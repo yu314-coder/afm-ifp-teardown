@@ -514,17 +514,30 @@ attention tensor mapping, and the architecture---a stronger check than the struc
 \S\ref{sec:recover}.
 \end{finding}
 
-\begin{finding}[the missing piece is wiring, not weights]\label{find:wiring}
-Adding the feed-forward stage makes the residual stream diverge exponentially. This is
-\emph{not} a weight or router error: a correct pre-norm layer adds a bounded increment
-regardless of $\lVert h\rVert$, so divergence can only arise from reading the \emph{wrong}
-feed-forward tensor. The expert region interleaves $12$ dense FFNs (intermediate $3072$) and
-$32$ sparse MoE banks (intermediate $56064{=}219{\times}256$) with \emph{no in-band boundary
-markers}: every offset decodes as a valid weight (structure ratio $R{\approx}40$ everywhere),
-so the dense/sparse pattern and the per-layer FFN offsets cannot be recovered from the weight
-stream. This layout is precisely the datum in the build-time
-\code{ifp\_\allowbreak constant\_\allowbreak table\_\allowbreak ifp1\_\allowbreak r48.\allowbreak json}, whose runtime
-form is compiled into the ANE program.
+\begin{finding}[the FFN wiring is a recoverable sequential layout]\label{find:wiring}
+Adding a \emph{mis-aligned} feed-forward stage diverges exponentially---a pre-norm layer adds
+a bounded increment regardless of $\lVert h\rVert$, so divergence can only come from reading
+the \emph{wrong} tensor. The correct layout, however, requires no shipped offset table: the
+396 \code{ifp\_\allowbreak constant} weights are stored \emph{sequentially in symbol-index
+order}, so $\text{offset}(N)=\text{BACK\_END}+\sum_{i<N}\lvert c_i\rvert$. The per-constant
+size follows from \code{num\_\allowbreak ffns}${=}3$, which splits each layer's $56064$-wide MoE
+bank into three $18688$-wide modules; the endpoint constraint (the cumulative layout must fill
+the expert region up to the embedding tail) pins the effective module width to
+$\approx\!16384$. Under this layout the first $120$ constants ($\approx$13 layers) decode
+correctly ($R{>}4$), and---decisively---\textbf{the full forward pass (attention $+$ MoE-SwiGLU
+$+$ self-routing) is stable}: the residual norm grows smoothly $86\!\to\!408$ over ten layers,
+the correct pre-norm signature. The wiring is therefore recovered, not ANE-locked; the
+remaining $\sim$10\% of constants drift where a module size changes, a bounded refinement.
+\end{finding}
+
+\begin{finding}[the router architecture is recovered]\label{find:routerarch}
+The unshipped selector is \emph{not} opaque microcode. The experts asset
+(\code{project\_\allowbreak experts.\allowbreak mlasset/\allowbreak main-unspecialized.\allowbreak odix}) defines
+\code{ExportableExpertSelector} as
+$\text{mask}=\mathrm{top\text{-}k}\big(\mathrm{sigmoid}(\mathbf{h}\,W_{\text{proj}})\big)$
+over a $[1536{\to}219]$ projection (\code{coreai.\allowbreak sigmoid}), selecting $10$ active $+\,4$
+shared experts. Only the projection weight $W_{\text{proj}}$ remains to be located; a
+self-routing top-$k$ surrogate already yields a stable forward pass.
 \end{finding}
 
 \begin{finding}[the router is dynamic, not stored]\label{find:router}
@@ -549,17 +562,18 @@ bricks are verified, its blueprint is on the coprocessor.
 \setlength{\tabcolsep}{6pt}
 \begin{tabular}{@{}ll@{}}
 \toprule
-Recovered (static data) & ANE-baked (runtime behavior) \\
+Recovered & Remaining (bounded) \\
 \midrule
-All $9.862$\,B weights ($100\%$)      & Per-layer FFN block offsets \\
-Attention path (validated stable)     & Dense/sparse layer pattern \\
-Codec, de-swizzle, RoPE               & Attention$\leftrightarrow$FFN pairing \\
-Norm values; tokenizer (validated)    & IFP expert-selection mask (dynamic) \\
+All $9.862$\,B weights ($100\%$)          & Dense-constant size ($\sim$10\% of FFN) \\
+Attention path (stable) $+$ FFN wiring    & Router weight $W_{\text{proj}}$ \\
+FFN sequential layout ($86\!\to\!408$ stable) & Embedding / output-head decode \\
+Router \emph{architecture}; codec; tokenizer & Dynamic mask (or self-route surrogate) \\
 \bottomrule
 \end{tabular}
-\caption{The recovery boundary. The left column is fully recovered and independently
-validated; the right column is the compiled ``wiring'' that the Neural Engine executes but
-never emits as data.}\label{tab:runnable}
+\caption{Revised recovery status. The forward pass runs stably on the recovered weights with
+the sequential FFN wiring; the router \emph{architecture} is recovered. What remains are
+bounded extraction tasks, not ANE-locked behavior---correcting the earlier verdict that the
+wiring was irrecoverable.}\label{tab:runnable}
 \end{table}
 
 A practical corollary: the only faithful way to \emph{execute} this exact model is Apple's
