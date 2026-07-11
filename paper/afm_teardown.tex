@@ -2,6 +2,8 @@
 \usepackage[margin=1in]{geometry}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{fancyvrb}
 \usepackage{amsmath,amssymb,amsthm,mathtools}
 \usepackage{booktabs,longtable,array,xcolor}
 \usepackage{caption}
@@ -410,12 +412,26 @@ This section records, in order, how a shipped asset directory becomes a validate
 \code{state\_\allowbreak dict}. Each step recovers one ``piece'' whose absence blocked the next;
 Figure~\ref{fig:pipeline} summarizes the dependency chain.
 
-\paragraph{Step 0 --- Acquisition.} The asset cache is not world-readable on a running system.
-A copy is taken from the macOS \emph{recovery} environment, where the data volume is mountable
-without the live-system protections, by running a single script
-(\code{/Volumes/D/copyfm}) from the recovery Terminal; it copies the
-\code{MobileAsset.\allowbreak UAF.\allowbreak FM.\allowbreak GenerativeModels} tree, including the Cryptex disk
-images, to external storage. All subsequent work is read-only on that copy.
+\paragraph{Step 0 --- Acquisition.} The asset cache lives on the sealed Signed System
+Volume. A clean copy is taken from the macOS \emph{Recovery} environment---Apple silicon:
+hold the power button at boot; Intel: hold Command-R---whose Terminal
+(\emph{Utilities} menu) has raw read access to the mounted system volume. The models sit under
+\code{AssetsV2}; a recursive copy to external storage (Figure~\ref{fig:acquire}) suffices, and
+all subsequent work is read-only on that copy.
+
+\begin{figure}[ht]\centering
+\begin{Verbatim}[frame=single,framesep=6pt,fontsize=\small,rulecolor=\color{accent}]
+# macOS Recovery  >  Utilities  >  Terminal
+ls /Volumes                       # find the system volume
+SYS="/Volumes/Macintosh HD"
+BASE="$SYS/System/Library/AssetsV2"
+ASSET=com_apple_MobileAsset_UAF_FM_GenerativeModels
+cp -R "$BASE/$ASSET" /Volumes/EXTERNAL/FM_Models
+\end{Verbatim}
+\caption{Read-only asset acquisition from macOS Recovery. \code{EXTERNAL} is any attached
+volume with $\ge$10\,GB free; the copy preserves the Cryptex disk images
+verbatim.}\label{fig:acquire}
+\end{figure}
 
 \paragraph{Step 1 --- Mount and locate.} \code{hdiutil attach -readonly} on the IFP Cryptex
 (\S\ref{sec:containers}) exposes \code{model.\allowbreak odixpackage/\allowbreak }: the ground-truth
@@ -460,7 +476,7 @@ manifest of $R$. Completeness is audited against the physical file
 
 \begin{figure}[ht]\centering
 \begin{tikzpicture}[flow,node distance=2.3mm]
-\node[blk,text width=80mm] (s0) {\textbf{0.\ Acquire}\ \ {\sub \code{/Volumes/D/copyfm} in recovery $\to$ copy Cryptex}};
+\node[blk,text width=80mm] (s0) {\textbf{0.\ Acquire}\ \ {\sub macOS Recovery Terminal $\to$ \code{cp -R} the asset (Fig.~\ref{fig:acquire})}};
 \node[blk,below=of s0,text width=80mm] (s1) {\textbf{1.\ Mount}\ \ {\sub \code{hdiutil} $\to$ config, rasterized weights, odix, hwx}};
 \node[blk,below=of s1,text width=80mm] (s2) {\textbf{2.\ Codec}\ \ {\sub 4-bit index $\to$ 16-entry \code{lut\_to\_dense} codebook $\times$ scale}};
 \node[blk,below=of s2,text width=80mm,fill=expfill] (s3) {\textbf{3.\ De-swizzle}\ \ {\sub ANE $8{\times}128$ tiling inverted (Eq.~\ref{eq:deswz}) $\Rightarrow R{=}13\text{--}69$}};
