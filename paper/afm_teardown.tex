@@ -72,8 +72,13 @@ physical file, resolve the norms (compile-time folded), the router (baked to a d
 set), and the missing constant table (its runtime equivalent is the shipped
 \code{metadata.\allowbreak bin} swizzler), and export the entire model to a single
 \code{state\_\allowbreak dict}: \textbf{$9.862$\,B parameters, $100.00\%$ of the shipped weight
-file, zero non-finite tensors}. All findings derive from read-only inspection; no code was
-executed on the models and no signing material was bypassed.
+file, zero non-finite tensors}. Reconstructing the forward pass in PyTorch, the attention
+stack runs \emph{stably} on the recovered tensors---independently validating the codec,
+de-swizzle, and architecture---while the feed-forward stage exposes the true boundary of the
+teardown: the per-layer expert wiring and the instruction-following expert-selection mask are
+\emph{compiled into the Neural Engine} rather than shipped as data, so the recovered model is
+\emph{component-complete but wiring-incomplete}. All findings derive from read-only
+inspection; no code was executed on the models and no signing material was bypassed.
 \end{abstract}
 
 \maketitle
@@ -489,6 +494,78 @@ manifest of $R$. Completeness is audited against the physical file
 \caption{The recovery pipeline. Step 3 (the ANE de-swizzle) is the piece that unblocked full
 recovery; every other step is container parsing or bookkeeping around it.}\label{fig:pipeline}
 \end{figure}
+
+\section{From-Weights Reconstruction: What Runs and What Is ANE-Baked}\label{sec:reconstruct}
+Recovering the weights is necessary but not sufficient to \emph{run} the model outside the
+Apple Neural Engine. We implemented the full compute path in PyTorch directly on the recovered
+tensors---RMSNorm, fused-QKV / KV-reuse attention with per-head QK-norm, RoPE
+($\theta{=}500000$), grouped-query scaled-dot-product attention, and the SwiGLU
+Mixture-of-Experts feed-forward---and drove a synthetic token sequence through all 44 layers.
+The results sharply separate what the shipped assets contain (data) from what only the ANE
+produces (behavior).
+
+\begin{finding}[the recovered weights are correct]\label{find:attnstable}
+The attention-only forward pass is \emph{stable}: the residual-stream norm grows smoothly and
+sub-exponentially ($17\!\to\!267$ across 44 layers), exactly the behavior of a correctly-wired
+pre-norm transformer. Because a pre-norm block re-normalizes its own input, any decode or
+de-swizzle error would manifest as divergence; the smooth growth therefore \emph{independently
+validates} the 4-bit LUT codec, the ANE $8{\times}128$ de-swizzle (Eq.~\ref{eq:deswz}), the
+attention tensor mapping, and the architecture---a stronger check than the structure ratio of
+\S\ref{sec:recover}.
+\end{finding}
+
+\begin{finding}[the missing piece is wiring, not weights]\label{find:wiring}
+Adding the feed-forward stage makes the residual stream diverge exponentially. This is
+\emph{not} a weight or router error: a correct pre-norm layer adds a bounded increment
+regardless of $\lVert h\rVert$, so divergence can only arise from reading the \emph{wrong}
+feed-forward tensor. The expert region interleaves $12$ dense FFNs (intermediate $3072$) and
+$32$ sparse MoE banks (intermediate $56064{=}219{\times}256$) with \emph{no in-band boundary
+markers}: every offset decodes as a valid weight (structure ratio $R{\approx}40$ everywhere),
+so the dense/sparse pattern and the per-layer FFN offsets cannot be recovered from the weight
+stream. This layout is precisely the datum in the build-time
+\code{ifp\_\allowbreak constant\_\allowbreak table\_\allowbreak ifp1\_\allowbreak r48.\allowbreak json}, whose runtime
+form is compiled into the ANE program.
+\end{finding}
+
+\begin{finding}[the router is dynamic, not stored]\label{find:router}
+\code{config.\allowbreak json} sets \code{expert\_\allowbreak selection\_\allowbreak frequency}${=}32$: the
+Instruction-Following-Pruning mask that selects $\approx$14 of 219 experts per sparse layer is
+\emph{recomputed every 32 tokens} from the running context. It is therefore not a shipped
+table but a live ANE computation; exhaustive search of the rasterized file, the
+\code{MLIR22.\allowbreak 0.\allowbreak 0} attribute section ($840{,}956$ attributes), the
+\code{0xBEEFFACE} ANE binary, and a full process core dump finds it in none of them. Summing
+all experts diverges ($\approx$17$\times$ overcount); a self-routing top-$k$ surrogate is
+stable but is not Apple's selector.
+\end{finding}
+
+Table~\ref{tab:runnable} summarizes the boundary. Everything Apple ships as
+\emph{self-validating data}---weights, architecture, codec, norm values, tokenizer---is
+recovered; the residual gap is exactly the \emph{assembly metadata} (per-layer FFN offsets,
+attention$\leftrightarrow$FFN pairing, the dynamic expert mask), which exists only as ANE
+behavior. The recovered model is thus \emph{component-complete but wiring-incomplete}: its
+bricks are verified, its blueprint is on the coprocessor.
+
+\begin{table}[ht]\centering\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Recovered (static data) & ANE-baked (runtime behavior) \\
+\midrule
+All $9.862$\,B weights ($100\%$)      & Per-layer FFN block offsets \\
+Attention path (validated stable)     & Dense/sparse layer pattern \\
+Codec, de-swizzle, RoPE               & Attention$\leftrightarrow$FFN pairing \\
+Norm values; tokenizer (validated)    & IFP expert-selection mask (dynamic) \\
+\bottomrule
+\end{tabular}
+\caption{The recovery boundary. The left column is fully recovered and independently
+validated; the right column is the compiled ``wiring'' that the Neural Engine executes but
+never emits as data.}\label{tab:runnable}
+\end{table}
+
+A practical corollary: the only faithful way to \emph{execute} this exact model is Apple's
+\code{FoundationModels} runtime, which holds the ANE-baked wiring by construction. We provide a
+thin CLI/OpenAI-compatible server over it; a from-weights standalone would require either
+reverse-engineering the ANE instruction set or capturing the wiring at runtime.
 
 \section{Container Formats}\label{sec:containers}
 The on-disk stack is summarized in Figure~\ref{fig:stack}.
