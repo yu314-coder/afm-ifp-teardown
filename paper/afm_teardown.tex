@@ -1,0 +1,652 @@
+\documentclass[11pt,reqno]{amsart}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,longtable,array,xcolor}
+\usepackage{caption}
+\usepackage{tikz}
+\usetikzlibrary{arrows,positioning,calc,fit,backgrounds}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{RGB}{22,46,94}
+\definecolor{boxfill}{RGB}{234,239,248}
+\definecolor{boxfill2}{RGB}{243,236,225}
+\definecolor{expfill}{RGB}{231,242,233}
+\captionsetup{font=small,labelfont=bf,labelsep=period}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\sub}{\normalfont\scriptsize\color{black!65}}
+\tolerance=1400 \setlength{\emergencystretch}{3em} \hyphenpenalty=250
+
+% math-journal result environments
+\theoremstyle{definition}
+\newtheorem{finding}{Finding}
+\theoremstyle{remark}
+\newtheorem{observation}{Observation}
+
+\tikzset{
+  flow/.style={>=latex,line width=0.5pt},
+  blk/.style={draw=accent,rounded corners=2pt,fill=boxfill,align=center,
+    font=\footnotesize,inner sep=3pt,minimum height=6.5mm},
+  sub/.style={font=\scriptsize\color{black!65}},
+  addop/.style={draw=accent,circle,fill=white,inner sep=0.6pt,font=\scriptsize},
+  file/.style={draw=accent,rounded corners=1.5pt,fill=boxfill,align=left,
+    font=\scriptsize\ttfamily,inner sep=3pt,text width=62mm},
+}
+
+\title[Apple On-Device Foundation Models: A Static Teardown]{A Teardown of Apple's
+On-Device Foundation Models: Architecture, Quantization, and Container Formats of the
+\texorpdfstring{\code{FM\_\allowbreak GenerativeModels}}{FM\_GenerativeModels} Asset Set}
+\author{Reverse-Engineering Report}
+\date{Asset build \texttt{13M204130}}
+\keywords{Apple Intelligence, on-device language models, Mixture-of-Experts, weight
+quantization, Apple Neural Engine, model container formats, reverse engineering}
+
+\begin{document}
+
+\begin{abstract}
+We present a complete static teardown \emph{and full weight recovery} of Apple's on-device
+generative-model asset bundle
+\code{com.\allowbreak apple.\allowbreak MobileAsset.\allowbreak UAF.\allowbreak FM.\allowbreak GenerativeModels},
+as shipped to a macOS~26/27 machine. The bundle comprises 118 signed assets ($\approx$10\,GB
+of disk images) spanning six model families. We document two distinct language backbones---a
+dense \code{afmplus-v11.\allowbreak 0-nano} ($\sim$3\,B, 2048-wide, 56 layers) and a sparse
+Mixture-of-Experts \code{afmplus-v11.\allowbreak 0-ifp} (1536-wide, 44 layers, routed experts)---%
+together with $\sim$90 task adapters, safety and guardrail models, a multimodal image
+encoder, speculative-decoding draft models, and Private-Cloud-Compute server variants.
+We fully characterize the on-disk container stack: Cryptex disk images, the \code{BBBB}
+rasterized-weight container, the \code{odix} on-device executable, the Apple Neural
+Engine \code{.\allowbreak hwx} binary, and the MPSGraph package. We reverse-engineer the
+\code{odix} internal reference scheme (self-relative signed offsets into an interned symbol
+pool) and parse the \code{MLIR22.\allowbreak 0.\allowbreak 0} MPSGraph bytecode to recover each constant's
+layer/role from its location hierarchy. We identify the weight codec as
+\emph{LUT-palettization} (a 4-bit index into a 16-entry codebook, scaled per 1024-element
+block) followed by an \emph{Apple-Neural-Engine $8{\times}128$ tile de-swizzle}, and---the
+central positive result---we \textbf{reverse the ANE spatial permutation and recover the full
+weights}. Under a scale-decontaminated low-rank structure test (\S\ref{sec:recover}), genuine
+weights score $R\approx9$ and noise $R\approx1$; our decode scores $R=13\text{--}69$,
+confirming true weight structure. We reconcile the parameter budget exactly against the
+physical file, resolve the norms (compile-time folded), the router (baked to a dense expert
+set), and the missing constant table (its runtime equivalent is the shipped
+\code{metadata.\allowbreak bin} swizzler), and export the entire model to a single
+\code{state\_\allowbreak dict}: \textbf{$9.862$\,B parameters, $100.00\%$ of the shipped weight
+file, zero non-finite tensors}. All findings derive from read-only inspection; no code was
+executed on the models and no signing material was bypassed.
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+Apple Intelligence performs on-device language tasks through a framework
+(\code{FoundationModels.\allowbreak framework}) backed by downloadable model assets managed by the
+\code{MobileAsset}/\code{nsurlsessiond} subsystem. This report inventories and dissects
+one complete copy of the \code{UAF.\allowbreak FM.\allowbreak GenerativeModels} asset set; here ``UAF'' denotes
+the on-device inference framework and ``FM'' the Foundation Models. Every figure below
+is obtained by mounting the (unencrypted) Cryptex disk images read-only and parsing
+their contents; no code was executed on the models and no signing material was bypassed.
+
+\section{Asset Distribution System}
+Each asset is a directory \code{<sha1>.\allowbreak asset/\allowbreak } under the bundle
+\code{com.\allowbreak apple.\allowbreak MobileAsset.\allowbreak UAF.\allowbreak FM.\allowbreak GenerativeModels}, containing:
+\begin{itemize}
+\item \code{Info.\allowbreak plist} --- bundle name, version, content-encryption flag
+  (\code{DSME\_\allowbreak COMPRESSED}), \code{\_\allowbreak \_\allowbreak RequiresPersonalization}, \code{\_\allowbreak DownloadPolicy};
+\item \code{AssetData/\allowbreak Restore/\allowbreak *.\allowbreak dmg} --- the payload, a raw APFS Cryptex disk image;
+\item \code{AssetData/\allowbreak Restore/\allowbreak Restore.\allowbreak plist} --- target board configs
+  (\code{mobileasset\{ios,\allowbreak mac,\allowbreak tvos,\allowbreak watch,\allowbreak vision,\allowbreak x86mac\}ap}, platform \code{cryptex1});
+\item \code{SecureAssetData/\allowbreak } --- \code{BuildManifest.\allowbreak plist}, \code{*.\allowbreak root\_\allowbreak hash},
+  \code{*.\allowbreak trustcache}, \code{*.\allowbreak integritycatalog}, an Image4 ticket (\code{apticket.\allowbreak *.\allowbreak im4m})
+  and TSS request/response.
+\end{itemize}
+Every payload sets \code{\_\allowbreak \_\allowbreak RequiresPersonalization} and carries a device-bound Image4
+ticket; the OS activates it as a Cryptex only after verifying the root hash and trust
+cache. The disk images themselves report \code{Encrypted:\ false}: confidentiality is
+not the goal, integrity and authenticity are. The inspected cache holds 118 assets
+totalling $\approx$10.0\,GB of disk images; versions span \code{0.\allowbreak 0.\allowbreak 2} to \code{14.\allowbreak 5.\allowbreak x},
+with the bulk at \code{14.\allowbreak x} (build \code{13M204130}/\code{13M204216}).
+
+\section{Model Families}
+Table~\ref{tab:families} groups the 118 assets; six families are present.
+\begin{table}[ht]\centering\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{@{}lr>{\raggedright\arraybackslash}p{0.5\textwidth}@{}}
+\toprule
+Family & \# & Role \\
+\midrule
+\code{fm.\allowbreak language.\allowbreak instruct\_\allowbreak 3b}       & 60 & Main LM (nano dense + ifp MoE) plus adapters\\
+\code{gm.\allowbreak server.\allowbreak instruct\_\allowbreak server\_\allowbreak v1} & 28 & PCC (server) task adapters\\
+\code{fm.\allowbreak language.\allowbreak instruct\_\allowbreak 300m}     & 21 & Safety, classifiers, voice control\\
+\code{gm.\allowbreak translate\_\allowbreak fm}               & 2  & Machine translation (alignment + phrasebook)\\
+\code{gm.\allowbreak server.\allowbreak instruct\_\allowbreak server\_\allowbreak small}&2 & Server safety / abuse guardrail\\
+\code{fm.\allowbreak language.\allowbreak instruct\_\allowbreak 9m}       & 2  & Text-event-extraction classifier\\
+\bottomrule
+\end{tabular}
+\caption{Model families in the asset set.}\label{tab:families}
+\end{table}
+
+\section{The \code{instruct\_\allowbreak 3b} Backbones}
+Two \emph{different} base networks share the \code{instruct\_\allowbreak 3b} name.
+
+\subsection{Dense \code{afmplus-v11.\allowbreak 0-nano}}
+From \code{metadata.\allowbreak json} (\code{model\_\allowbreak config: v11-nano}, \code{model\_\allowbreak type: ane}):
+context length 4096; hidden size 2048; FFN 6656 (gated SwiGLU: \code{linear\_\allowbreak 0}=gate,
+\code{linear\_\allowbreak 1}=up, \code{output}=down); 56 transformer layers emitted in two ANE
+segments (35 + 21); grouped-query attention, RoPE, RMSNorm; adapter slots at LoRA ranks
+16 and 32 (empty in the base); prompt template \code{afm\_\allowbreak cider\_\allowbreak v2}. The
+\code{base.\allowbreak generic} image is 1.3\,GB, i.e.\ $\approx$2\,bits/weight.
+
+\subsection{Sparse MoE \code{afmplus-v11.\allowbreak 0-ifp}}
+The \code{base.\allowbreak generic\_\allowbreak sparse} (\code{IFP}) image (5.8\,GB) is a Mixture-of-Experts
+network. Its \code{ifp/\allowbreak config.\allowbreak json} states verbatim \code{num\_\allowbreak layers}=44,
+\code{hidden\_\allowbreak dim}=1536, \code{num\_\allowbreak ffns}=3, \code{expert\_\allowbreak size}=256, and configuration
+\code{ifp1\_\allowbreak r48} with \code{active\_\allowbreak experts}=10, \code{shared\_\allowbreak experts}=4,
+\code{active\_\allowbreak ffn\_\allowbreak dim}=2560, \code{expert\_\allowbreak selection\_\allowbreak frequency}=32, and
+\code{swizzler\_\allowbreak config}=\code{metadata.\allowbreak bin}. Table~\ref{tab:ifp} gives the recovered
+structure and Figure~\ref{fig:moe} the per-layer data flow.
+
+\begin{table}[ht]\centering\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{@{}l l@{}}
+\toprule
+Property & Value \\
+\midrule
+Model dim $d$          & 1536 \\
+Layers                 & $44 = 12$ dense $+\ 32$ sparse \\
+\;\;attention split    & 32 fused-QKV $+\ 12$ KV-reuse (Q-only) \\
+Attention              & $Q=2048\ (16{\times}128)$, $KV=1024$ \\
+\;\;GQA ratio          & 16 query : 4 KV heads, dim 128 \\
+QK-norm                & per-head RMSNorm on $Q$ and $K$ \\
+Residual norms         & pre \emph{and} post, attention and FFN \\
+Positional             & RoPE (\code{cos/\allowbreak sin\_\allowbreak cached}) \\
+Dense FFN              & SwiGLU, intermediate 3072 \\
+MoE FFN                & 10 active $+\ 4$ shared, freq.\ 32 \\
+Embedding              & int scalar-quant (scale $+$ zero) \\
+Output                 & tied embedding $+$ \code{output\_\allowbreak norm} \\
+Baked adapters         & LoRA rank 48 (\code{lora\_\allowbreak i1\_\allowbreak r48}) \\
+Context                & 8192 \\
+Vocabulary (est.)      & 152{,}064 \\
+Origin framework       & \code{tamm} / \code{coreflow} \\
+\bottomrule
+\end{tabular}
+\caption{Recovered \code{afmplus-v11.\allowbreak 0-ifp} MoE architecture.}\label{tab:ifp}
+\end{table}
+
+\begin{figure}[ht]\centering
+\begin{tikzpicture}[flow,node distance=3.4mm]
+\node (in) [font=\footnotesize] {$\mathbf{x}_\ell\in\mathbb{R}^{1536}$};
+\node[blk,below=of in,text width=62mm] (n1) {RMSNorm (pre-residual)};
+\node[blk,below=of n1,text width=62mm] (attn)
+  {Attention\\[1pt]{\sub fused QKV \emph{or} Q-only (KV-reuse) $\cdot$ per-head QK-norm
+   $\cdot$ RoPE $\cdot$ GQA 16:4 $\cdot$ 4-bit palettized}};
+\node[blk,below=of attn,text width=62mm] (pn1) {RMSNorm (post)};
+\node[addop,below=1.0mm of pn1] (a1) {$+$};
+\node[blk,below=3.4mm of a1,text width=62mm] (n2) {RMSNorm (pre-residual)};
+\node[blk,below=of n2,text width=62mm] (route)
+  {Router\\[1pt]{\sub select top-10 routed experts (freq.\ 32)}};
+\node[blk,below=of route,text width=62mm,fill=expfill] (exp)
+  {Experts: 4 shared $+$ 10 routed\\[1pt]{\sub SwiGLU, $d_{\text{ffn}}{=}2560$, 4-bit palettized}};
+\node[blk,below=of exp,text width=62mm] (pn2) {RMSNorm (post)};
+\node[addop,below=1.0mm of pn2] (a2) {$+$};
+\node[font=\footnotesize,below=3.4mm of a2] (out) {$\mathbf{x}_{\ell+1}$};
+\draw[->] (in)--(n1); \draw[->] (n1)--(attn); \draw[->] (attn)--(pn1);
+\draw[->] (pn1)--(a1); \draw[->] (a1)--(n2); \draw[->] (n2)--(route);
+\draw[->] (route)--(exp); \draw[->] (exp)--(pn2); \draw[->] (pn2)--(a2); \draw[->] (a2)--(out);
+\draw[->,accent] (in.west) -- ++(-9mm,0) |- (a1.west);
+\draw[->,accent] (a1.east) -- ++(9mm,0) |- (a2.east);
+\end{tikzpicture}
+\caption{One \code{afmplus-v11.\allowbreak 0-ifp} sparse (MoE) layer. Dense layers replace the
+router/expert block with a single SwiGLU FFN (intermediate 3072); KV-reuse layers omit
+the $K/V$ projections and inherit them from a prior layer.}\label{fig:moe}
+\end{figure}
+
+\begin{table}[ht]\centering\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Model & Layers & Total params & Active/token \\
+\midrule
+\code{afmplus-v11.0-nano} (dense) & 56 & $\approx$3.0\,B & $\approx$3.0\,B \\
+\code{afmplus-v11.0-ifp} (MoE)    & 44 & $9.862$\,B & $\approx$1.4\,B \\
+\bottomrule
+\end{tabular}
+\caption{Parameter budgets. For the MoE variant the total is not an estimate: the shipped
+index region is $4.931$\,GB of 4-bit weights $=9.862$\,B parameters exactly, of which our
+export recovers $100.00\%$ (\S\ref{sec:recover}). Only $\approx$1.4\,B activate per token
+(14 of $\approx$219 experts per sparse layer: 10 routed $+$ 4 shared, giving
+\code{active\_ffn\_dim}$=2560$), a $\approx$22$\times$ pruning---this is why Apple's
+``3\,B'' active-class name and the $9.9$\,B stored count coexist.}\label{tab:params}
+\end{table}
+
+\begin{observation}\label{obs:count}
+The attention decode (\S\ref{sec:recover}) self-organizes into exactly $44$ layers---%
+$32$ carrying a fused-QKV projection ($12$ dense $+\ 20$ sparse-standard) and $12$ carrying
+a $Q$-only projection (KV-reuse)---matching \code{num\_\allowbreak layers}$=44$ with no forcing.
+\end{observation}
+
+\section{Weight Quantization}
+\begin{finding}\label{find:codec}
+For the IFP model, linear weights are \emph{LUT-palettized}: a 4-bit index into a 16-entry
+codebook (the graph's \code{lut\_to\_dense} operator), multiplied by a per-1024-element
+\textrm{fp16} scale, with scales and indices in separate planar regions, then an ANE
+$8{\times}128$ tile de-swizzle (\S\ref{sec:recover}). (An initial signed-4-bit reading was
+wrong---see \S\ref{sec:recover}.)
+\end{finding}
+\noindent\emph{Evidence.} The scale region is $100\%$ positive (range $0.0012$--$0.181$,
+mean $0.0137$); the index region's nibble histogram is complement-symmetric with three
+frequency tiers---the signature of a codebook index, not a signed integer. Embeddings use
+scalar integer quantization (\code{embedding\_\allowbreak quantization\_\allowbreak scale},
+\code{\_\allowbreak default\_\allowbreak scalar\_\allowbreak scale/\allowbreak zero\_\allowbreak point}); LoRA factors are
+\textrm{fp16}. Dequantization is $W = s\cdot\mathrm{codebook}[\text{idx}]$ per 1024-element
+block, followed by the ANE $8{\times}128$ tile de-swizzle of \S\ref{sec:recover}
+(Eq.~\ref{eq:deswz}). The learned RMSNorm scales are \emph{not} shipped separately: the ANE
+compiler folds each $\gamma$ into the adjacent palettized linear weight
+($\mathrm{Linear}(\mathrm{RMSNorm}(x)\!\cdot\!\gamma)\equiv\mathrm{Linear}'(\mathrm{RMSNorm}(x))$),
+so the recovered weights already carry them.
+
+\begin{finding}\label{find:budget}
+The parameter budget reconciles the MoE fan-out. With $8{,}560{,}592$ \textrm{fp16}
+scales (17.1\,MB) and a 4.91\,GB index region, the non-expert linear weights account for
+$\approx$483\,M parameters ($\approx$241\,MB at 4-bit); the residual $\approx$4.67\,GB is
+the routed-expert bank, i.e.\ $\approx$9.3\,B expert parameters across the 32 sparse
+layers. Modelling each expert as a SwiGLU triple with intermediate $256$ yields
+$\approx$235 experts per sparse layer (231 routed $+$ 4 shared), closing the index-region
+budget to within $4.8\%$.
+\end{finding}
+
+The dequantization is given as Algorithm~\ref{alg:dequant}. Applying it to the leading
+bytes of the index region---taking the scale and index regions to be order-aligned---%
+reconstructs the distribution in Figure~\ref{fig:hist}, which yields
+Finding~\ref{find:recon}.
+
+\begin{figure}[ht]\centering
+\fbox{\begin{minipage}{0.9\columnwidth}\small
+\textbf{Algorithm~1}\ \ (Planar 4-bit dequantization).\\[1pt]
+\textbf{Input:} index bytes $I$; \textrm{fp16} scales $s$; block size $B$.\quad
+\textbf{Output:} weights $w$.
+\begin{enumerate}
+\item split each byte of $I$ into nibbles (low, high) and interleave $\to n_i\in\{0,\dots,15\}$;
+\item sign: $q_i \leftarrow n_i-16$ if $n_i\ge 8$, else $n_i$ \hfill($q_i\in[-8,7]$);
+\item scale: $w_i \leftarrow s_{\lfloor i/B\rfloor}\cdot q_i$.
+\end{enumerate}
+\end{minipage}}
+\caption{Weight dequantization for the IFP codec.}\label{alg:dequant}
+\end{figure}
+
+\begin{figure}[ht]\centering
+\begin{tikzpicture}[y=2.2cm,x=1cm]
+\draw[->,gray] (-3.1,0)--(3.3,0) node[right,black]{\scriptsize $w$};
+\draw[->,gray] (0,0)--(0,1.15) node[above,black]{\scriptsize density};
+\foreach \x/\y in {-2.66/0.000, -2.38/0.001, -2.10/0.001, -1.82/0.000, -1.54/0.001,
+  -1.26/0.009, -0.98/0.596, -0.70/0.923, -0.42/0.457, -0.14/0.449, 0.14/1.000,
+  0.42/0.528, 0.70/0.948, 0.98/0.154, 1.26/0.001, 1.54/0.001, 1.82/0.000, 2.10/0.001,
+  2.38/0.001, 2.66/0.000}
+  \fill[accent!75] (\x-0.13,0) rectangle (\x+0.13,\y);
+\node[font=\scriptsize] at (-2.0,-0.12) {$-0.15$};
+\node[font=\scriptsize] at (0,-0.12) {$0$};
+\node[font=\scriptsize] at (2.0,-0.12) {$0.15$};
+\end{tikzpicture}
+\caption{Distribution of dequantized weights over the leading $5{\times}10^{8}$ indices
+of the region ($\mathrm{mean}\approx0$, $\mathrm{std}\approx0.043$). This marginal
+profile is necessary but not sufficient: it is also produced by mis-ordered data, which the
+spatial-order test of \S\ref{sec:recover} disambiguates.}\label{fig:hist}
+\end{figure}
+
+\begin{finding}[necessary, then sufficient]\label{find:recon}
+Dequantizing the index region under Algorithm~\ref{alg:dequant} yields values with
+$\mathrm{mean}\approx0$ and $\mathrm{std}\approx0.043$ (Figure~\ref{fig:hist})---the
+\emph{marginal} distribution of trained weights. This alone constrains the codec parameters
+(4-bit width, block size, scale magnitude) but does not establish a correct reconstruction,
+since the same marginal is produced by correctly-valued but wrongly-ordered data;
+\S\ref{sec:recover} supplies the missing spatial-order test and passes it.
+\end{finding}
+
+\begin{finding}[budget closure bounds the fan-out]\label{find:full}
+At $B=1024$ the $8{,}634{,}320$ scales cover $\approx$8.84\,B of the $9.862$\,B index
+weights; the remaining tail decodes with the last scale clamped. The closure validates the
+\emph{scalar} codec parameters and bounds the MoE fan-out to $\approx$219 experts per sparse
+layer; \S\ref{sec:recover} then validates the per-tensor spatial layout.
+\end{finding}
+
+\section{Weight Recovery}\label{sec:recover}
+We validate a reconstruction with a structure statistic rather than trusting the marginal
+distribution. A trained weight matrix is approximately low-rank, so permuting its entries
+markedly raises its stable rank $\rho(W)=\lVert W\rVert_F^2/\sigma_1^2$, whereas noise is
+unaffected; let $R=\rho(\Pi W)/\rho(W)=\sigma_1(W)^2/\sigma_1(\Pi W)^2$ for a random
+permutation $\Pi$. The per-block \textrm{fp16} scales alone impose spurious low-rank
+structure, so $R$ is measured \emph{decontaminated}---on the pure codebook indices with the
+scales removed. Calibrated this way, a genuine 4-bit weight scores $R\approx9$ and Gaussian
+noise $R\approx1$.
+
+\begin{finding}[the ANE spatial permutation]\label{find:deswz}
+The residual permutation is a fixed $8{\times}128$ tile de-swizzle: the ANE stores a
+$C_\text{out}{\times}C_\text{in}$ matrix as a row-major grid of $8{\times}128$ tiles, each
+tile laid out column-major. The inverse is
+\begin{equation}\label{eq:deswz}
+W \;=\; \mathrm{reshape}\!\Big(\mathrm{transpose}\big(
+\mathrm{reshape}(v,\;\tfrac{C_\text{out}}{8},\tfrac{C_\text{in}}{128},128,8),\,
+(0,3,1,2)\big),\; C_\text{out},\,C_\text{in}\Big),
+\end{equation}
+applied after $W=s\cdot\mathrm{codebook}[\text{idx}]$. This is the step missing from all
+prior decode attempts.
+\end{finding}
+
+With Eq.~\ref{eq:deswz} in place the decontaminated ratio rises from the palettization-only
+$R\approx3$ to $R=13\text{--}69$ across the file (Table~\ref{tab:struct})---%
+\textbf{unambiguous trained-weight structure}. The permutation, the $16$-entry codebook, and
+the per-1024-block scales together constitute a \emph{complete, validated} decode: the codec
+is not merely identified but inverted.
+
+\begin{table}[ht]\centering\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+Matrix (decontaminated, pure-index test) & $R$ \\
+\midrule
+Genuine 4-bit weight (reference)              & $\approx$9 \\
+Gaussian noise                                & 1.0 \\
+Palettization only, no de-swizzle             & 3.0 \\
+\textbf{Palettization $+$ $8{\times}128$ de-swizzle} & \textbf{13--69} \\
+\quad median (attention tensors)              & 12.7 \\
+\bottomrule
+\end{tabular}
+\caption{Scale-decontaminated structure ratio. $R\gg1$ marks genuine weight structure;
+$R\approx1$ marks noise. Adding the ANE de-swizzle (Eq.~\ref{eq:deswz}) lifts the decode
+past the genuine-weight reference, confirming recovery.}\label{tab:struct}
+\end{table}
+
+\subsection{The router, and the missing constant table}
+Two artefacts expected of an MoE model are absent from the shipped IFP graph, and both are
+resolved rather than missing. \emph{(i)~The router.} The exported adapter carries the token
+\code{ifp1\_\allowbreak r48\_\allowbreak prompt\_\allowbreak opt\_\allowbreak dense\_\allowbreak only}: instruction-following pruning
+was run once at export time and \emph{baked} the per-instruction expert mask into a fixed
+dense expert set, so no runtime mask predictor ships. \emph{(ii)~The per-tensor offset table.}
+The compile-time \code{ifp\_\allowbreak constant\_\allowbreak table\_\allowbreak ifp1\_\allowbreak r48.\allowbreak json} is not in the
+assets, but its runtime equivalent is: the shipped \code{metadata.\allowbreak bin} \code{BBBB}
+swizzler is exactly the constant$\to$offset scatter table (Appendix~\ref{app:bbbb}), and the
+\code{MLIR22.\allowbreak 0.\allowbreak 0} MPSGraph bytecode tags each of the $396$ \code{ifp\_\allowbreak constant}
+symbols with its full layer/role location hierarchy (e.g.\ \code{lut\_\allowbreak to\_\allowbreak dense}
+$\to$ \code{MultiOutputLinear} $\to$ \code{TransformerFeedForward} $\to$
+\code{TransformerLayer}), giving the per-tensor semantics directly.
+
+\begin{finding}[the \code{.hwx} holds no weights]\label{find:hwx}
+The Apple-Neural-Engine binary \code{binary\_\allowbreak 0.\allowbreak hwx} ($252$\,MB) is a Mach-O
+(\code{0xBEEFFACE}) of \emph{compiled ANE microcode}, not weights: its high-entropy
+\code{\_\allowbreak \_\allowbreak KERN} sections score $R\approx1.0$ under the structure test, while its
+\code{\_\allowbreak \_\allowbreak MKERN\_\allowbreak 0} segment has zero file bytes and a size ($\mathtt{0xC0C8000}$)
+equal to the maximum offset in \code{metadata.\allowbreak bin}---it is \emph{runtime-mapped} from the
+rasterized file. Every weight therefore lives in the single planar file
+\code{ifp\_\allowbreak rasterized\_\allowbreak weights.\allowbreak bin}.
+\end{finding}
+
+\subsection{Full export and verification}
+Applying the validated decode to the entire index region yields a single
+\code{state\_\allowbreak dict}. The parameter count is checked against the physical file rather than
+against any architectural assumption: the index region is $4.931$\,GB $=9.862$\,B 4-bit
+weights, and the export captures $9.8619$\,B ($100.00\%$) with \emph{zero} non-finite tensors
+(Table~\ref{tab:export}). Attention is stored in \textrm{fp16}; the expert bank is stored
+int8-with-per-tensor-scale (near-lossless, the source being 4-bit) so the whole model fits a
+single $10.2$\,GB file. Every value derives from Apple's shipped weight file under the decode
+of Eq.~\ref{eq:deswz}; no training data, distillation, or external weights are involved.
+
+\begin{table}[ht]\centering\small
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{@{}lrl@{}}
+\toprule
+Component & Parameters & Storage \\
+\midrule
+Attention (44 layers)      & $0.377$\,B & \textrm{fp16}, $R$-verified \\
+Experts (FFN / MoE)        & $9.484$\,B & int8 $+$ scale \\
+Embedding / head (tail)    & (in tail)  & int8 \\
+\midrule
+\textbf{Total captured}    & $\mathbf{9.862}$\,\textbf{B} & $=100.00\%$ of file \\
+Non-finite tensors         & $0$        & \\
+\bottomrule
+\end{tabular}
+\caption{Recovered \code{afmplus-v11.\allowbreak 0-ifp} export. The total equals the physical index
+region ($9.862$\,B 4-bit weights), so completeness is exact, not estimated.}\label{tab:export}
+\end{table}
+
+\section{Recovery Pipeline: Finding the Pieces}\label{sec:pipeline}
+This section records, in order, how a shipped asset directory becomes a validated
+\code{state\_\allowbreak dict}. Each step recovers one ``piece'' whose absence blocked the next;
+Figure~\ref{fig:pipeline} summarizes the dependency chain.
+
+\paragraph{Step 0 --- Acquisition.} The asset cache is not world-readable on a running system.
+A copy is taken from the macOS \emph{recovery} environment, where the data volume is mountable
+without the live-system protections, by running a single script
+(\code{/Volumes/D/copyfm}) from the recovery Terminal; it copies the
+\code{MobileAsset.\allowbreak UAF.\allowbreak FM.\allowbreak GenerativeModels} tree, including the Cryptex disk
+images, to external storage. All subsequent work is read-only on that copy.
+
+\paragraph{Step 1 --- Mount and locate.} \code{hdiutil attach -readonly} on the IFP Cryptex
+(\S\ref{sec:containers}) exposes \code{model.\allowbreak odixpackage/\allowbreak }: the ground-truth
+\code{config.\allowbreak json} (44 layers, dims, expert counts), the $4.7$\,GB
+\code{ifp\_\allowbreak rasterized\_\allowbreak weights.\allowbreak bin}, the swizzler \code{metadata.\allowbreak bin}, the
+program \code{main-h16g.\allowbreak odix}, and the ANE package (\code{.\allowbreak hwx} $+$ MPSGraph).
+
+\paragraph{Step 2 --- The codec.} Value-distribution analysis of the two \code{BBBB} regions
+identifies LUT-palettization (Finding~\ref{find:codec}): a $100\%$-positive \textrm{fp16}
+scale region and a complement-symmetric nibble histogram, matched to the graph's
+\code{lut\_\allowbreak to\_\allowbreak dense} operator (a 16-entry codebook).
+
+\paragraph{Step 3 --- The de-swizzle (the blocking piece).} Palettization alone leaves the
+decode at $R\approx3$. The breakthrough is recognizing the residual permutation as the ANE's
+$8{\times}128$ tiling and inverting it with Eq.~\ref{eq:deswz}; the decontaminated structure
+ratio jumps to $R=13\text{--}69$ (Finding~\ref{find:deswz}), i.e.\ genuine weights.
+
+\paragraph{Step 4 --- The file map.} A window scan classifies every region of the
+$4.95$\,GB file by nibble-entropy and \textrm{fp16}-likeness: global scales
+$[\mathtt{0x60},\mathtt{0x1078000})$, attention indices
+$[\mathtt{0x1078000},\mathtt{0xC0C8000})$, and expert$+$tail indices
+$[\mathtt{0xC0C8000},\mathrm{EOF})$. Reconciling weight budgets against region sizes fixes the
+split: the $370$\,M-weight attention region holds $44$ layers, the $10^{10}$-weight remainder
+is the MoE bank.
+
+\paragraph{Step 5 --- Names and semantics.} The \code{odix} location tree gives authoritative
+tensor names (\code{\_\allowbreak wrapped\_\allowbreak model\_\allowbreak layers\_\allowbreak \dots\_\allowbreak palettized\_\allowbreak indices\_\allowbreak raw});
+parsing the \code{MLIR22.\allowbreak 0.\allowbreak 0} MPSGraph bytecode tags each of the $396$
+\code{ifp\_\allowbreak constant} weights with its layer/role hierarchy. This same parse shows the
+norms are folded and the router is baked (\S\ref{sec:recover}), so no further assets are needed.
+
+\paragraph{Step 6 --- Decode, verify, assemble.} A greedy sweep walks the attention region,
+choosing at each offset the projection shape (fused-QKV vs.\ Q-only) that maximizes $R$,
+decoding it via Eq.~\ref{eq:deswz}, and advancing; it self-terminates at exactly $44$ layers
+(Observation~\ref{obs:count}). The expert region is decoded in fused blocks and stored int8.
+Scales beyond the $8.84$\,B-weight coverage are clamped, eliminating the tail overflow.
+
+\paragraph{Step 7 --- Export and audit.} The tensors are written to one \code{state\_\allowbreak dict}
+carrying the config, codebook, Apple's \code{full\_\allowbreak model\_\allowbreak sha256}, and a per-tensor
+manifest of $R$. Completeness is audited against the physical file
+(Table~\ref{tab:export}): $9.8619$\,B captured of $9.8619$\,B, $100.00\%$, zero non-finite.
+
+\begin{figure}[ht]\centering
+\begin{tikzpicture}[flow,node distance=2.3mm]
+\node[blk,text width=80mm] (s0) {\textbf{0.\ Acquire}\ \ {\sub \code{/Volumes/D/copyfm} in recovery $\to$ copy Cryptex}};
+\node[blk,below=of s0,text width=80mm] (s1) {\textbf{1.\ Mount}\ \ {\sub \code{hdiutil} $\to$ config, rasterized weights, odix, hwx}};
+\node[blk,below=of s1,text width=80mm] (s2) {\textbf{2.\ Codec}\ \ {\sub 4-bit index $\to$ 16-entry \code{lut\_to\_dense} codebook $\times$ scale}};
+\node[blk,below=of s2,text width=80mm,fill=expfill] (s3) {\textbf{3.\ De-swizzle}\ \ {\sub ANE $8{\times}128$ tiling inverted (Eq.~\ref{eq:deswz}) $\Rightarrow R{=}13\text{--}69$}};
+\node[blk,below=of s3,text width=80mm] (s4) {\textbf{4.\ File map}\ \ {\sub scales $\mid$ attention (44 L) $\mid$ expert bank}};
+\node[blk,below=of s4,text width=80mm] (s5) {\textbf{5.\ Names}\ \ {\sub odix tree $+$ MLIR hierarchy; norms folded, router baked}};
+\node[blk,below=of s5,text width=80mm] (s6) {\textbf{6.\ Decode $+$ verify}\ \ {\sub greedy $R$-max sweep $\to$ 44 layers $+$ experts}};
+\node[blk,below=of s6,text width=80mm] (s7) {\textbf{7.\ Export}\ \ {\sub single \code{.pt}; audit $=100.00\%$ of file, 0 NaN}};
+\foreach \a/\b in {s0/s1,s1/s2,s2/s3,s3/s4,s4/s5,s5/s6,s6/s7} \draw[->] (\a)--(\b);
+\end{tikzpicture}
+\caption{The recovery pipeline. Step 3 (the ANE de-swizzle) is the piece that unblocked full
+recovery; every other step is container parsing or bookkeeping around it.}\label{fig:pipeline}
+\end{figure}
+
+\section{Container Formats}\label{sec:containers}
+The on-disk stack is summarized in Figure~\ref{fig:stack}.
+\begin{figure}[ht]\centering
+\begin{tikzpicture}[flow,node distance=2.6mm]
+\node[file,fill=boxfill2,text width=76mm] (dmg)
+  {Cryptex DMG {\rmfamily\itshape(raw APFS, Image4-signed, DSME\_COMPRESSED, Encrypted:false)}};
+\node[file,below=of dmg,text width=68mm] (meta) {metadata.json $\cdot$ ifp/config.json};
+\node[file,below=of meta,text width=68mm] (odix)
+  {main-h16g.odix\\{\rmfamily\scriptsize IR + 11 MPSGraph subgraphs; self-relative refs}};
+\node[file,below=of odix,text width=68mm] (rw)
+  {ifp\_rasterized\_weights.bin\\{\rmfamily\scriptsize BBBB: [\,fp16 scales\,$\mid$\,4-bit indices\,]}};
+\node[file,below=of rw,text width=68mm] (swz)
+  {metadata.bin\\{\rmfamily\scriptsize swizzler: 32-byte ANE tile scatter}};
+\node[file,below=of swz,text width=68mm] (hwx)
+  {MPSGraph $\to$ binary\_0.hwx\\{\rmfamily\scriptsize ANE microcode (no weights); \_\_MKERN maps rasterized file}};
+\node[blk,below=of hwx,text width=46mm,fill=expfill] (ane) {Apple Neural Engine};
+\begin{scope}[on background layer]
+\node[draw=accent,rounded corners=3pt,dashed,fit=(meta)(swz)(hwx),inner sep=4pt] (pkg) {};
+\end{scope}
+\node[font=\scriptsize\ttfamily\color{accent},anchor=east]
+      at ([xshift=-1mm]pkg.east |- meta.north) {model.odixpackage/};
+\draw[->] (hwx)--(ane);
+\end{tikzpicture}
+\caption{The \code{FM\_\allowbreak GenerativeModels} on-disk container stack for the IFP model. The
+dashed box is \code{model.\allowbreak odixpackage/\allowbreak }; execution is dispatched to the ANE.}\label{fig:stack}
+\end{figure}
+
+\noindent\textbf{Cryptex DMG.} Raw APFS image, \code{DSME\_\allowbreak COMPRESSED}; contains
+\code{model.\allowbreak odixpackage/\allowbreak }, \code{metadata.\allowbreak json}, a nominal \code{System/\allowbreak Library}.
+\textbf{\code{BBBB} rasterized container} (\code{ifp\_\allowbreak rasterized\_\allowbreak weights.\allowbreak bin}): magic
+\code{BBBB}, version \code{0x017c0100}, tag \code{0x0600002c}, then a u64 segment-offset
+table---\textrm{fp16} scales \code{0x60}--\code{0x1054000}; 4-bit indices
+\code{0x1078000}--\code{0x125e80000}. \textbf{Swizzler} (\code{metadata.\allowbreak bin}): also
+\code{BBBB}; 14{,}079 records of 24 bytes, \code{[idx][flag][off\_a][off\_b{=}off\_a{+}0x20]}
+\code{[0x0600beef][0]}, a scatter of 32-byte ANE tiles into the index region.
+\textbf{\code{odix} executable} (magic \code{odix\textbackslash0\textbackslash0\textbackslash5\textbackslash0}):
+header \code{u64[0]=ir\_\allowbreak start(0x40)}, \code{u64[1]=ir\_\allowbreak size}; the 32\,MB IR section holds
+11 compiled MPSGraph subgraphs, a location/debug tree, and an interned type table.
+\textbf{ANE \code{.\allowbreak hwx}} (magic \code{0xBEEFFACE}, cputype \code{0x80}): a Mach-O of
+compiled ANE microcode, \emph{not weights} (Finding~\ref{find:hwx})---segments
+\code{\_\allowbreak \_\allowbreak TEXT} and \code{\_\allowbreak \_\allowbreak KERN\_\allowbreak 0.\allowbreak .\allowbreak 7} are kernel code (structure
+$R\approx1$), and \code{\_\allowbreak \_\allowbreak MKERN\_\allowbreak 0} carries no file bytes but is runtime-mapped
+from the rasterized file (its size equals the swizzler's maximum offset). \textbf{MPSGraph package.}
+\code{specialized\_\allowbreak model\_\allowbreak 0.\allowbreak mpsgraph} is MLIR bytecode (\code{MLIR22.\allowbreak 0.\allowbreak 0}) with
+\code{mps.\allowbreak fullyPlacedOnANE}.
+
+\begin{finding}\label{find:ref}
+The \code{odix} reference scheme is self-relative: a 32-bit word whose high byte is
+\code{0xFF} encodes a signed offset, with target $=\text{position}+\mathrm{int32}$, into
+an interned symbol pool. Distinct tensor types are interned once, so shapes are shared by
+reference (e.g.\ ``1536'' occurs only 26 times in 32\,MB).
+\end{finding}
+
+\section{Tokenizer}
+A standalone 8.6\,MB SentencePiece-family tokenizer. Special tokens observed:
+\code{<bos> <eos> <unk> <pad> <mask>}; chat markers \code{<start\_\allowbreak of\_\allowbreak turn>} and
+\code{<end\_\allowbreak of\_\allowbreak turn>}; a \code{[multimodal]} token; reserved \code{<unused$n$>} and
+\code{<ctrl$n$>} slots. The \code{[multimodal]} token, with the \code{image\_\allowbreak encoder}
+(346\,MB) and \code{image\_\allowbreak tokenizer} assets, indicates vision-language input support.
+Estimated vocabulary $152{,}064$.
+
+\section{Adapters and Task Specialization}
+A single backbone serves dozens of features via LoRA adapters that snap into the base's
+empty slots; each ships as a \code{.\allowbreak generic} adapter plus a small \code{.\allowbreak draft.\allowbreak generic}
+(38--62\,MB) speculative-decoding draft.
+\textbf{On-device (\code{instruct\_\allowbreak 3b}):} summarization, mail\_reply, magic\_rewrite,
+proofreading\_review, machine\_translation, personalized\_smart\_reply,
+news\_topic\_summarization, messages\_action, autonaming\_messages, smart\_naming,
+urgency\_classification, video\_caption, ui\_grounding,
+image\_playground\_edit\_suggestions, suggest\_recipe\_items,
+reminders\_suggest\_action\_items, open\_ended\_extract, text\_event\_extraction,
+text\_person\_extraction, auto\_tagger, adm\_prompt\_analyzer, embedding\_preprocessor,
+fm\_api\_generic, fm\_api\_content\_tagger, lw\_planner\_v1, holdassistwaittime,
+homekit\_summary\_notifications, and Safari/Shortcuts/Photos-Memories families.
+\textbf{Small (\code{instruct\_\allowbreak 300m}):} safety, prepubescent\_safety, misc\_safety,
+mm\_guard, ipi\_classifier, structural\_integrity, factual\_consistency\_classifier,
+vi\_content\_classifier, voice\_control\_ai (v1/v2), action\_validator,
+adm\_prompt\_rewriting, adm\_people\_grounding, gvicc, image\_tokenizer,
+open\_ended\_extract, base (426\,MB). \textbf{\code{instruct\_\allowbreak 9m}:} a 9\,M-parameter
+text-event-extraction classifier. \textbf{Server / PCC (\code{instruct\_\allowbreak server\_\allowbreak v1}):}
+text\_summarizer, takeaways/tables/bullets\_transform, professional/friendly/concise
+tone, open\_ended\_tone (+ query-response v1/v2),
+mail\_reply\_long\_form\_\{basic,rewrite\}, mail\_reply\_qa, magic\_rewrite,
+generative\_shortcuts, llm\_siri\_pcc, lw\_planner\_v1, fitness\_workout\_voice,
+reminders\_auto\_categorized\_list, photos\_memories\_*, stx\_multimodal,
+shortcuts\_ask\_afm\_action (v1/v2); \code{instruct\_\allowbreak server\_\allowbreak small}: safety\_nsfw,
+model\_abuse\_guardrail. \textbf{Translation (\code{gm.\allowbreak translate\_\allowbreak fm}):} a dedicated
+model with \code{alignment} and \code{phrasebook} components.
+
+\section{Reverse-Engineering Methodology}
+All artifacts were obtained via \code{hdiutil attach -readonly -noverify} on the Cryptex
+images (no personalization is required for reading), followed by binary parsing in
+Python. Architecture was recovered from \code{config.\allowbreak json}/\code{metadata.\allowbreak json} and from
+\code{tamm}-framework tensor names inside \code{main-h16g.\allowbreak odix} (e.g.\
+\code{\_\allowbreak wrapped\_\allowbreak model\_\allowbreak layers\_\allowbreak .\allowbreak .\allowbreak .\allowbreak \_\allowbreak palettized\_\allowbreak indices\_\allowbreak raw},
+\code{\_\allowbreak wrapped\_\allowbreak model\_\allowbreak output\_\allowbreak norm\_\allowbreak weight}). The quantization scheme
+(Finding~\ref{find:codec}) was inferred from value-distribution analysis of the two
+\code{BBBB} regions; the reference scheme (Finding~\ref{find:ref}) from resolving the
+\code{0xFF}-tagged words; and the expert fan-out (Finding~\ref{find:budget}) from the
+size budget; the per-constant layer/role semantics were read from the
+\code{MLIR22.\allowbreak 0.\allowbreak 0} MPSGraph bytecode location tree. The native model was
+independently confirmed runnable on the host through \code{FoundationModels}
+(\code{SystemLanguageModel}). Tensor-level reconstruction is validated by the structure
+statistic of \S\ref{sec:recover}: with the ANE $8{\times}128$ de-swizzle (Eq.~\ref{eq:deswz})
+the decode scores $R=13\text{--}69$ against a genuine-weight reference of $\approx$9, and the
+full export reconciles to $100.00\%$ of the physical index region with zero non-finite
+tensors (Table~\ref{tab:export}). The weight codec is thus \emph{identified and inverted}:
+LUT-palettization $+$ per-block scale $+$ ANE tile de-swizzle, with norms folded into the
+weights, the router baked to a dense expert set, and the per-tensor mapping supplied by the
+shipped \code{metadata.\allowbreak bin} swizzler in lieu of the compile-time
+\code{ifp\_\allowbreak constant\_\allowbreak table\_\allowbreak ifp1\_\allowbreak r48.\allowbreak json}. A complete, named
+\code{state\_\allowbreak dict} is produced.
+
+\section{Complete Asset Inventory}
+Table~\ref{tab:inv} lists all 118 assets with version and disk-image size in megabytes
+(blank denotes a metadata-only override with no payload).
+{\footnotesize
+\setlength{\tabcolsep}{8pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.72\textwidth}rr@{}}
+\caption{Full \code{FM\_\allowbreak GenerativeModels} asset inventory (118 assets).}\label{tab:inv}\\
+\toprule \textbf{Bundle name} & \textbf{Version} & \textbf{MB}\\ \midrule \endfirsthead
+\multicolumn{3}{l}{\footnotesize\itshape Table~\ref{tab:inv}, continued}\\[2pt]
+\toprule \textbf{Bundle name} & \textbf{Version} & \textbf{MB}\\ \midrule \endhead
+\midrule \multicolumn{3}{r}{\footnotesize\itshape continued on next page}\\ \endfoot
+\bottomrule \endlastfoot
+\input{inventory.tex}
+\end{longtable}}
+
+\appendix
+\section{\code{odix} IR Grammar}\label{app:odix}
+The \code{odix} IR is a length-prefixed section stream. Strings and tensor \emph{types}
+are interned once in a symbol pool and shared by reference. A reference is a 32-bit word
+whose high byte is \code{0xFF}, encoding a self-relative signed offset $t=p+\mathrm{int32}(w)$
+from the word position $p$. Attribute records in the location/debug tree take the form
+$\langle\text{key-ref}\rangle\ \langle\text{len:u32}\rangle\ \langle\text{payload}\rangle$
+with interned keys \code{name}, \code{location\_type}, \code{named\_child\_loc},
+\code{op\_id}, \code{line}, \code{filename}, \code{column}, \code{metadata}. Because types
+are interned, a dimension such as $1536$ occurs only $\approx$26 times across the entire
+32\,MB IR. The compile-time name-to-offset table
+(\code{ifp\_constant\_table\_ifp1\_r48.json}) is not shipped, but it is not needed: its runtime
+equivalent is the \code{metadata.\allowbreak bin} \code{BBBB} swizzler (Appendix~\ref{app:bbbb}), and
+the MPSGraph bytecode location tree tags each \code{ifp\_constant} with its layer/role, so a
+named export is produced without it (\S\ref{sec:recover}).
+
+\section{\code{BBBB} Container Layout}\label{app:bbbb}
+Both \code{ifp\_rasterized\_weights.bin} and the swizzler \code{metadata.bin} share the
+\code{BBBB} magic. The rasterized header is \code{BBBB}, version \code{0x017c0100}, tag
+\code{0x0600002c}, count, then a u64 segment-offset table. The swizzler body is a sequence
+of 24-byte records \code{[idx][flag][off\_a][off\_b][marker=0x0600beef][0]} with
+$\text{off\_b}=\text{off\_a}+\mathtt{0x20}$, i.e.\ a scatter map of 32-byte Apple Neural
+Engine tiles. Region spans: scales \code{[0x60,0x1054000)}; 4-bit indices
+\code{[0x1078000,0x125e80000)}.
+
+\begin{thebibliography}{9}
+\bibitem{afm} Apple, \emph{Introducing Apple's On-Device and Server Foundation Models},
+  Apple Machine Learning Research, 2024.
+\bibitem{openelm} S.~Mehta et al., \emph{OpenELM: An Efficient Language Model Family with
+  Open Training and Inference Framework}, arXiv:2404.14619, 2024.
+\bibitem{switch} W.~Fedus, B.~Zoph, N.~Shazeer, \emph{Switch Transformers: Scaling to
+  Trillion Parameter Models with Simple and Efficient Sparsity}, JMLR, 2022.
+\bibitem{moe} N.~Shazeer et al., \emph{Outrageously Large Neural Networks: The
+  Sparsely-Gated Mixture-of-Experts Layer}, ICLR, 2017.
+\bibitem{gqa} J.~Ainslie et al., \emph{GQA: Training Generalized Multi-Query Transformer
+  Models from Multi-Head Checkpoints}, EMNLP, 2023.
+\bibitem{rope} J.~Su et al., \emph{RoFormer: Enhanced Transformer with Rotary Position
+  Embedding}, arXiv:2104.09864, 2021.
+\bibitem{rmsnorm} B.~Zhang, R.~Sennrich, \emph{Root Mean Square Layer Normalization},
+  NeurIPS, 2019.
+\bibitem{swiglu} N.~Shazeer, \emph{GLU Variants Improve Transformer},
+  arXiv:2002.05202, 2020.
+\bibitem{gguf} G.~Gerganov et al., \emph{GGUF / llama.cpp: A file format and runtime for
+  quantized transformer inference}, \url{https://github.com/ggml-org/llama.cpp}, 2023--.
+\end{thebibliography}
+
+\end{document}

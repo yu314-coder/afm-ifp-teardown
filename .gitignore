@@ -1,0 +1,14 @@
+# NEVER commit Apple's weights or assets
+*.pt
+*.bin
+*.dmg
+*.hwx
+*.odix
+*.mpsgraph
+*.mlmodelc
+*.asset
+*.npy
+# latex build cruft
+*.aux
+*.log
+*.out
