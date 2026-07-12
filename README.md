@@ -17,46 +17,45 @@ runtime.
 ## TL;DR — what was found
 
 The model is a **sparse MoE**: ~9.86 B stored params, ~1.4 B active per instruction (12 dense +
-32 sparse layers, d=1536, GQA, RoPE θ=500000, SwiGLU, ~219 experts/layer with Instruction-
-Following Pruning selecting ~14). Everything Apple ships as **data** was recovered. The final
-inch — Apple's exact *behavior* — lives compiled inside the Neural Engine.
+32 sparse layers, d=1536, GQA, RoPE θ=500000, SwiGLU, 219 experts/layer with Instruction-
+Following Pruning selecting 10 active + 4 shared). Everything Apple ships as **data** was
+recovered, **including the expert-selection router** — see [`ROUTER_EXTRACTION.md`](ROUTER_EXTRACTION.md).
 
 | Component | Status |
 |---|---|
 | **All 9.86 B weights** | ✅ recovered, 100% of file, verified |
 | **Container stack** (Cryptex, BBBB, odix, hwx, MPSGraph) | ✅ fully characterized |
-| **Weight codec** (4-bit LUT + per-block scale + ANE 8×128 de-swizzle) | ✅ validated (structure R=13–69, sane weights) |
+| **Weight codec** (4-bit LUT + per-block scale + ANE 8×128 de-swizzle) | ✅ validated (structure R, sane weights) |
 | **Architecture, norm values, RoPE** | ✅ recovered |
 | **Tokenizer** | ✅ working (byte-BPE, validated round-trip) |
-| **FFN wiring** (sequential layout, module width ~16384) | ✅ recovered — *not* ANE-baked |
-| **Router architecture** (`topk(sigmoid(h·W_proj))`) | ✅ recovered from the experts asset |
-| **Full forward pass** (attn + MoE-SwiGLU + self-route + embed + head) | ✅ **runs stably end-to-end** |
-| **Coherent text generation** | ❌ produces noise — see "The honest limit" |
+| **Router** (`ExportableExpertSelector`, plain fp16) | ✅ **extracted + decoded + validated** — [`ROUTER_EXTRACTION.md`](ROUTER_EXTRACTION.md) |
+| **`main-h16g.odix` decompiler** (38 configs, op format) | ✅ structural map — [`ODIX_DECOMPILER.md`](ODIX_DECOMPILER.md) |
+| **FFN per-constant layout** (variable-width, pruned) | ⚠️ scoped: type/symbol schema-recovery remaining |
+| **Full forward pass** (attn + MoE-SwiGLU + router + embed + head) | ✅ **runs stably end-to-end** |
+| **Coherent text generation** | ❌ needs FFN layout + 3 calibration pieces — see "The honest limit" |
 | **Running the real model** | ✅ via `afm` (Apple's `FoundationModels` runtime) |
 
 ---
 
-## The honest limit — why the reconstruction runs but doesn't generate Apple's text
+## The honest limit — what remains before coherent text
 
-The forward pass is numerically stable (residual norm grows smoothly 86→408, correct pre-norm
-behavior) but its output is noise, not coherent text. This is **not** missing data — it's
-**calibration precision**. Several reconstructed pieces are each ~90% correct:
+The forward pass is numerically stable but does not yet emit Apple's text. Of the pieces once
+thought blocking, **the router is now solved** (extracted, not a surrogate). The remaining gap is
+concrete and scoped:
 
-- FFN module size (~16384, endpoint-fit; scattered small constants unresolved)
-- Router = a self-routing surrogate, not the exact `W_project_experts` weight
-- Embedding quantization scale / zero-point (approximate)
-- Output-norm γ (parameter-free stand-in)
-- Layer pairing (assumed file-order = depth-order)
+1. **FFN per-constant layout** — the 396 expert constants are shipped **IFP-pruned to variable
+   widths** (42–232 experts/constant, *not* uniform). Their exact sizes require resolving the
+   `main-h16g.odix` type/symbol tables (a bounded FlatBuffer schema-recovery problem — see
+   [`ODIX_DECOMPILER.md`](ODIX_DECOMPILER.md)). A uniform-width model mis-aligns and is why the
+   reconstructed FFN produces noise.
+2. **Embedding dequant**, **output-norm γ**, **layer pairing** — three calibration pieces still
+   approximate.
 
-A transformer multiplies these — **~90%⁵ ≈ noise at the output** — and none can be calibrated in
-isolation, because each needs the others exact to validate, and the only ground truth (Apple's
-runtime) never exposes the intermediate activations to check against. That circular dependency
-is the genuine, demonstrated wall.
-
-**Corrected verdicts along the way:** several things I initially concluded were "ANE-locked /
-impossible" turned out recoverable — the FFN wiring (a sequential layout), the router
-architecture, and a stable end-to-end run. The reconstruction goes much further than "you can
-only run it on the ANE"; it just stops short of bit-exact behavior.
+**Corrected verdicts along the way (the honest part):** several conclusions reversed under
+scrutiny — the FFN wiring is a sequential layout (not ANE-baked); and, most importantly, the
+**router is not ANE-locked at all** — it ships as plain fp16 in `project_experts.mlasset` and is
+now extracted and validated. This project moved the model from "a black box baked into the ANE"
+to "the router is in hand and the FFN layout is a precisely-scoped schema problem."
 
 ---
 

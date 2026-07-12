@@ -360,19 +360,43 @@ $R\approx1$ marks noise. Adding the ANE de-swizzle (Eq.~\ref{eq:deswz}) lifts th
 past the genuine-weight reference, confirming recovery.}\label{tab:struct}
 \end{table}
 
-\subsection{The router, and the missing constant table}
-Two artefacts expected of an MoE model are absent from the shipped IFP graph, and both are
-resolved rather than missing. \emph{(i)~The router.} The exported adapter carries the token
-\code{ifp1\_\allowbreak r48\_\allowbreak prompt\_\allowbreak opt\_\allowbreak dense\_\allowbreak only}: instruction-following pruning
-was run once at export time and \emph{baked} the per-instruction expert mask into a fixed
-dense expert set, so no runtime mask predictor ships. \emph{(ii)~The per-tensor offset table.}
-The compile-time \code{ifp\_\allowbreak constant\_\allowbreak table\_\allowbreak ifp1\_\allowbreak r48.\allowbreak json} is not in the
-assets, but its runtime equivalent is: the shipped \code{metadata.\allowbreak bin} \code{BBBB}
-swizzler is exactly the constant$\to$offset scatter table (Appendix~\ref{app:bbbb}), and the
-\code{MLIR22.\allowbreak 0.\allowbreak 0} MPSGraph bytecode tags each of the $396$ \code{ifp\_\allowbreak constant}
-symbols with its full layer/role location hierarchy (e.g.\ \code{lut\_\allowbreak to\_\allowbreak dense}
-$\to$ \code{MultiOutputLinear} $\to$ \code{TransformerFeedForward} $\to$
-\code{TransformerLayer}), giving the per-tensor semantics directly.
+\subsection{The router: shipped and extractable}\label{sec:router}
+An earlier version of this work concluded that no runtime mask predictor ships---that
+instruction-following pruning was baked at export time. \textbf{That conclusion was wrong, and
+is corrected here.} The router ships as its own asset, \code{project\_\allowbreak experts.\allowbreak mlasset},
+and is fully extractable. Its \code{odix} op graph names the class
+\code{ExportableExpertSelector} with I/O \code{in\_\allowbreak expert\_\allowbreak hidden\_\allowbreak state}
+$\to$ \code{out\_\allowbreak expert\_\allowbreak logits} and the op sequence
+\code{RMSNorm} $\to$ \code{hidden\_\allowbreak transform} $\to$ \code{sigmoid} $\to$
+\code{output\_\allowbreak transform} $\to$ \code{topk}. Crucially the weights carry \emph{no}
+dequantize/gather op: they are stored as \textbf{plain \textrm{fp16}} in one contiguous block
+($\mathtt{0x12600}\to$EOF), so no codec is needed. The three tensors decode at grounded offsets
+to
+\[
+\underbrace{\gamma\in\mathbb{R}^{1536}}_{\text{norm (folded)}},\quad
+\underbrace{W_{h}\in\mathbb{R}^{548\times1536}}_{\text{hidden}},\quad
+\underbrace{W_{o}\in\mathbb{R}^{7008\times548}}_{\text{output}}\!\!\to\!(32,219),
+\]
+plus $7084$ tail biases; here $548$ is the router hidden dim and $7008=32\text{ layers}\times219
+\text{ experts}$, reshaping with \emph{uniform} per-layer norms---the layout self-verifies. The
+selector computes $\mathrm{mask}=\mathrm{top}_{10}\big(W_{o}\,\phi(W_{h}\,\mathrm{RMSNorm}_\gamma
+(h))\big)$ per layer, $+4$ shared experts. Feeding controlled hidden states confirms it behaves
+as a router: with $\phi=$ identity/GELU the masks \emph{discriminate} inputs ($1$--$2/10$
+overlap across distinct hidden states, $171$ distinct experts spread over $32$ layers), whereas
+$\phi=$ sigmoid collapses to $9/10$ overlap and is thereby ruled out as the hidden activation.
+The router is Apple's, extracted---not a trained mimic.
+
+\medskip\noindent\emph{The per-tensor offset table.} The compile-time
+\code{ifp\_\allowbreak constant\_\allowbreak table\_\allowbreak ifp1\_\allowbreak r48.\allowbreak json} is not shipped, and the
+$396$ FFN constants store neither offset nor size inline: the rasterizer computes offsets from
+each constant's \emph{shape}, and shapes in \code{main-h16g.\allowbreak odix} are doubly-indirect
+(type-index $\to$ type table $\to$ interned dimension symbols). This work recovers the surrounding
+structure---the $38$ export-config functions, the op format, and the \code{alloc\_\allowbreak const}
+semantics (Appendix~\ref{app:odix})---and reduces the remaining gap to a bounded schema-recovery
+problem: resolve the type/symbol tables to obtain per-constant $C_{\text{out}}$, which are
+confirmed \emph{variable} ($42$--$232$ experts/constant, no uniform width). The
+\code{metadata.\allowbreak bin} \code{BBBB} swizzler indexes the attention region only (its maximum
+offset equals $\mathtt{0xC0C8000}$, exactly the start of the expert region).
 
 \begin{finding}[the \code{.hwx} holds no weights]\label{find:hwx}
 The Apple-Neural-Engine binary \code{binary\_\allowbreak 0.\allowbreak hwx} ($252$\,MB) is a Mach-O
