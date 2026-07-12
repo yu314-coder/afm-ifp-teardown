@@ -12,3 +12,6 @@
 *.aux
 *.log
 *.out
+
+# macOS
+.DS_Store
