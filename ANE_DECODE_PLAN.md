@@ -173,6 +173,29 @@ I/O binding or found by compiling candidate shapes and matching the shipped sect
 back the tiling; (c) fold in the per-token scale. Smoke test: the `if __name__` block in
 `disasm/pbuild.py` already sweeps G∈{1,4,8,23} and prints `opb/OCG/CoeffSize`.
 
+**Phase 1 progress (2026-07-15, cont.):**
+- **CHUNK SHAPE CONFIRMED = `[512, 1536]` palettized conv.** Compiling a `[Cout=512, Cin=1536]`
+  4-bit conv yields `__kern_0 = 394240 = 393216 + 1024` (dense 4-bit coeffs + 16×64 B bank headers),
+  matching the odix chunk (393216 B, dtype 0x40012) **exactly**. Storage is dense (ratio 1.00×). So
+  the embedding = 512 chunks of a `[512,1536]` palettized conv weight; `512 × 394240 = 201,850,880 ≈
+  __MKERN_0 (202,145,792)` — reinforcing `__MKERN_0` as the resident embedding buffer.
+- **The tiling is NOT the plain 8×128 de-swizzle.** Reading `__kern_0` of a *known-weight*
+  `[512,1536]` conv and applying `{contiguous, 8×128, transposed-8×128}` gives corr(|decoded|,|W|)
+  ≈ 0 in all cases. So the G=1 conv coeff order is a distinct tiling (matches the earlier
+  coreml2hwx-G=1 ≠ raster-8×128 finding) that must be recovered by **positional probe**, not guessed.
+  The `__const` LUT format also needs proper parsing (naive fp16-at-offset failed).
+- **✅ TILING RECOVERED + VALIDATED (2026-07-15).** Ran the 6-compile positional probe
+  (`probe_{o,i}{0,1,2}`, base-16 digits; index→digit via the `linear_lut` maxdigit scaling). Result
+  is an exact bijection with the **closed form**
+  `p(o,i) = (o//32)*49152 + (i//16)*512 + (i%16)*32 + (o%32)` (nested tile: 32 out-ch innermost,
+  16 in-ch stride 32, 96 in-blocks stride 512, 16 out-blocks stride 49152). Validated end-to-end
+  against a known-weight round-trip: **corr(decoded, W) = +0.984** (4-bit-limited); no-tiling
+  control = 0.002. Bank parse: `__kern_0` = 16 banks × (size/16), 64 B header each, low-then-high
+  nibbles. Deliverable shipped: **`src/ane_embed_codec.py`** (`decode_chunk`, `physical_index`,
+  `read_kern0_nibbles`, `linear_lut`). **Phase 1 is functionally complete for the chunk decode**;
+  the only open Phase-1 item is confirming the shipped embedding uses this same tiling (Phase 2's
+  oracle check) and extracting the real per-chunk LUT + per-token scale.
+
 **Kill criterion:** if `coreml2hwx` refuses the embedding dtype/shape or emits a fundamentally
 different structure than the gather target in `binary_0.hwx` (compare byte histograms / section
 structure), stop — the shipped encoding is not reproducible by the public toolchain, and the wall
