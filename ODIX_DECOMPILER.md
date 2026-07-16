@@ -76,3 +76,29 @@ sub-tables**, not a top-level vector. Reader: `src/odix_fb.py`. This remains the
 **Caveat added 2026-07-15:** even a complete `C_out` map does **not** yield coherent text — the
 token embedding is now proven ANE-baked and absent from all shipped files (see the teardown paper
 §embedding / `find:embed`), so a from-weights standalone forward is not reachable regardless.
+
+### Schema crack (2026-07-15) — module ops + debug tree decoded; type→shape core still binary
+
+Advanced the decode; the doubly-indirect `type_index → shape` core remains the hard part.
+
+- **`alloc_const` op descriptor cracked.** Each of the 5 global `NDArray.alloc_const` ops
+  (`field[1]` op[7..11]) carries `f0 = [flags, offset, size, dtype]` (op[11] = `[1, 0, 393216,
+  0x40012]` = the [512,1536] embedding chunk) and a generic `f1 = VEC[19]` whose 5-word prefix
+  decodes to the ASCII op name `"NDArray.alloc_const."`. The `VEC[19]` tail has self-relative
+  `0xff…` REFs (into the symbol pool) plus per-op scalars (op[11]:1408/209/340, op[8]:232/128/331)
+  that do **not** cleanly decode to dims — so shapes are not in the op descriptor beyond `size`.
+- **The IR debug/location tree is readable** (keys `location_type, name, op_id, named_child_loc,
+  sub_locations, line, filename, column`): it yields op NAMES + hierarchy + `op_id`
+  (`TransformerAttention_274`, `PalettizedConv2D`, `LoRAFusedMultiOutputLinear_745`,
+  `ANE_FusedMultiOutputLinear_670`, `mul_7025`) and MLIR attrs (`{id = N : ui64, level = "coreai"}`).
+  Gives names/op_ids, **NOT shapes**.
+- **Value-table semantics** (`field[2]`, 114 entries): `f1 = type_index` ∈ {1,2,3,13,18,19,21},
+  `f2 = dtype = 12`, `f0/f4` = serialized shape/data vecs (expert widths 232,140,65,57,32,20,13,12
+  × 256 are present, but interleaved with `0xff…` refs so they don't parse as clean int arrays).
+- **STILL UNCRACKED:** the `type_index → type-table → interned dim-symbol → symbol-pool → {1536,
+  C_out}` chain. The type table is not a top-level vector (indices reach 21; a BFS over reachable
+  tables found no clean 22-entry candidate — it explodes into data). The REFs from constants point
+  to MLIR-attribute / debug strings, not clean dim arrays. Extracting clean per-constant `C_out`
+  needs following op_id→data references through the FlatBuffer's own (unknown) schema — the genuine
+  multi-week task. **Value now reduced:** even a full `C_out` map won't produce text (embedding
+  wall), so this is worth doing only to firm up the FFN structural record, not to reach generation.
