@@ -101,6 +101,42 @@ mutually exclusive hypotheses, one cheap discriminator each.
 Everything after depends on this. Current best guess: **`__KERN_0` @ 104,660,992 in `binary_0.hwx`,
 ANE-palettized, 512 chunks of 393216 B.**
 
+### Phase 0 findings (2026-07-15, in progress)
+
+Ran the discriminators. Results — encoding largely clarified, exact data location still open:
+
+- **ENCODING CONFIRMED = `PalettizedConv2D` + `lut_to_dense`.** `specialized_model_0.mpsgraph`
+  names the layer weights as `PalettizedConv2D_{799,740,809,860,…}` with `lut_to_dense` ops —
+  i.e. exactly the 4-bit-index → 16-entry codebook codec already cracked for FFN weights. The
+  token embedding / logit projection is the same family. So there is **no new codec to learn**,
+  only the tiling.
+- **THE ANE TILING IS EXPLICIT AS AFFINE MAPS in the mpsgraph** — invertible directly, likely
+  removing the need for a `coreml2hwx` round-trip to *learn* the layout. The 8-way-tiled maps are:
+  `(d0,d1,d2,d3,d4) -> d0*9175040 + d1*262144 + (d2//8)*2048 + d3*2048 + d4*8 + d2%8` and
+  `(d0,d1,d2,d3) -> d0*504102912 + (d1//8)*12288 + d2*12288 + d3*8 + d1%8` (note `12288 = 8×1536`).
+  A separate family `d0*K + d1*32 + d2*32 + d3`, K ∈ {16384,32768,49152,65536,131072,262144},
+  factors as **32 × {512,1024,1536,2048,4096,8192}** (49152 = 32×1536 = 32×hidden).
+- **⚠️ CAUTION — `262144` in the maps is NOT confirmed as vocab.** It equals both `V` and
+  `32×8192` (32 × max-context). No vocab-sized `tensor<>` shape or `logit`/`token_embedding` op
+  name was findable in the binary MIL. Do not assume `262144 = vocab` without shape confirmation
+  (this session burned six such assumptions). Resolve in Phase 1 by reading the op's I/O shapes.
+- **hwx section discriminator (see §0 table):** `__KERN_0`/`__KERN_1` are uniform entropy 7.8–7.9
+  with **no unused-token zero tail** at any 393216-chunk boundary. Two readings, both live: (a) they
+  are affine-**tiled** palettized weights (tiling scatters the unused-token zeros vocab-wide, so no
+  contiguous tail appears — *consistent* with an embedding container), or (b) they are not the
+  embedding. `__KERN_0` is 133.73 MB < 201 MB, so it cannot hold the full 4-bit embedding alone.
+- **NEW leading candidate: `__MKERN_0` = 202,145,792 B ≈ the 201,326,592 B embedding** (runtime-
+  allocated, 0-on-disk, patched from the raster at load). If `__MKERN_0` is the resident embedding
+  buffer, the **raster holds the source** — but affine-tiled, which is exactly why the `[V,D]`
+  token-row raster sweeps missed it. This is the most likely resolution and the Phase-1 target:
+  trace the `gather`/patch `dsid` for `__MKERN_0` to its raster region, then invert the affine map
+  on that region.
+
+**Phase 0 status:** encoding solved; location narrowed to {`__KERN_0` on-disk, affine-tiled} vs
+{raster-source patched into `__MKERN_0`, affine-tiled} — decide by tracing the `__MKERN_0` patch
+`dsid` (extend `afm_odix/hwx_expert_dma.json`, which covered only the expert `__MKERN`s) and by
+confirming the `262144` dimension is vocab.
+
 ---
 
 ## 3. Phase 1 — Learn the encoding by `coreml2hwx` round-trip (1–2 weeks)
@@ -124,6 +160,18 @@ Compile controlled constants and read back the exact ANE bytes; fit the transfor
 
 **Deliverable:** `ane_embed_codec.py` implementing `encode(W)->bytes` and `decode(bytes)->W` for a
 `[512,1536]` dtype-`0x40012` chunk, verified bit-exact against the round-trip.
+
+**Phase 1 status (2026-07-15): ENGINE VERIFIED.** A minimal palettized 4-bit 1×1 conv
+(`Cin=256,Cout=128`) compiled through `coreml2hwx` (rc=0, coremltools 9.0 in `anevenv`) to a hwx
+with **magic `cefaefbe` and sections `__kern_0`(17408 B) + `__const`(16384 B = LUT)** — the *same*
+format as the shipped `binary_0.hwx`. So the toolchain reproduces Apple's encoding, and the
+`posread_full.py` positional-read (which cracked the down-proj 48×256 z-order) applies directly.
+**Remaining Phase-1 work** (multi-session): (a) build a positional-probe conv at the *embedding's*
+shape — blocked on confirming that shape, since `262144` appears only 2× in the mpsgraph (vs `8192`
+12×, `1536` 5×) and is likely `32×8192` not vocab, so the embedding op's Cout must be read from its
+I/O binding or found by compiling candidate shapes and matching the shipped section sizes; (b) read
+back the tiling; (c) fold in the per-token scale. Smoke test: the `if __name__` block in
+`disasm/pbuild.py` already sweeps G∈{1,4,8,23} and prints `opb/OCG/CoeffSize`.
 
 **Kill criterion:** if `coreml2hwx` refuses the embedding dtype/shape or emits a fundamentally
 different structure than the gather target in `binary_0.hwx` (compare byte histograms / section
