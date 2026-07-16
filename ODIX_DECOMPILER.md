@@ -16,9 +16,16 @@ next effort starts here rather than from scratch.
 - **`field[2]` values**: `f1=[type_index]`, and the type-index sequence is period-3
   `[gate, up, down]` — `[21,2,13]` for the embedding gathers, then `[18,3,18/19]` repeating over
   the layer stack.
-- **`NDArray.alloc_const` op**: fields `[flags, offset, size, dtype]` — but **inline only for
-  special constants** (e.g. the 393216-byte embedding chunk, dtype `0x40012`). The 396 FFN
-  constants do **not** carry offset/size inline; the rasterizer computes offsets from shapes.
+- ~~**`NDArray.alloc_const` op**: fields `[flags, offset, size, dtype]` — inline only for special
+  constants (e.g. the 393216-byte embedding chunk, dtype `0x40012`).~~ **RETRACTED (2026-07-15) —
+  this was an artifact.** All four `u32 == 393216` sites in the IR share the byte pattern
+  `00 00 06 00`, i.e. u16 `(0, 6)` where `6` is a FlatBuffer **vtable_size**, always followed by
+  `(table_size, 4, 6)`; one sits beside the debug string `line`, another beside `NDArray`/`Scalar`.
+  So `393216 = 0x00060000` and `0x40012` are **u32 reads straddling u16 vtable headers**, not a
+  size/dtype pair, and no inline `[flags, offset, size, dtype]` record was ever demonstrated.
+  (`512 × 1536 / 2 = 393216` is a numerical coincidence with `0x60000` — it made the artifact look
+  meaningful.) **Lesson: never u32-scan a FlatBuffer for "sizes"; the vtables are u16.** The 396
+  FFN constants carry no inline offset/size; the rasterizer computes offsets from shapes.
 - **Expert dims are variable**: IR histogram of multiples-of-256 shows `42–232` experts per
   constant — there is no uniform width (this is why a uniform-width offset model mis-aligns and
   the reconstructed FFN never produced coherent text).

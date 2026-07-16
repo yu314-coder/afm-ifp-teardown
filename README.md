@@ -39,7 +39,8 @@ sum over experts), so no selection map is needed to run it.
 | **Expert-selection map** (which-of-219, "missing constant table") | ✅ **proven irrelevant AND ungated full-219 sum confirmed *optimal*** (selection/gating/scaling all score strictly worse) |
 | **`metadata.bin` swizzler** | ✅ **decoded = two physical FFN address tables** (down-proj `0x0600beef`, gate/up `0x0a00b0ef`) |
 | **down-proj experts** | ✅ **codec cracked = same as gate/up** (the missing factor was the per-block scale, not a z-order) |
-| **Embedding + tied unembed** | ✅ exact (every token self-ranks 0) |
+| **Tokenizer vocab size** | ✅ **262,144** (Gemma-style 2^18) — confirmed 4 ways; the previously-used `152,064` is *Qwen's* size, a borrowed constant |
+| **Embedding + tied unembed** | 🔴 **NOT recovered — prior "✅ exact" was a vacuous test** (self-ranking uses the same matrix on both sides, so *any* matrix — incl. noise — self-ranks 0). A validated semantic probe (calibrated at **+0.53** on a real 4-bit LM embedding) scores **+0.003–0.047** on every candidate: ~1.14 M raster offsets swept → **not in the raster**; the only vocab-structured table in the package (in the odix) is **proven not to be it**. Leading hypothesis: **ANE-baked into `binary_0.hwx`** / fused into the gather op |
 | **Attention forward** (all 44 layers) | ✅ runs stably (bounded residual growth) |
 | **Coherent text generation** | 🔴 **blocked by an information limit** — assembled 44-layer forward carries real signal (3.6× chance) but the summed-FFN direction is mis-aligned, and per-layer activations are ANE-internal so it can't be validated/bisected — see below |
 | **Running the real model** | ✅ via `afm` (Apple's `FoundationModels` runtime) |
@@ -95,6 +96,36 @@ embeddings* scores 0.17 = noise). So the alignment cannot be validated or debugg
 component-by-component from any accessible artifact. This is the same class of wall reached
 independently from the ANE/`.hwx` side; it needs either ANE-internal activation capture or a clean
 single-geometry re-extraction, not further convention search.
+
+### The embedding is not in the shipped weight file (2026-07-15)
+
+The single largest correction in this project's history. The token embedding — long marked
+"✅ exact" — was **never validated**: the test used was `argmax(E · rms(E[t])) == t`, which the
+*same matrix on both sides* satisfies trivially. **Any** matrix, including pure noise, passes it.
+
+Replacing it with a falsifiable test — mean cosine of orthographic variants (`▁dog`/`dog`,
+`▁year`/`▁years`) minus an **id-matched** random control — and **calibrating it on a real model**
+(Qwen3-4B `token_embd.weight`, Q6_K, re-quantized to AFM's exact signed-4-bit + per-token-scale
+format) gives a clean instrument: **a real embedding scores +0.53; 4-bit costs only ~2%**
+(0.533 → 0.522; `ĠParis~Paris` = +0.842). Against it:
+
+- **~1.14 M candidate offsets across the 4.9 GB raster score ≤ +0.047** — unscaled tail and
+  scaled region, interleaved and contiguous, 4-bit and int8. The embedding is **not a `[V,D]`
+  table in the raster**.
+- The **only** vocab-structured table in the entire package (in `main-h16g.odix`, pinned to
+  +0.777/0.78 by the untrained-`<unused>`-row zero signature, 8-way nibble-interleaved, signed
+  4-bit) scores **+0.003** — it is **not the embedding** (likely `c_sparsity_embedding`).
+- `VOCAB = 262,144`, not the `152,064` previously assumed — that is *Qwen's* vocab size.
+
+**Leading hypothesis: the embedding is ANE-baked into `binary_0.hwx` or fused into
+`AFM_fused_interleaved_embedding_gather_dequant_reshape`** — consistent with the proven fact that
+the ANE performs embedding lookup, all 44 layers, and logits entirely on-chip. If so, a
+from-weights standalone forward may be **impossible from the shipped assets**.
+
+*Methodological note.* Six plausible-looking results were falsified by controls during this pass,
+including an `alloc_const [flags,offset,size,dtype]` claim in `ODIX_DECOMPILER.md` that was a u32
+read straddling FlatBuffer **u16** vtables. Without ground truth, statistical shortcuts into these
+assets reliably produce mirages; every claim here now carries a stated control.
 
 Full consolidated record: see the teardown paper §"From-Weights Reconstruction".
 
