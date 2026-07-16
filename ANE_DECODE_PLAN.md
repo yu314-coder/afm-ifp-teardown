@@ -236,6 +236,25 @@ Honest status: **Phase 1 (recover *a* validated ANE chunk tiling) succeeded; Pha
 shipped embedding + confirm same tiling) is unmet** — the shipped tiling is unconfirmed and the data
 is unlocated. The kill-criterion (round-trip encoding may not match shipped bytes) is now live.
 
+### Option 4 probed (gather/dsid trace) — reframes, doesn't resolve
+
+- **The token embedding is NOT ANE-baked.** `specialized_model_0.mpsgraph` has exactly one Gather:
+  `IsolatedGatherPositionalEmbedding` + `ANE_RotaryPositionalEmbedding` — the *positional* (RoPE)
+  gather. `gather_embeddings`/`load_embeddings`/`in_new_token_ids` appear **0× in the mpsgraph**. So
+  the ANE never does the token-embedding lookup — this **supersedes** the "ANE-baked into
+  `binary_0.hwx`" hypothesis in §0.
+- **`__MKERN_0` = the ifp1 LoRA/expert kernel** (hwx patch descriptors:
+  `rt_op_load_lora_48_ifp1_r48_extend`, `..._dsid_relocation`), not the embedding.
+- **The embedding is a CPU-side odix-runtime op** (`load_embeddings`, `$gather_embeddings_8`); the
+  model I/O has **both** `in_new_token_ids` and `in_embeddings` + `out_logits`. So it is a *loadable
+  table*, not baked — but every package file is now enumerated (5.62 GB total) and none holds a
+  decodable **semantic** `[V,D]` table.
+- **Terminal reading:** the embedding table is either (a) in the raster behind the odix
+  `load_embeddings`→data reference (needs the type-table/symbol-pool schema cracked — the one hard
+  task left), or (b) supplied by the host FoundationModels framework from **outside this
+  MobileAsset** (consistent with `in_embeddings` being a model input). Both put it beyond recovery
+  from this package by search alone.
+
 ## 4. Phase 2 — Invert on the real data + validate (2–4 days)
 
 1. Apply `ane_embed_codec.decode` to the real embedding bytes located in Phase 0, per chunk, to
