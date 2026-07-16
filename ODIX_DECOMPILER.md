@@ -48,3 +48,31 @@ Once `C_out` per constant is known: `size = C_out × 1536 / 2` (4-bit) → cumsu
 `BACK = 0xC0C8000` → decode with the validated LUT+de-swizzle (Eq. de-swz in the paper). Coherent
 text then still needs three calibration pieces: embedding dequant, output-norm, and layer
 pairing.
+
+### Value-table schema (2026-07-15 progress)
+
+The 114-entry value table (`root.field[2]`) is now partially decoded. Each value is a FlatBuffer
+table with:
+
+- **`f1` = `type_index`** (a `vec[1]`): values `{1,2,3,13,18,19,21}`; histogram
+  `{18:52, 3:35, 19:16, 2:4, 21:3, 13:3, 1:1}`. Types **18 and 3** are the two dominant FFN
+  constant kinds; they interleave down the layer stack.
+- **`f2` = `dtype` = 12** (a `vec[1]`), constant across all 114.
+- **`f0`, `f4`** are **monotone symbol-pool references when scalar** — `f4` runs `357 → 3009`
+  and `f0` runs `13 → 286` monotonically across the 114 values (i.e. each value names an entry at
+  an increasing offset in a symbol/name pool) — and **serialized shape/data vectors when a vec**.
+  Those vecs interleave real dims with `0xff…` self-relative ref-markers, so they do **not** parse
+  as clean int arrays.
+
+**Expert widths ARE present** in the `f0`/`f4` vecs (as multiples of 256): observed
+`232,140,126,65,57,32,20,17,15,13,12,4,3,2,1` experts — spanning the full "42–232 per constant,
+variable width" range and **confirming per-constant variable expert width** (the root cause of the
+uniform-stride FFN mis-alignment). But a *clean* per-constant `C_out` still needs the type table
+resolved: `type_index` reaches 21, yet no root vector has ≥22 entries (`field[0..9]` sizes are
+`6,12,114,114,-,-,1,-,-,38`), so the type table is **nested inside a module op or a value's own
+sub-tables**, not a top-level vector. Reader: `src/odix_fb.py`. This remains the self-contained
+(but genuinely hard) schema-recovery gap.
+
+**Caveat added 2026-07-15:** even a complete `C_out` map does **not** yield coherent text — the
+token embedding is now proven ANE-baked and absent from all shipped files (see the teardown paper
+§embedding / `find:embed`), so a from-weights standalone forward is not reachable regardless.
