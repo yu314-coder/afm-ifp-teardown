@@ -203,6 +203,39 @@ is hard. Record the divergence.
 
 ---
 
+### Phase 2 progress (2026-07-15) — location NOT found; tiling-provenance is the blocker
+
+Applied the validated `[512,1536]` decoder to every plausible data location, scored with the
+semantic oracle (need GAP > +0.25): **all ≈ 0.** odix `c_sparsity_embedding` table (all base pins,
+codebook + signed LUT): ≤ +0.009. hwx `__KERN_0` (±header, stride 393216 & 394240): ≤ −0.002.
+Raster region-starts (INDEX0, BACK, EOF−201M, EOF−116M, 2 GB, 4 GB): ≤ +0.007 (SCALE0's +0.093 is
+the scale table's smoothness inflating both terms, not an embedding).
+
+**The blocker is tiling provenance, and it fires the §3 kill-criterion.** The recovered nested
+tiling is what `coreml2hwx` (coremltools 9.0) emits — validated for *coreml2hwx-compiled* weights
+(+0.984). But the *shipped* export uses a **different** tiling: the odix `c_sparsity_embedding`
+`[262144,1536]` table reads cleanly as **token-contiguous** (768 B/token, clean unused-zero rows),
+i.e. Apple exports that vocab-table token-contiguous, not nested-tiled. This matches the standing
+finding that `coreml2hwx` G=1 layout ≠ the raster's 8×128 export layout. So the round-trip recovered
+*a* valid ANE tiling, but not necessarily the shipped embedding's.
+
+**Consequences / next options (pick per evidence):**
+1. **The embedding may be token-contiguous in the shipped assets too** — but then the original
+   `[V,D]` token-row raster sweeps (§0, 4.16 M offsets) would have found it, and they did not. So if
+   token-contiguous, it is ANE-resident only (`__MKERN`, 0-on-disk), not in any shipped file.
+2. **Extract Apple's ACTUAL export tiling**, not coreml2hwx's: the raster FFN/attention weights use
+   the validated 8×128 de-swizzle — test whether the embedding chunk uses 8×128 (or a
+   vocab-specific variant) by decoding candidate regions with 8×128 instead of the nested map.
+3. **Full nested-tiling raster scan**: score every chunk-aligned base in the raster with the nested
+   decoder + oracle (large compute; only worth it if option 2's quick 8×128 test also fails).
+4. **Trace the `gather_embeddings` `dsid` → `__MKERN` patch source** in the hwx (extend
+   `hwx_expert_dma.json`, which covered only the expert `__MKERN`s) to pin the resident buffer and
+   its raster source directly, sidestepping the tiling guess.
+
+Honest status: **Phase 1 (recover *a* validated ANE chunk tiling) succeeded; Phase 2 (locate the
+shipped embedding + confirm same tiling) is unmet** — the shipped tiling is unconfirmed and the data
+is unlocated. The kill-criterion (round-trip encoding may not match shipped bytes) is now live.
+
 ## 4. Phase 2 — Invert on the real data + validate (2–4 days)
 
 1. Apply `ane_embed_codec.decode` to the real embedding bytes located in Phase 0, per chunk, to
