@@ -124,3 +124,17 @@ compute op consumes which tiles** — i.e. parsing the `__TEXT` ANE program's op
 operand bindings. That is a bounded but genuine ANE-ISA RE effort (H16 ISA v17), the same class of work
 as the 3B's ANE-program analysis. Everything *else* on the pico weights is solved; this scheduling/graph
 decode is the gate to a complete per-tensor extraction.
+
+**ANE-ISA parse — started; both structural shortcuts ruled out (2026-07-17).**
+- `__TEXT` holds **1740 tile-aligned `__KERN_0` refs** (≈ the 2047 tiles) — the weight tiles *are*
+  addressed by the program. But the H16 descriptor format does **not** co-locate weight+activation+dims
+  in any ±16-word window (0 hits): operand bindings are encoded/indirected, not laid out contiguously.
+- **Sequential-packing disproven.** The naive per-layer order [Q,K,V,O,gate,up,down] gives elevated but
+  unclean R (2.1–4.6) at predicted boundaries, and the summed per-layer size (`0x5f0000` = 6.09 MB) is
+  **not** a real stride: a candidate anchor at `+0x2d0000` structures in only **1/24** layer strides.
+  So tensors carry per-tensor tile-padding / a non-sequential order, not a fixed stride.
+- **Diagnosis.** Weights are all present and decodable (R elevated everywhere in `__KERN`), but
+  **byte-exact per-tensor boundaries require decoding the ANE op stream's operand bindings** — real H16
+  ISA RE (instruction format + descriptor indirection), which the structural/statistical methods that
+  cracked the format, layout, and codec cannot shortcut. This is the honest boundary for a *complete*
+  per-tensor pico weight set. (The 3B reached the analogous point via `metadata.bin`, which pico lacks.)
