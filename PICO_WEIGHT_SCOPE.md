@@ -24,24 +24,34 @@ are or will be committed — only structure, method, and validation statistics.
 - **Scales located.** fp16 scale-table regions sit just before/within the weights
   (`~0x01c8_0000`, `~0x01f0_0000`, `~0x0218_0000`; fp16-in-(1e-4,1) fraction ≈ 0.94), consistent with
   per-channel/per-block scales `S`.
-- **Real weight structure CONFIRMED.** A rough decode (affine int4, Z=7.5, contiguous `[1024,1024]`)
-  at `0x46fa400` scores **R ≈ 5.0** on the scale-decontaminated low-rank structure test
-  (scrambled ≈ 1.4). So the region genuinely holds weights and they are decodable in principle.
+- **Real weight structure CONFIRMED + metric recalibrated.** A decode (affine int4, Z=7.5,
+  contiguous `[1024,1024]`) at `0x46fa400` scores **R ≈ 5.0** (scrambled ≈ 1.4). Crucially, **R≈5 is
+  the *clean* ceiling for affine int4**, not a partial result: a synthetic real low-rank weight
+  quantized to affine int4 tops out at R≈3.6, and pico scores *above* that. The "R = 8–11" target
+  from the 3B applies only to its *palettized* weights; affine-int4 weights structure-test lower by
+  construction (16 levels, per-channel scale stripped). So this tensor is **cleanly decoded**, and no
+  ANE de-swizzle is needed for it — a systematic tile search (contiguous, 8×128, 128×8, 32×32,
+  16×64, nested `p(o,i)`, both grid/tile orders) leaves **contiguous strictly best**, i.e. pico stores
+  weights ~row-major, unlike the tiled 3B.
+- **...but the region is not uniformly contiguous.** Sweeping `[256,512]` contiguous probes across
+  ~4 layers, only ~3 % structure-test (>3.5), at a **~6 MB (≈ one-layer) period**. So individual
+  tensors decode, but most offsets do not sub-block-probe as clean weights — the large FFN tensors
+  (`1024×3200`, `3200×1024`) and exact tensor starts are not resolved by blind probing. Per-tensor
+  boundaries (kernel-symbol table) are the gating unknown, not the codec.
 - **Architecture is fully known** (§`sec:pico`): 24 dense layers × {Q 1024×1024, K/V 1024×256,
   O 1024×1024, gate/up 1024×3200, down 3200×1024} ⇒ **~168 weight tensors** to locate + decode.
 
 ## 1. What remains (the actual work)
 
-1. **The exact ANE de-swizzle tiling.** R plateaus at ~5 (not the clean 8–11) across contiguous,
-   8×128, 128×8, 32×32, 16×64, and transpose — so the shipped tiling is none of these exactly. This
-   is the crux, and it is the *same wall the 3B hit*; it was solved there by compiling a
-   positional-probe weight of the exact shape through Apple's own `coreml2hwx` and reading back the
-   physical→logical byte permutation (paper §`sec:recover`). The same method applies here, per pico
-   shape (`1024×1024`, `1024×256`, `1024×3200`, `3200×1024`).
-2. **Per-tensor boundaries.** The hwx section table is not simple u32 (offset,size) pairs; the tensor
-   offsets must come from the ANE program's kernel-symbol table (the 3B parse exposes
-   `kernel_symbol_starts` / `segments` — reuse that parser) or from a structure-test base sweep per
-   shape.
+1. **Per-tensor boundaries — now the gating unknown** (tiling is *not* the crux for pico: contiguous
+   is strictly best, so no `coreml2hwx` de-swizzle hunt is needed). The hwx section table is not
+   simple u32 (offset,size) pairs; the 168 tensor offsets must come from the ANE program's
+   kernel-symbol table (the 3B parse in `afm_odix/hwx_expert_dma.json` exposes `kernel_symbol_starts`
+   / `segments` — reuse that parser) or a per-shape structure-test base sweep. With exact starts, each
+   `[Cout,Cin]` tensor decodes as contiguous affine int4 `(q−7.5)·S`.
+2. **Confirm the big FFN tensors.** The `[256,512]` sweep found clean spots only ~once per 6 MB
+   (≈ one layer); the `1024×3200` / `3200×1024` FFN tensors need to be probed at their true shape
+   (a sub-block of a wide matrix under-reads its structure), not as `[1024,1024]`.
 3. **Scale pairing.** Match each int4 tensor to its fp16 scale block (per-channel vs per-1024-block).
 4. **Validation = structure test only.** As with the 3B, **every per-layer activation is
    ANE-internal** (paper §`find:aneint`), so there is **no forward-level ground truth** for pico
