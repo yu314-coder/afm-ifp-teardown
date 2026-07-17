@@ -77,6 +77,27 @@ Do tasks 1–2 first as a **go/no-go**: if the `rt_op_map_nm_kernel_` ops decode
 graph-walking; if the framing resists, fall back to the coreml2hwx route (compile a probe of each pico
 shape through Apple's toolchain and match byte permutations, as the 3B did for its de-swizzle).
 
+### ★ BREAKTHROUGH (2026-07-18, multi-agent workflow + salvage): the boundaries are in the SYMBOL TABLE.
+The `rt_op` op-stream decode turned out to be unnecessary — the compiled hwx ships a **full symbol table**
+(`LC_SYMTAB`, 29991 syms) that **names every weight tensor**:
+- **854 weight tensors in `__kern_0`** (n_sect 8; +1858 in `__kern_1`, +596 in `__kern_2`), each named
+  `K<64-hex>_ne_<0..15>` — i.e. **16 tiles per tensor** at the **0x2080 stride** (the mystery `0x2080`
+  marker was the ANE tile stride all along). Plus `K<hash>_pallut` (palette LUTs, 148) and `K<hash>_actl`.
+- **Tile format**: `0x2080` = **128-byte header (per-tile fp16 scales — decodes as a smooth ramp) +
+  128×128 int4** (8192 B). Sym address → file offset via `va − 0x394d8000 + 0x22c4000` (kern0).
+- **Cross-check**: 854/854 kern0 tensor base offsets appear as KERN-relative u32 in the region-0 `__TEXT`
+  code (weights are addressed by segment-relative offset, per the dsid-relocation machinery); and `__INIT`
+  holds a 31-word (`0x7c`) descriptor array co-locating weight+activation pointers with dim-mask fields
+  (`0x1ff`,`0xff` = dim−1), 24-periodic (= 24 layers) — the shape source.
+- **Decode status**: decoding tensor 0 as 16×[128,128] int4 arranged into a grid structure-tests at
+  **R≈3.4** (elevated/real, not yet clean 5) — the exact intra-128×128 tile order + the 128 B header/scale
+  application remain. Remaining to a full set: (a) nail the intra-tile order (small bounded de-swizzle);
+  (b) group the 854 kern-pages into the 168 logical tensors via the `__INIT` dim descriptors / program
+  order. **This is now a bounded finish, not open ISA RE** — the symbol table supplies the boundaries the
+  op-stream decode was going to have to reconstruct.
+Credit: 11-agent Workflow `wf_c81abc39` (hit the session usage cap mid-run; findings salvaged from agent
+transcripts + validated in the main thread).
+
 ### Go/no-go RESULT (2026-07-17): the per-tensor map is in task 3, not task 2.
 The 108 `rt_op_map_nm_kernel_*` ops name **`KernelSymbolStart0/1/2`** (= the `__KERN_0/1/2` segments),
 each tied to a LoRA/seq **specialization variant** (`lora_32_extend_2048_8`, `…_ANE_region_0_0`, …).
