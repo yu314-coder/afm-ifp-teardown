@@ -94,9 +94,16 @@ recovered model is thus \emph{component-complete} in its linear weights, yet sta
 that the token embedding was never actually validated---the test used was vacuous---and that against a
 probe calibrated on a real 4-bit model ($+0.53$ for a genuine embedding) ${\approx}1.14$M candidate
 offsets across the entire weight file score $\le+0.047$, i.e.\ \textbf{the embedding is not a $[V,D]$
-table in the shipped weights at all}, leaving it ANE-baked. The boundary is an \emph{information}
-limit---absent ground truth and absent data---not remaining decode effort. All findings derive from read-only inspection; no code was executed on the models
-and no signing material was bypassed.
+table in the shipped weights at all}. It is instead CPU-side and host-provided: the small on-device
+models ship it as an \code{fp16}, $[8,1,1]$-interleaved \code{load\_\allowbreak embeddings/weights.\allowbreak bin}
+(\S\ref{find:embformat}), but the 3B ships no such file, and a privileged live-memory capture of the
+running inference process (\S\ref{find:dyncap}) holds only the quantized source, dequantized
+per-token. We do, however, recover the \emph{deployed} sparse-FFN shape ($10$ active $+\,4$ shared
+experts per layer, with physical tile addresses) from \code{metadata.\allowbreak bin} (\S\ref{find:deployedffn}).
+The boundary is thus an \emph{information} limit---the embedding and the un-pruned pruning list live
+outside the shipped package---not remaining decode effort. The static analysis is read-only; the
+sole dynamic step is a user-privileged \code{lldb} core dump of the user's own running model on their
+own hardware, and no signing material was bypassed.
 \end{abstract}
 
 \maketitle
@@ -637,10 +644,50 @@ weight file.} Separately, the only vocabulary-structured table in the package (i
 localized to $+0.777$ of a $0.78$ maximum by the zero-rows of untrained \code{<unused>} tokens,
 8-way nibble-interleaved, signed 4-bit) scores $+0.003$ and is therefore \emph{not} the embedding.
 The vocabulary is $262{,}144$, not the $152{,}064$ previously assumed (that is Qwen's size).
-The residual hypothesis is that the embedding is ANE-baked into \code{binary\_\allowbreak 0.hwx} or
-fused into \code{AFM\_\allowbreak fused\_\allowbreak interleaved\_\allowbreak embedding\_\allowbreak gather\_\allowbreak dequant\_\allowbreak reshape},
-consistent with Finding~\ref{find:aneint}; if so, a from-weights standalone is \emph{not
-reachable} from the shipped assets.
+Subsequent findings (\S\ref{find:embformat},~\S\ref{find:dyncap}) localize the table: it is
+CPU-side and host-provided, absent from every shipped 3B asset.
+\end{finding}
+
+\begin{finding}[the CPU embedding format, and the 3B ships no embedding file]\label{find:embformat}
+The mpsgraph performs no token-embedding lookup (its single \code{Gather} is the rotary
+positional one); the embedding is a CPU-side \code{odix} \code{load\_\allowbreak embeddings} op. Apple's
+\emph{small} on-device models ship this embedding openly as
+\code{model.\allowbreak bundle/\ldots/load\_\allowbreak embeddings/weights.\allowbreak bin}, whose \code{fragment.\allowbreak mil} declares the exact
+format: \textrm{fp16}, shape $[V,1,H]$, \code{interleave\_\allowbreak factors}$=[8,1,1]$, strides
+$[8H,8H,8]$, after a $64$-byte header---i.e. token $v$, channel $h$ at element
+$\lfloor v/8\rfloor\,8H + 8h + (v\bmod 8)$. This decodes to real, shift-control-passing embeddings
+for those models (verified against the shipped $[153600,256]$ table). \textbf{The 3B ships no such
+file}: no \code{load\_\allowbreak embeddings/weights.\allowbreak bin}, no \code{model.\allowbreak bundle}; it uses the 4-bit
+\code{odixpackage}. Applying the $[8,1,1]$ format to the 3B (raster and \code{odix}, all widths)
+peaks at a shift-\emph{failing} $+0.08$. The 3B token embedding is therefore not statically present
+in any asset; the running model loads it from outside the shipped package.
+\end{finding}
+
+\begin{finding}[dynamic capture localizes the live embedding]\label{find:dyncap}
+During inference the resident model lives in \code{TGOnDeviceInferenceProviderService} (RSS
+grows ${\approx}4$\,MB${\to}1.7$\,GB while a prompt runs), a system extension running as
+\code{\_\allowbreak modelmanagerd}. A privileged \code{lldb} core dump of that process (SIP disabled) is thus
+the only remaining route to the embedding. A full-memory core (${\approx}8$\,GB) contains the
+\code{c\_sparsity} vocabulary table but---across an exhaustive oracle scan (token-contiguous and
+$[8,1,1]$ at \textrm{fp16}/\textrm{int8}/4-bit)---no cleanly-scoring token embedding: the resident
+form is the quantized source, dequantized per-token by the fused gather rather than kept as a
+decoded $[V,H]$ table. Recovering it is a live-instrumentation problem, not a static one.
+\end{finding}
+
+\begin{finding}[the deployed sparse-FFN shape is recoverable from \code{metadata.bin}]\label{find:deployedffn}
+The sparse FFN has no per-constant palettized descriptor (it is IFP-fused); its deployed layout
+is in \code{metadata.\allowbreak bin}. The down-projection address table (marker \code{0x0600beef}, 24-byte
+records) holds $14{,}080$ tiles of $8{\times}1536$ 4-bit weight with physical addresses;
+$14{,}080/32 = 440$ tiles per sparse layer $\Rightarrow 3{,}520$ rows ${\approx}14$ experts, matching
+the shipped \code{ifp1\_\allowbreak r48} configuration ($10$ active $+\,4$ shared) to the byte. The gate/up
+table (\code{0x0a00b0ef}) holds $4{,}223$ records. So the deployed per-layer expert count and each
+tile's address are recovered; only the un-pruned \emph{superset} width (variable, in the interned
+symbol pool) remains, and it is not needed to run the shipped model. The MLIR constant names
+further fix the structure: FFN $=$ gate/up/down as
+\code{hidden\_\allowbreak transform\_\allowbreak linear\_\allowbreak 0}/\code{\_\allowbreak 1}/\code{output\_\allowbreak transform}; the sandwich
+norms are explicit plain constants in the export graph (folded to parameter-free \textrm{RMSNorm} at
+ANE-compile, so $\gamma{=}1$ at runtime), and attention splits into $23$ standard (full QKV) $+\,21$
+kv-reuse ($Q$-only) layers.
 \end{finding}
 
 \begin{finding}[full-forward ablation: two claims confirmed, the assembly blocker re-located]\label{find:ablate}
