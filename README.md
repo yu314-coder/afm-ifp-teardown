@@ -127,7 +127,7 @@ from-weights standalone forward may be **impossible from the shipped assets**.
 
 The hypothesis above is now resolved, differently for each model.
 
-- **Small model (`afmplus-v11.0-pico`, D=1024): recovered.** Its gather/dequant runs on the **host
+- **Small model (`afmplus-v11.0-pico`, D=1024): recovered.** Its architecture is now fully mapped from `program.odix` (static): **24 dense layers, D=1024, SwiGLU FFN 3200, GQA 16 Q / 4 KV heads (head-dim 64), RoPE, vocab 262144** — ≈295 M transformer params (the "300M" label), the speculative-decoding draft the runtime loads alongside the 3B. Its gather/dequant runs on the **host
   CPU**, so the dequantized `in_embeddings` is in host DRAM during a forward. A prompt of one token
   repeated ~1500× makes the resident buffer a long run of **byte-identical `[1024]` fp16 rows** — an
   unmistakable period-D signature — captured with a privileged `lldb` core (attach **by-PID** +

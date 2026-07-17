@@ -261,6 +261,22 @@ $32$ carrying a fused-QKV projection ($12$ dense $+\ 20$ sparse-standard) and $1
 a $Q$-only projection (KV-reuse)---matching \code{num\_\allowbreak layers}$=44$ with no forcing.
 \end{observation}
 
+\subsection{Draft model \code{afmplus-v11.\allowbreak 0-pico}}\label{sec:pico}
+The \code{instruct\_\allowbreak 300m} \code{base} asset (\code{metadata.\allowbreak json}: \code{model\_\allowbreak config:
+v11-pico}, \code{model\_\allowbreak type: ane}) is the speculative-decoding draft that Apple's
+\code{FoundationModels} runtime loads \emph{alongside} the 3B; it is the model our dynamic
+embedding capture (\S\ref{find:embrecover}) actually reads. Its \code{program.\allowbreak odix} op graph
+fully fixes the architecture with no forcing: \textbf{$24$ dense transformer layers} (indices
+$0$--$23$; \emph{no} \code{expert}/\code{IFP}/\code{sparse} markers appear), hidden size
+$D{=}1024$ (confirmed by the captured embedding row), grouped-query attention with
+\textbf{$16$ query heads $/\,4$ KV heads, head dim $64$} ($Q$ width $1024$, $K/V$ width $256$;
+some layers KV-reuse), interleaved RoPE, and a \textbf{dense SwiGLU} feed-forward of intermediate
+width $3200$ (\code{hidden\_\allowbreak transform\_\allowbreak linear\_\allowbreak 0}/\code{\_\allowbreak 1} gate/up $1024{\to}3200$,
+\code{output\_\allowbreak transform} $3200{\to}1024$). This is ${\approx}295$\,M transformer parameters,
+i.e.\ the ``300\,M'' label, with the $262{,}144$-row embedding tied/separate. Unlike the 3B, the
+pico embedding gather/dequant runs on the host CPU, which is precisely why its dequantized rows are
+host-capturable (\S\ref{find:embrecover}) while the 3B's are not (\S\ref{find:3bane}).
+
 \section{Weight Quantization}
 \begin{finding}\label{find:codec}
 For the IFP model, linear weights are \emph{LUT-palettized}: a 4-bit index into a 16-entry
