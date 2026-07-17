@@ -107,3 +107,36 @@ they are in the per-op operands of the compute graph (**task 3**), which require
 framing (task 1) + operand decode. NET: the cheap shortcut is exhausted; a complete per-tensor pico
 weight set genuinely needs the task-1/3 ISA framing+graph decode (the ~1–2 week engineering effort),
 or the coreml2hwx fallback per shape. This is the true floor of the pico weight work.
+
+---
+
+## ★ FINAL RESULT (2026-07-18): 168/168 located & decode-validated; composition unproven (MOSTLY)
+
+Full write-up: `/Volumes/D/fix/pico_shapes/PICO_WEIGHT_RESULT.md`. Map:
+`/Volumes/D/fix/pico_shapes/pico_weight_map.json` (169 entries = 168 tensors + 1 flagged partial unit).
+
+**Bottom line — MOSTLY.** All **168 logical tensors** (24 complete layers × 7) are **located** and every
+constituent block is **decode-validated as genuine affine-int4 weight data**, with an exact reproducible
+recipe. But the **byte-exact composition into `[Cout,Cin]` matrices is NOT proven**, and the 24 `down`
+projections use a palettized codec the uniform path can't score.
+
+- **Packing (validated):** 998 blocks in `__kern_0/1/2`, symtab-named `K<hash>_ne_<0..15>` (16 tiles ×
+  `0x2080`). Three block classes by tile stride: **N** (848, `0x2080`, 512×512 int4), **s** (50, `0x1080`,
+  1024×128, the 3200-col remainder), **L** (100, `0x6480`, palettized `down`). Periodic layer =
+  `[N×10][s][N×12][s][N×12][L×4]` = 40 blocks; int4 budget closes exactly at 12,451,840/layer. **24 full
+  layers (168 tensors, 960 blocks) + 1 trailing partial unit (38 blocks, 2 N short) = 998, zero dup.**
+- **Decode recipe:** symtab va → file off (`va−vmaddr+filebase`, SEG 8/9/10); 16 tiles/block, each 128 B
+  fp16-scale hdr + 128×128 int4; nibble→`(q−7.5)`, reshape+`.T`, `arrange` into grid, ×per-tile fp16
+  scale. `down` (L) uses the separately-cracked grouped-palettized codec, not this path.
+- **Validated:** every block offset resolves to a real symbol (0 misses); per-block R elevated above the
+  1.4 scramble floor; counts/int4 budget exact; per-layer byte-size signature matches from file-offset
+  gaps alone; `down` honestly flagged (`assembled_R: null`).
+- **NOT validated:** `assembled_R` (≈7–11) is a **concatenation artifact** — cross-role/cross-layer/
+  reversed/shifted controls score identically, so it proves blocks are real, not that they form that
+  projection. Intra-tensor geometry (block order, tile order, FFN 8×25 packing) is unresolved; the
+  **K/V `[1024,256]` shape is not structurally supported** (best arrangement is 4×4, never 8×2; several
+  hit ~1.4 under a rigid read); K-vs-V is export-order convention, not proof; the partial unit's role
+  layout is unresolved.
+- **Remaining floor (unchanged from §3):** pinning the exact per-tensor arrangement needs the ANE
+  op-stream operand bindings (task-1/3 ISA framing + graph decode) — an information wall, not a decode
+  gap. The weights are found; the geometry is not.

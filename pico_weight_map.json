@@ -1,0 +1,6539 @@
+[
+ {
+  "layer": 0,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x22c4000",
+   "0x22e4800",
+   "0x2305000",
+   "0x2325800"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.0732,
+  "assembled_R": 7.5095,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 0,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x2346000"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.8723,
+  "assembled_R": 2.8331,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 0,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x2366800"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.5586,
+  "assembled_R": 3.2737,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 0,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x2387100",
+   "0x23a7900",
+   "0x23c8100",
+   "0x23e8900"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8303,
+  "assembled_R": 7.2607,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 0,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x2409100",
+   "0x2419900",
+   "0x243a100",
+   "0x245a900",
+   "0x247b100",
+   "0x249b900",
+   "0x24bc100",
+   "0x24dc900",
+   "0x24fd100",
+   "0x251d900",
+   "0x253e100",
+   "0x255e900",
+   "0x257f100"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.0214,
+  "assembled_R": 11.2659,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 0,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x259f900",
+   "0x25b0100",
+   "0x25d0900",
+   "0x25f1100",
+   "0x2611900",
+   "0x2632100",
+   "0x2652900",
+   "0x2673100",
+   "0x2693900",
+   "0x26b4100",
+   "0x26d4900",
+   "0x26f5100",
+   "0x2715900"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.8073,
+  "assembled_R": 10.4378,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 0,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x2736180",
+   "0x279a980",
+   "0x27ff180",
+   "0x2863980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0994,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 1,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x28c8180",
+   "0x28e8980",
+   "0x2909180",
+   "0x2929980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.579,
+  "assembled_R": 8.1737,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 1,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x294a180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.2621,
+  "assembled_R": 3.1111,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 1,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x296a980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.7426,
+  "assembled_R": 3.3315,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 1,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x298b180",
+   "0x29ab980",
+   "0x29cc180",
+   "0x29ec980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.1223,
+  "assembled_R": 7.8856,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 1,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x2a0d180",
+   "0x2a1d980",
+   "0x2a3e180",
+   "0x2a5e980",
+   "0x2a7f180",
+   "0x2a9f980",
+   "0x2ac0180",
+   "0x2ae0980",
+   "0x2b01180",
+   "0x2b21980",
+   "0x2b42180",
+   "0x2b62980",
+   "0x2b83180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.0301,
+  "assembled_R": 11.0113,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 1,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x2ba3980",
+   "0x2bb4180",
+   "0x2bd4980",
+   "0x2bf5180",
+   "0x2c15980",
+   "0x2c36180",
+   "0x2c56980",
+   "0x2c77180",
+   "0x2c97980",
+   "0x2cb8180",
+   "0x2cd8980",
+   "0x2cf9180",
+   "0x2d19980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.8549,
+  "assembled_R": 10.4612,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 1,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x2d3a180",
+   "0x2d9e980",
+   "0x2e03180",
+   "0x2e67980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0894,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 2,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x2ecc180",
+   "0x2eec980",
+   "0x2f0d180",
+   "0x2f2d980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.3331,
+  "assembled_R": 8.0852,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 2,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x2f4e180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 2.9031,
+  "assembled_R": 2.7832,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 2,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x2f6e980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.2026,
+  "assembled_R": 4.0232,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 2,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x2f8f180",
+   "0x2faf980",
+   "0x2fd0180",
+   "0x2ff0980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.0304,
+  "assembled_R": 7.5425,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 2,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x3011180",
+   "0x3021980",
+   "0x3042180",
+   "0x3062980",
+   "0x3083180",
+   "0x30a3980",
+   "0x30c4180",
+   "0x30e4980",
+   "0x3105180",
+   "0x3125980",
+   "0x3146180",
+   "0x3166980",
+   "0x3187180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2015,
+  "assembled_R": 11.071,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 2,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x31a7980",
+   "0x31b8180",
+   "0x31d8980",
+   "0x31f9180",
+   "0x3219980",
+   "0x323a180",
+   "0x325a980",
+   "0x327b180",
+   "0x329b980",
+   "0x32bc180",
+   "0x32dc980",
+   "0x32fd180",
+   "0x331d980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7289,
+  "assembled_R": 10.5385,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 2,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x333e180",
+   "0x33a2980",
+   "0x3407180",
+   "0x346b980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0318,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 3,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x34d0180",
+   "0x34f0980",
+   "0x3511180",
+   "0x3531980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2863,
+  "assembled_R": 7.7221,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 3,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x3552180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.1124,
+  "assembled_R": 2.9453,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 3,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x3572980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.2338,
+  "assembled_R": 3.8429,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 3,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x3593180",
+   "0x35b3980",
+   "0x35d4180",
+   "0x35f4980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.1295,
+  "assembled_R": 7.8108,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 3,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x3615180",
+   "0x3625980",
+   "0x3646180",
+   "0x3666980",
+   "0x3687180",
+   "0x36a7980",
+   "0x36c8180",
+   "0x36e8980",
+   "0x3709180",
+   "0x3729980",
+   "0x374a180",
+   "0x376a980",
+   "0x378b180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2355,
+  "assembled_R": 11.1383,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 3,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x37ab980",
+   "0x37bc180",
+   "0x37dc980",
+   "0x37fd180",
+   "0x381d980",
+   "0x383e180",
+   "0x385e980",
+   "0x387f180",
+   "0x389f980",
+   "0x38c0180",
+   "0x38e0980",
+   "0x3901180",
+   "0x3921980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7344,
+  "assembled_R": 10.3472,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 3,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x3942180",
+   "0x39a6980",
+   "0x3a0b180",
+   "0x3a6f980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0649,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 4,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x3ad4180",
+   "0x3af4980",
+   "0x3b15180",
+   "0x3b35980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.1603,
+  "assembled_R": 7.9172,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 4,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x3b56180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.0753,
+  "assembled_R": 2.807,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 4,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x3b76980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.0978,
+  "assembled_R": 3.7981,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 4,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x3b97180",
+   "0x3bb7980",
+   "0x3bd8180",
+   "0x3bf8980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.0842,
+  "assembled_R": 7.7176,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 4,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x3c19180",
+   "0x3c29980",
+   "0x3c4a180",
+   "0x3c6a980",
+   "0x3c8b180",
+   "0x3cab980",
+   "0x3ccc180",
+   "0x3cec980",
+   "0x3d0d180",
+   "0x3d2d980",
+   "0x3d4e180",
+   "0x3d6e980",
+   "0x3d8f180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.3942,
+  "assembled_R": 11.5548,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 4,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x3daf980",
+   "0x3dc0180",
+   "0x3de0980",
+   "0x3e01180",
+   "0x3e21980",
+   "0x3e42180",
+   "0x3e62980",
+   "0x3e83180",
+   "0x3ea3980",
+   "0x3ec4180",
+   "0x3ee4980",
+   "0x3f05180",
+   "0x3f25980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7488,
+  "assembled_R": 9.9733,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 4,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x3f46180",
+   "0x3faa980",
+   "0x400f180",
+   "0x4073980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.4377,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 5,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x40d8180",
+   "0x40f8980",
+   "0x4119180",
+   "0x4139980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.5872,
+  "assembled_R": 8.2138,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 5,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x415a180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.196,
+  "assembled_R": 2.8809,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 5,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x417a980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.5003,
+  "assembled_R": 3.9057,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 5,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x419b180",
+   "0x41bb980",
+   "0x41dc180",
+   "0x41fc980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2174,
+  "assembled_R": 8.0978,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 5,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x421d180",
+   "0x422d980",
+   "0x424e180",
+   "0x426e980",
+   "0x428f180",
+   "0x42af980",
+   "0x42d0180",
+   "0x42f0980",
+   "0x4311180",
+   "0x4331980",
+   "0x4352180",
+   "0x4372980",
+   "0x4393180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2822,
+  "assembled_R": 11.6452,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 5,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x43b3980",
+   "0x43c4180",
+   "0x43e4980",
+   "0x4405180",
+   "0x4425980",
+   "0x4446180",
+   "0x4466980",
+   "0x4487180",
+   "0x44a7980",
+   "0x44c8180",
+   "0x44e8980",
+   "0x4509180",
+   "0x4529980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7317,
+  "assembled_R": 9.9706,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 5,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x454a180",
+   "0x45ae980",
+   "0x4613180",
+   "0x4677980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.1258,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 6,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x46dc180",
+   "0x46fc980",
+   "0x471d180",
+   "0x473d980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2641,
+  "assembled_R": 7.4993,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 6,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x475e180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.4082,
+  "assembled_R": 3.187,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 6,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x477e980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.8673,
+  "assembled_R": 3.6165,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 6,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x479f180",
+   "0x47bf980",
+   "0x47e0180",
+   "0x4800980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.008,
+  "assembled_R": 7.722,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 6,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x4821180",
+   "0x4831980",
+   "0x4852180",
+   "0x4872980",
+   "0x4893180",
+   "0x48b3980",
+   "0x48d4180",
+   "0x48f4980",
+   "0x4915180",
+   "0x4935980",
+   "0x4956180",
+   "0x4976980",
+   "0x4997180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2821,
+  "assembled_R": 11.3017,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 6,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x49b7980",
+   "0x49c8180",
+   "0x49e8980",
+   "0x4a09180",
+   "0x4a29980",
+   "0x4a4a180",
+   "0x4a6a980",
+   "0x4a8b180",
+   "0x4aab980",
+   "0x4acc180",
+   "0x4aec980",
+   "0x4b0d180",
+   "0x4b2d980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.586,
+  "assembled_R": 9.8375,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 6,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x4b4e180",
+   "0x4bb2980",
+   "0x4c17180",
+   "0x4c7b980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.6576,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 7,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x4ce0180",
+   "0x4d00980",
+   "0x4d21180",
+   "0x4d41980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.4136,
+  "assembled_R": 7.8429,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 7,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x4d62180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.2007,
+  "assembled_R": 2.9324,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 7,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x4d82980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.2219,
+  "assembled_R": 3.2216,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 7,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x4da3180",
+   "0x4dc3980",
+   "0x4de4180",
+   "0x4e04980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.0394,
+  "assembled_R": 8.0038,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 7,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x4e25180",
+   "0x4e35980",
+   "0x4e56180",
+   "0x4e76980",
+   "0x4e97180",
+   "0x4eb7980",
+   "0x4ed8180",
+   "0x4ef8980",
+   "0x4f19180",
+   "0x4f39980",
+   "0x4f5a180",
+   "0x4f7a980",
+   "0x4f9b180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2812,
+  "assembled_R": 11.62,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 7,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x4fbb980",
+   "0x4fcc180",
+   "0x4fec980",
+   "0x500d180",
+   "0x502d980",
+   "0x504e180",
+   "0x506e980",
+   "0x508f180",
+   "0x50af980",
+   "0x50d0180",
+   "0x50f0980",
+   "0x5111180",
+   "0x5131980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.8045,
+  "assembled_R": 8.8736,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 7,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x5152180",
+   "0x51b6980",
+   "0x521b180",
+   "0x527f980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 1.8362,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 8,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x52e4180",
+   "0x5304980",
+   "0x5325180",
+   "0x5345980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.1127,
+  "assembled_R": 7.4263,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 8,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x5366180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.3403,
+  "assembled_R": 3.1206,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 8,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x5386980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.7489,
+  "assembled_R": 3.7489,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 8,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x53a7180",
+   "0x53c7980",
+   "0x53e8180",
+   "0x5408980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.4991,
+  "assembled_R": 8.4686,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 8,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x5429180",
+   "0x5439980",
+   "0x545a180",
+   "0x547a980",
+   "0x549b180",
+   "0x54bb980",
+   "0x54dc180",
+   "0x54fc980",
+   "0x551d180",
+   "0x553d980",
+   "0x555e180",
+   "0x557e980",
+   "0x559f180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.304,
+  "assembled_R": 11.2499,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 8,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x55bf980",
+   "0x55d0180",
+   "0x55f0980",
+   "0x5611180",
+   "0x5631980",
+   "0x5652180",
+   "0x5672980",
+   "0x5693180",
+   "0x56b3980",
+   "0x56d4180",
+   "0x56f4980",
+   "0x5715180",
+   "0x5735980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7899,
+  "assembled_R": 10.0801,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 8,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x5756180",
+   "0x57ba980",
+   "0x581f180",
+   "0x5883980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.3826,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 9,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x58e8180",
+   "0x5908980",
+   "0x5929180",
+   "0x5949980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2453,
+  "assembled_R": 7.6382,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 9,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x596a180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.2555,
+  "assembled_R": 3.2555,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 9,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x598a980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.748,
+  "assembled_R": 4.748,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 9,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x59ab180",
+   "0x59cb980",
+   "0x59ec180",
+   "0x5a0c980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8479,
+  "assembled_R": 7.2601,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 9,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x5a2d180",
+   "0x5a3d980",
+   "0x5a5e180",
+   "0x5a7e980",
+   "0x5a9f180",
+   "0x5abf980",
+   "0x5ae0180",
+   "0x5b00980",
+   "0x5b21180",
+   "0x5b41980",
+   "0x5b62180",
+   "0x5b82980",
+   "0x5ba3180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1328,
+  "assembled_R": 11.1962,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 9,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x5bc3980",
+   "0x5bd4180",
+   "0x5bf4980",
+   "0x5c15180",
+   "0x5c35980",
+   "0x5c56180",
+   "0x5c76980",
+   "0x5c97180",
+   "0x5cb7980",
+   "0x5cd8180",
+   "0x5cf8980",
+   "0x5d19180",
+   "0x5d39980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7906,
+  "assembled_R": 10.2541,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 9,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x5d5a180",
+   "0x5dbe980",
+   "0x5e23180",
+   "0x5e87980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.3636,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 10,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x5eec180",
+   "0x5f0c980",
+   "0x5f2d180",
+   "0x5f4d980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2954,
+  "assembled_R": 7.8245,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 10,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x5f6e180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.2527,
+  "assembled_R": 2.0186,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 10,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x5f8e980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.4737,
+  "assembled_R": 4.0819,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 10,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x5faf180",
+   "0x5fcf980",
+   "0x5ff0180",
+   "0x6010980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2153,
+  "assembled_R": 7.9226,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 10,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x6031180",
+   "0x6041980",
+   "0x6062180",
+   "0x6082980",
+   "0x60a3180",
+   "0x60c3980",
+   "0x60e4180",
+   "0x6104980",
+   "0x6125180",
+   "0x6145980",
+   "0x6166180",
+   "0x6186980",
+   "0x61a7180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1192,
+  "assembled_R": 11.3231,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 10,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x61c7980",
+   "0x61d8180",
+   "0x61f8980",
+   "0x6219180",
+   "0x6239980",
+   "0x625a180",
+   "0x627a980",
+   "0x629b180",
+   "0x62bb980",
+   "0x62dc180",
+   "0x62fc980",
+   "0x631d180",
+   "0x633d980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9134,
+  "assembled_R": 10.1586,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 10,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x635e180",
+   "0x63c2980",
+   "0x6427180",
+   "0x648b980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.3973,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 11,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x64f0180",
+   "0x6510980",
+   "0x6531180",
+   "0x6551980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.301,
+  "assembled_R": 7.8994,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 11,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x6572180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.8622,
+  "assembled_R": 3.8622,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 11,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x6592980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.4089,
+  "assembled_R": 4.4089,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 11,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x65b3180",
+   "0x65d3980",
+   "0x65f4180",
+   "0x6614980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.5261,
+  "assembled_R": 8.8864,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 11,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x6635180",
+   "0x6645980",
+   "0x6666180",
+   "0x6686980",
+   "0x66a7180",
+   "0x66c7980",
+   "0x66e8180",
+   "0x6708980",
+   "0x6729180",
+   "0x6749980",
+   "0x676a180",
+   "0x678a980",
+   "0x67ab180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.278,
+  "assembled_R": 11.341,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 11,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x67cb980",
+   "0x67dc180",
+   "0x67fc980",
+   "0x681d180",
+   "0x683d980",
+   "0x685e180",
+   "0x687e980",
+   "0x689f180",
+   "0x68bf980",
+   "0x68e0180",
+   "0x6900980",
+   "0x6921180",
+   "0x6941980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.8671,
+  "assembled_R": 10.1706,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 11,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x6962180",
+   "0x69c6980",
+   "0x6a2b180",
+   "0x6a8f980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 1.9369,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 12,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x6af4180",
+   "0x6b14980",
+   "0x6b35180",
+   "0x6b55980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.4435,
+  "assembled_R": 8.1414,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 12,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x6b76180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.391,
+  "assembled_R": 2.7773,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 12,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x6b96980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.1866,
+  "assembled_R": 4.1129,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 12,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x6bb7180",
+   "0x6bd7980",
+   "0x6bf8180",
+   "0x6c18980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8884,
+  "assembled_R": 7.3316,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 12,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x6c39180",
+   "0x6c49980",
+   "0x6c6a180",
+   "0x6c8a980",
+   "0x6cab180",
+   "0x6ccb980",
+   "0x6cec180",
+   "0x6d0c980",
+   "0x6d2d180",
+   "0x6d4d980",
+   "0x6d6e180",
+   "0x6d8e980",
+   "0x6daf180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.163,
+  "assembled_R": 11.1383,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 12,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x6dcf980",
+   "0x6de0180",
+   "0x6e00980",
+   "0x6e21180",
+   "0x6e41980",
+   "0x6e62180",
+   "0x6e82980",
+   "0x6ea3180",
+   "0x6ec3980",
+   "0x6ee4180",
+   "0x6f04980",
+   "0x6f25180",
+   "0x6f45980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.8746,
+  "assembled_R": 10.5957,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 12,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x6f66180",
+   "0x6fca980",
+   "0x702f180",
+   "0x7093980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.7933,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 13,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x70f8180",
+   "0x7118980",
+   "0x7139180",
+   "0x7159980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.4264,
+  "assembled_R": 7.8813,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 13,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x717a180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.8609,
+  "assembled_R": 3.6197,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 13,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x719a980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.5329,
+  "assembled_R": 3.9466,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 13,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x71bb180",
+   "0x71db980",
+   "0x71fc180",
+   "0x721c980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.9081,
+  "assembled_R": 7.5768,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 13,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x723d180",
+   "0x724d980",
+   "0x726e180",
+   "0x728e980",
+   "0x72af180",
+   "0x72cf980",
+   "0x72f0180",
+   "0x7310980",
+   "0x7331180",
+   "0x7351980",
+   "0x7372180",
+   "0x7392980",
+   "0x73b3180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1737,
+  "assembled_R": 11.236,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 13,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x73d3980",
+   "0x73e4180",
+   "0x7404980",
+   "0x7425180",
+   "0x7445980",
+   "0x7466180",
+   "0x7486980",
+   "0x74a7180",
+   "0x74c7980",
+   "0x74e8180",
+   "0x7508980",
+   "0x7529180",
+   "0x7549980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9032,
+  "assembled_R": 10.0381,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 13,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x756a180",
+   "0x75ce980",
+   "0x7633180",
+   "0x7697980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.6095,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 14,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x76fc180",
+   "0x771c980",
+   "0x773d180",
+   "0x775d980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.255,
+  "assembled_R": 8.0258,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 14,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x777e180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.5269,
+  "assembled_R": 2.7327,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 14,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x779e980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.7758,
+  "assembled_R": 4.7758,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 14,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x77bf180",
+   "0x77df980",
+   "0x7800180",
+   "0x7820980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.5749,
+  "assembled_R": 6.8,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 14,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x7841180",
+   "0x7851980",
+   "0x7872180",
+   "0x7892980",
+   "0x78b3180",
+   "0x78d3980",
+   "0x78f4180",
+   "0x7914980",
+   "0x7935180",
+   "0x7955980",
+   "0x7976180",
+   "0x7996980",
+   "0x79b7180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1752,
+  "assembled_R": 10.9463,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 14,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x79d7980",
+   "0x79e8180",
+   "0x7a08980",
+   "0x7a29180",
+   "0x7a49980",
+   "0x7a6a180",
+   "0x7a8a980",
+   "0x7aab180",
+   "0x7acb980",
+   "0x7aec180",
+   "0x7b0c980",
+   "0x7b2d180",
+   "0x7b4d980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9024,
+  "assembled_R": 10.4991,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 14,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x7b6e180",
+   "0x7bd2980",
+   "0x7c37180",
+   "0x7c9b980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.1976,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 15,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x7d00180",
+   "0x7d20980",
+   "0x7d41180",
+   "0x7d61980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.5996,
+  "assembled_R": 8.7416,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 15,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x7d82180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.2786,
+  "assembled_R": 2.9538,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 15,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x7da2980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.7318,
+  "assembled_R": 4.5838,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 15,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x7dc3180",
+   "0x7de3980",
+   "0x7e04180",
+   "0x7e24980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8131,
+  "assembled_R": 7.2,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 15,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x7e45180",
+   "0x7e55980",
+   "0x7e76180",
+   "0x7e96980",
+   "0x7eb7180",
+   "0x7ed7980",
+   "0x7ef8180",
+   "0x7f18980",
+   "0x7f39180",
+   "0x7f59980",
+   "0x7f7a180",
+   "0x7f9a980",
+   "0x7fbb180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.3297,
+  "assembled_R": 11.2515,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 15,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x7fdb980",
+   "0x7fec180",
+   "0x800c980",
+   "0x802d180",
+   "0x804d980",
+   "0x806e180",
+   "0x808e980",
+   "0x80af180",
+   "0x80cf980",
+   "0x80f0180",
+   "0x8110980",
+   "0x8131180",
+   "0x8151980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.7527,
+  "assembled_R": 10.3981,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 15,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x8172180",
+   "0x81d6980",
+   "0x823b180",
+   "0x829f980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.3866,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 16,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x8304180",
+   "0x8324980",
+   "0x8345180",
+   "0x8365980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2503,
+  "assembled_R": 7.7848,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 16,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x8386180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.3103,
+  "assembled_R": 4.3103,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 16,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x83a6980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.5057,
+  "assembled_R": 4.5057,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 16,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x83c7180",
+   "0x83e7980",
+   "0x8408180",
+   "0x8428980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.6078,
+  "assembled_R": 6.8165,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 16,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x8449180",
+   "0x8459980",
+   "0x847a180",
+   "0x849a980",
+   "0x84bb180",
+   "0x84db980",
+   "0x84fc180",
+   "0x851c980",
+   "0x853d180",
+   "0x855d980",
+   "0x857e180",
+   "0x859e980",
+   "0x85bf180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.315,
+  "assembled_R": 11.2638,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 16,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x85df980",
+   "0x85f0180",
+   "0x8610980",
+   "0x8631180",
+   "0x8651980",
+   "0x8672180",
+   "0x8692980",
+   "0x86b3180",
+   "0x86d3980",
+   "0x86f4180",
+   "0x8714980",
+   "0x8735180",
+   "0x8755980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9309,
+  "assembled_R": 10.3347,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 16,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x8776180",
+   "0x87da980",
+   "0x883f180",
+   "0x88a3980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0781,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 17,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x8908180",
+   "0x8928980",
+   "0x8949180",
+   "0x8969980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.6915,
+  "assembled_R": 8.2054,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 17,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x898a180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.3305,
+  "assembled_R": 4.0849,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 17,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x89aa980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 5.1945,
+  "assembled_R": 5.1945,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 17,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x89cb180",
+   "0x89eb980",
+   "0x8a0c180",
+   "0x8a2c980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.7729,
+  "assembled_R": 7.1176,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 17,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x8a4d180",
+   "0x8a5d980",
+   "0x8a7e180",
+   "0x8a9e980",
+   "0x8abf180",
+   "0x8adf980",
+   "0x8b00180",
+   "0x8b20980",
+   "0x8b41180",
+   "0x8b61980",
+   "0x8b82180",
+   "0x8ba2980",
+   "0x8bc3180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.3421,
+  "assembled_R": 11.982,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 17,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x8be3980",
+   "0x8bf4180",
+   "0x8c14980",
+   "0x8c35180",
+   "0x8c55980",
+   "0x8c76180",
+   "0x8c96980",
+   "0x8cb7180",
+   "0x8cd7980",
+   "0x8cf8180",
+   "0x8d18980",
+   "0x8d39180",
+   "0x8d59980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9613,
+  "assembled_R": 10.9076,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 17,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x8d7a180",
+   "0x8dde980",
+   "0x8e43180",
+   "0x8ea7980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.1568,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 18,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x8f0c180",
+   "0x8f2c980",
+   "0x8f4d180",
+   "0x8f6d980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.8352,
+  "assembled_R": 8.5649,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 18,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x8f8e180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.5437,
+  "assembled_R": 4.1655,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 18,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x8fae980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 5.0705,
+  "assembled_R": 4.8091,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 18,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x8fcf180",
+   "0x8fef980",
+   "0x9010180",
+   "0x9030980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8962,
+  "assembled_R": 7.343,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 18,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x9051180",
+   "0x9061980",
+   "0x9082180",
+   "0x90a2980",
+   "0x90c3180",
+   "0x90e3980",
+   "0x9104180",
+   "0x9124980",
+   "0x9145180",
+   "0x9165980",
+   "0x9186180",
+   "0x91a6980",
+   "0x91c7180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2856,
+  "assembled_R": 11.4481,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 18,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x91e7980",
+   "0x91f8180",
+   "0x9218980",
+   "0x9239180",
+   "0x9259980",
+   "0x927a180",
+   "0x929a980",
+   "0x92bb180",
+   "0x92db980",
+   "0x92fc180",
+   "0x931c980",
+   "0x933d180",
+   "0x935d980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.8959,
+  "assembled_R": 10.7921,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 18,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x937e180",
+   "0x93e2980",
+   "0x9447180",
+   "0x94ab980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0158,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 19,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x9510180",
+   "0x9530980",
+   "0x9551180",
+   "0x9571980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.9586,
+  "assembled_R": 8.8413,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 19,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x9592180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.8662,
+  "assembled_R": 4.7703,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 19,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x95b2980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 5.537,
+  "assembled_R": 5.5358,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 19,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x95d3180",
+   "0x95f3980",
+   "0x9614180",
+   "0x9634980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.75,
+  "assembled_R": 7.2578,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 19,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x9655180",
+   "0x9665980",
+   "0x9686180",
+   "0x96a6980",
+   "0x96c7180",
+   "0x96e7980",
+   "0x9708180",
+   "0x9728980",
+   "0x9749180",
+   "0x9769980",
+   "0x978a180",
+   "0x97aa980",
+   "0x97cb180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.4489,
+  "assembled_R": 12.1268,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 19,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x97eb980",
+   "0x97fc180",
+   "0x981c980",
+   "0x983d180",
+   "0x985d980",
+   "0x987e180",
+   "0x989e980",
+   "0x98bf180",
+   "0x98df980",
+   "0x9900180",
+   "0x9920980",
+   "0x9941180",
+   "0x9961980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.0139,
+  "assembled_R": 10.5579,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 19,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x9982180",
+   "0x99e6980",
+   "0x9a4b180",
+   "0x9aaf980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.6153,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 20,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x9b14180",
+   "0x9b34980",
+   "0x9b55180",
+   "0x9b75980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.5726,
+  "assembled_R": 8.5262,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 20,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x9b96180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.238,
+  "assembled_R": 3.9837,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 20,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0x9bb6980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.7013,
+  "assembled_R": 4.5469,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 20,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0x9bd7180",
+   "0x9bf7980",
+   "0x9c18180",
+   "0x9c38980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8478,
+  "assembled_R": 7.4623,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 20,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x9c59180",
+   "0x9c69980",
+   "0x9c8a180",
+   "0x9caa980",
+   "0x9ccb180",
+   "0x9ceb980",
+   "0x9d0c180",
+   "0x9d2c980",
+   "0x9d4d180",
+   "0x9d6d980",
+   "0x9d8e180",
+   "0x9dae980",
+   "0x9dcf180"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1391,
+  "assembled_R": 11.0898,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 20,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0x9def980",
+   "0x9e00180",
+   "0x9e20980",
+   "0x9e41180",
+   "0x9e61980",
+   "0x9e82180",
+   "0x9ea2980",
+   "0x9ec3180",
+   "0x9ee3980",
+   "0x9f04180",
+   "0x9f24980",
+   "0x9f45180",
+   "0x9f65980"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9781,
+  "assembled_R": 10.4882,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 20,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0x9f86180",
+   "0x9fea980",
+   "0xa04f180",
+   "0xa0b3980"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 1.5081,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 21,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0xa118180",
+   "0xa138980",
+   "0xa159180",
+   "0xa179980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.4192,
+  "assembled_R": 8.3132,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 21,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0xa19a180"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.6841,
+  "assembled_R": 3.6108,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 21,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0xa1ba980"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_0"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.8482,
+  "assembled_R": 4.7005,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 21,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0xa1db180",
+   "0xa1fb980",
+   "0xa21c180",
+   "0xa23c980"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_0"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 3.8179,
+  "assembled_R": 7.3203,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 21,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0xa25d180",
+   "0xa26d980",
+   "0xa28e180",
+   "0xa2c0000",
+   "0xa2e0800",
+   "0xa301000",
+   "0xa321800",
+   "0xa342000",
+   "0xa362800",
+   "0xa383000",
+   "0xa3a3800",
+   "0xa3c4000",
+   "0xa3e4800"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_0",
+   "__kern_0",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1391,
+  "assembled_R": 10.9634,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 21,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0xa2ae980",
+   "0xa405000",
+   "0xa425800",
+   "0xa446000",
+   "0xa466800",
+   "0xa487000",
+   "0xa4a7800",
+   "0xa4c8000",
+   "0xa4e8800",
+   "0xa509000",
+   "0xa529800",
+   "0xa54a000",
+   "0xa56a800"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_0",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.1272,
+  "assembled_R": 10.4742,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 21,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0xa58b000",
+   "0xa5ef800",
+   "0xa654000",
+   "0xa6b8800"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 2.0141,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 22,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0xa71d000",
+   "0xa73d800",
+   "0xa75e000",
+   "0xa77e800"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.5098,
+  "assembled_R": 8.4734,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 22,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0xa79f000"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_1"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.7019,
+  "assembled_R": 3.5437,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 22,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0xa7bf800"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_1"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.9028,
+  "assembled_R": 4.5041,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 22,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0xa7e0000",
+   "0xa800800",
+   "0xa821000",
+   "0xa841800"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.025,
+  "assembled_R": 7.696,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 22,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0xa862000",
+   "0xa872800",
+   "0xa893000",
+   "0xa8b3800",
+   "0xa8d4000",
+   "0xa8f4800",
+   "0xa915000",
+   "0xa935800",
+   "0xa956000",
+   "0xa976800",
+   "0xa997000",
+   "0xa9b7800",
+   "0xa9d8000"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.2759,
+  "assembled_R": 11.6984,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 22,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0xa9f8800",
+   "0xaa09000",
+   "0xaa29800",
+   "0xaa4a000",
+   "0xaa6a800",
+   "0xaa8b000",
+   "0xaaab800",
+   "0xaacc000",
+   "0xaaec800",
+   "0xab0d000",
+   "0xab2d800",
+   "0xab4e000",
+   "0xab6e800"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 3.9203,
+  "assembled_R": 10.4874,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 22,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0xab8f000",
+   "0xabf3800",
+   "0xac58000",
+   "0xacbc800"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 1.4372,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 23,
+  "role": "Q",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0xad21000",
+   "0xad41800",
+   "0xad62000",
+   "0xad82800"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2051,
+  "assembled_R": 7.9222,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 23,
+  "role": "K",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0xada3000"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_1"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 3.3359,
+  "assembled_R": 3.1876,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 23,
+  "role": "V",
+  "shape": [
+   1024,
+   256
+  ],
+  "block_offsets": [
+   "0xadc3800"
+  ],
+  "block_classes": [
+   "N"
+  ],
+  "seg": [
+   "__kern_1"
+  ],
+  "n_blocks": 1,
+  "int4": 262144,
+  "int4_expected": 262144,
+  "int4_ok": true,
+  "mean_R": 4.2234,
+  "assembled_R": 3.8863,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 23,
+  "role": "O",
+  "shape": [
+   1024,
+   1024
+  ],
+  "block_offsets": [
+   "0xade4000",
+   "0xae04800",
+   "0xae25000",
+   "0xae45800"
+  ],
+  "block_classes": [
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 1048576,
+  "int4_expected": 1048576,
+  "int4_ok": true,
+  "mean_R": 4.2181,
+  "assembled_R": 7.8738,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 23,
+  "role": "gate",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0xae66000",
+   "0xae76800",
+   "0xae97000",
+   "0xaeb7800",
+   "0xaed8000",
+   "0xaef8800",
+   "0xaf19000",
+   "0xaf39800",
+   "0xaf5a000",
+   "0xaf7a800",
+   "0xaf9b000",
+   "0xafbb800",
+   "0xafdc000"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.3953,
+  "assembled_R": 11.7011,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 23,
+  "role": "up",
+  "shape": [
+   1024,
+   3200
+  ],
+  "block_offsets": [
+   "0xaffc800",
+   "0xb00d000",
+   "0xb02d800",
+   "0xb04e000",
+   "0xb06e800",
+   "0xb08f000",
+   "0xb0af800",
+   "0xb0d0000",
+   "0xb0f0800",
+   "0xb111000",
+   "0xb131800",
+   "0xb152000",
+   "0xb172800"
+  ],
+  "block_classes": [
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 13,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 4.0986,
+  "assembled_R": 11.0511,
+  "decode": "uniform int4"
+ },
+ {
+  "layer": 23,
+  "role": "down",
+  "shape": [
+   3200,
+   1024
+  ],
+  "block_offsets": [
+   "0xb193000",
+   "0xb1f7800",
+   "0xb25c000",
+   "0xb2c0800"
+  ],
+  "block_classes": [
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_1",
+   "__kern_1"
+  ],
+  "n_blocks": 4,
+  "int4": 3276800,
+  "int4_expected": 3276800,
+  "int4_ok": true,
+  "mean_R": 1.7381,
+  "assembled_R": null,
+  "decode": "codebook/grouped-palettized (naive R invalid; validated structurally)"
+ },
+ {
+  "layer": 24,
+  "role": "PARTIAL_UNIT",
+  "shape": null,
+  "note": "trailing overflow/head region; 2 N-blocks short of a full layer; s/N interleaving non-canonical; not split into Q/K/V/O",
+  "n_blocks": 38,
+  "block_offsets": [
+   "0xb327040",
+   "0xb347840",
+   "0xb35c4c0",
+   "0xb37ccc0",
+   "0xb39d4c0",
+   "0xb3bdcc0",
+   "0xb3de4c0",
+   "0xb3fecc0",
+   "0xb41f4c0",
+   "0xb43fcc0",
+   "0xb4604c0",
+   "0xb480cc0",
+   "0xb4a14c0",
+   "0xb4c1cc0",
+   "0xb4e24c0",
+   "0xb502cc0",
+   "0xb5234c0",
+   "0xb543cc0",
+   "0xb5644c0",
+   "0xb584cc0",
+   "0xb5a54c0",
+   "0xb5c5cc0",
+   "0xb5d64c0",
+   "0xb5f6cc0",
+   "0xb6174c0",
+   "0xb637cc0",
+   "0xb6584c0",
+   "0xb678cc0",
+   "0xb6994c0",
+   "0xb6b9cc0",
+   "0xb6da4c0",
+   "0xb6facc0",
+   "0xb71b4c0",
+   "0xb73bcc0",
+   "0xb75c4c0",
+   "0xb7c0cc0",
+   "0xb8254c0",
+   "0xb889cc0"
+  ],
+  "block_classes": [
+   "N",
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "s",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "N",
+   "L",
+   "L",
+   "L",
+   "L"
+  ],
+  "seg": [
+   "__kern_1",
+   "__kern_1",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2",
+   "__kern_2"
+  ],
+  "int4": 11927552,
+  "int4_full_layer": 12451840
+ }
+]
