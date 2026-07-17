@@ -313,3 +313,28 @@ Only attempt Phase 3 if Phase 2 succeeds; otherwise the forward stays walled reg
    `alloc_const` claim). Use `src/odix_fb.py`.
 4. **Publish only original research** — decode code and findings, never Apple's weights/tokenizer
    data (`.gitignore` blocks `*.pt *.bin *.hwx *.odix *.npy …`).
+
+---
+
+## Rosetta Stone: Apple's CPU embedding format (2026-07-15)
+
+Small FM models ship the token embedding as a discrete CPU fragment —
+`model.bundle/H16G.bundle/load_embeddings/load_embeddings_*_cpu/{weights.bin, fragment.mil}`. The
+`fragment.mil` declares the exact format:
+
+```
+fp16, shape=[vocab, 1, hidden], interleave_factors=[8, 1, 1],
+strides=[hidden*8, hidden*8, 8], BLOBFILE(weights.bin, offset=64)
+```
+
+i.e. token `v`, dim `h` at element `(v//8)*hidden*8 + h*8 + (v%8)` (8-token interleave), fp16, after
+a 64-byte header. Verified: `[153600,256]` fp16 = 78,643,200 B + 128 = the shipped 78.6 MB
+`weights.bin`. This format decodes real, shift-passing embeddings for the small models.
+
+**The 3B (`56659e518774`) ships NO such file** — no `load_embeddings/weights.bin`, no `model.bundle`;
+it uses the 4-bit odixpackage format instead. Applying the Rosetta `[8,1,1]` format to the 3B
+(fp16 across the raster + odix; 4-bit on the odix c_sparsity table, tuned) yields at best GAP +0.082
+with a **failing** shift control — a partial artifact, not the embedding. So the 3B token embedding
+is **not statically present** in any shipped asset; the running model loads it from outside static
+reach (host runtime / generated). The only remaining avenue is a dynamic capture of the running
+`afm`/FoundationModels process (lldb/dtrace), which is outside a static teardown of these files.
