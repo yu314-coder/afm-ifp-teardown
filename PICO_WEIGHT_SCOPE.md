@@ -98,4 +98,20 @@ are or will be committed — only structure, method, and validation statistics.
    stability (not per-layer correctness).
 4. Harvest the embedding subset needed for any demonstration (§`find:embrecover`).
 
-Status: **format + region + structure done; tiling + boundaries + scales + assembly remain.**
+Status: **DECODE effectively solved; boundary-enumeration + scales + assembly remain (mechanical).**
+
+### Decode conclusion (strong evidence)
+The pico weight decode is **contiguous affine int4** `(q − 7.5)·S` — *no ANE de-swizzle*, unlike the 3B:
+- R = 4.99 contiguous; every tile de-swizzle tried (8×128, 16×128, 32×128, nested `p(o,i)`, both
+  grid/tile orders, intra-64 KB-tile variants) is **≤ 5.09**, i.e. none beats contiguous.
+- Metric calibration: a synthetic real weight quantized to affine int4 ceilings at R ≈ 3.6; pico
+  scores *above* that (4.99), so R≈5 is the clean-decode signal for this quantization, not a partial.
+- 64 KB tiles hold 128×1024 int4 stacked row-major over output channels ⇒ the tile arrangement is
+  already contiguous, and the intra-tile order is ~row-major.
+
+So a per-tensor decode is: read `[Cout,Cin]` int4 contiguously from its `__KERN` offset, `(q−7.5)·S`.
+The only open mechanical items: (1) the 168 tensor **offsets** (order the 3053 `__TEXT` `__KERN_0`
+refs by program sequence, or structure-walk at each known shape), (2) **scale** pairing (fp16 blocks
+at `~0x01c8_0000`/`0x01f0_0000`/`0x0218_0000`), (3) decode + structure-validate + residual-stability
+assemble. No remaining information wall on the weights themselves — only the (ANE-internal-activation)
+limit on end-to-end token verification, identical to the 3B.
