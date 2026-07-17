@@ -50,6 +50,15 @@ are or will be committed — only structure, method, and validation statistics.
 - **Architecture is fully known** (§`sec:pico`): 24 dense layers × {Q 1024×1024, K/V 1024×256,
   O 1024×1024, gate/up 1024×3200, down 3200×1024} ⇒ **~168 weight tensors** to locate + decode.
 
+- **Layout is 64 KB-tiled (from the ANE program).** `__TEXT` contains **3053 distinct `__KERN_0`
+  vmaddr references** (weight-load operands); their dominant gap is **65536 bytes**, so the ANE
+  addresses weights in **64 KB tiles** (131072 int4 each). A `[1024,1024]` tensor = 8 tiles, a
+  `[1024,256]` = 2, an FFN `[1024,3200]` = 25. The contiguous R=5 is because tiles are ~row-major
+  internally; the residual gap to a fully clean decode is the **intra-64 KB-tile order** (a bounded
+  de-swizzle over 131072 elements) plus the tile→tensor assignment. The manifest/mpsgraph carry **no**
+  per-tensor offset table (only the file name), so the tile→tensor map must come from decoding the
+  `__TEXT` ANE weight-load ops (the 3053 refs, ordered by the program) or a structure-test walk.
+
 ## 1. What remains (the actual work)
 
 1. **Per-tensor boundaries — now the gating unknown** (tiling is *not* the crux for pico: contiguous
