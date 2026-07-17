@@ -13,9 +13,18 @@ are or will be committed — only structure, method, and validation statistics.
 
 ## 0. What is already cracked (this pass)
 
-- **Container.** `binary_0.hwx` is the ANE `hwx` format (magic `0xbeefface`, header
-  `fields=128,7,2`), 193.9 MB. First ~32 MB = ANE program + tables + LoRA-specialization sections
-  (`__lora_*`, `__arg0/1/5`); the weight-bearing region is **`~0x0228_0000` → EOF (~161 MB)**.
+- **Container + segment map.** `binary_0.hwx` is a Mach-O-like ANE image (magic `0xbeefface`,
+  cputype `0x80`=ANE, `ncmds=13`), 193.9 MB. Parsed `LC_SEGMENT_64` load commands give the exact
+  boundaries:
+  | segment | fileoff | filesize | role |
+  |---|---|---|---|
+  | `__TEXT` | `0x003d4000` | 32.4 MB | ANE program code |
+  | **`__KERN_0`** | **`0x022c4000`** | **134.2 MB** | **main weight blob** |
+  | `__KERN_1` | `0x0a2c0000` | 17.4 MB | weights |
+  | `__KERN_2` | `0x0b35c000` | 5.8 MB | weights |
+  | `__MKERN_0`,`__MKERN_9` | — | 0 (89 MB vmsize) | LoRA mutable kernels, runtime-patched |
+  `__KERN_{0,1,2}` total 157 MB ≈ 315 M int4 params ≈ pico's ~299 M transformer weights. The
+  structured tensor found below (`0x46fa400`) sits inside `__KERN_0`.
 - **Quant format = affine int4, NOT palettized.** The int4 nibble histogram over the weight region
   is **bell-shaped, centered at 7–8** (`[2117, 2992, 5421, …, 14176, …, 2531, 1099]`), the signature
   of `value = (q − Z)·S` with **Z ≈ 7.5** and Gaussian weights — *not* the 3B's peaked
