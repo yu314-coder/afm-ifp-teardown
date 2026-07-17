@@ -30,9 +30,24 @@ The binary type-table resisted, but the **constant NAMES carry the full structur
 - Activation tensor-type strings present: `tensor1x{1024,1536,2048,3072}x1x{8,16,64}f16`
   (hidden 1536, dense-FFN 3072, attn 2048/1024; the 8/16/64 = gather/seq batch).
 
-**STILL binary-locked:** per-sparse-layer expert `C_out` (the type-index→symbol-pool chain) and the
-per-constant data OFFSETS. Names give role+layer, not shape/offset. Deliverable:
-`odix_constant_inventory.json`.
+**Per-constant data OFFSETS + the DEPLOYED expert C_out — RECOVERED from `metadata.bin`
+(2026-07-15).** The sparse FFN has no per-constant palettized descriptor (it is IFP-fused), so its
+layout lives in `metadata.bin` (BBBB container), which we now parse fully:
+- **Down-proj address table** (marker `0x0600beef`, 24-byte records, **14,080** of them): each
+  record = one **8×1536** 4-bit down tile (6144 B data + 32 B header ⇒ 6176 stride) with its
+  physical tile address in col4/col5. 14,080 tiles × 8 rows = **112,640 rows** ⇒
+  **3,520 rows ≈ 14 experts per sparse layer** (14,080/32 = 440 tiles/layer).
+- **Gate/up address table** (marker `0x0a00b0ef`, **4,223** records, 10,272-B stride).
+- **This EQUALS the shipped `ifp1_r48` config: 10 active + 4 shared = 14 experts** ⇒ the metadata
+  encodes the DEPLOYED resident expert set, and — crucially — its **physical addresses**, so the
+  deployed sparse FFN is *gatherable* (tile addresses known) and, being ungated, summable without a
+  router map. Block structure (160-tile ≈ 5-expert / 320-tile ≈ 10-expert groups) mirrors the
+  active/shared split.
+
+So the DEPLOYED per-layer C_out (~14 experts) is recovered; only the un-pruned SUPERSET C_out (all
+routable experts, variable per layer) remains in the binary symbol pool — and that superset is NOT
+needed to run the shipped `ifp1_r48` model. Names give role+layer; `metadata.bin` gives the deployed
+shape+address. Deliverables: `odix_constant_inventory.json`.
 
 ## Solid (cracked)
 
