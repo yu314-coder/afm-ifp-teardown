@@ -1,5 +1,20 @@
 # Live-Instrumentation Route — Scope of Work
 
+> **OUTCOME (2026-07-17).** Approach A (CPU dequant interception) **succeeded for the small model**
+> and is **provably blocked for the 3B**.
+> - **pico (`afmplus-v11.0-pico`, D=1024): embedding RECOVERED + validated.** Its gather/dequant runs
+>   on the host CPU, so the dequantized `in_embeddings` is in host DRAM. A repeated-token prompt makes
+>   the buffer a run of byte-identical `[1024]` fp16 rows; a privileged **attach-by-PID** `lldb`
+>   `save-core` grabs it (`--waitfor` cannot resolve E5RT symbols or save a core). Recovered vectors
+>   pass the oracle: `dog~dogs=+0.648`, `king~kings=+0.664`. See `src/embedding_dynamic_capture.py`.
+> - **3B (`instruct_3b`, D=1536): ANE-LOCKED.** An 8.2 GB *full* core (wired + IOSurface pages) during a
+>   repeated-token 3B prefill has **0** D=1536 identical-row buffers (D=1024 pico buffers present in the
+>   same core). The 3B gather/dequant is ANE-delegated (`main-h16g-delegates`) → never reaches host DRAM.
+>   Only Approach C (ANE-internal IOSurface/H11ANE capture) could reach it.
+> - The static storage codec stays uncracked (rowmajor / `[8,1,1]` / ANE `[512,D]`-tile all = chance vs
+>   six ground-truth rows), so the dynamic *output* capture — not a static decode — is what worked.
+
+
 **Goal.** Recover the two pieces proven absent from all static and dynamic *memory-dump* analysis:
 (1) the **token embedding** `[262144, 1536]`, and (2) the **deployed expert weight bytes** (the
 resident set metadata.bin addresses but does not, in dump form, decode). Both are recoverable *in
