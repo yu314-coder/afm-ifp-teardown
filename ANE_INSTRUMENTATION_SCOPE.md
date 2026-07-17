@@ -26,21 +26,42 @@ only needed for goal (2), the resident FFN weights. **Do the CPU embedding route
 
 ---
 
-## 1. Hard prerequisites (all required before any approach)
+## 1. Prerequisites (go/no-go checked 2026-07-15 — lower than first feared)
 
-1. **Root.** The target runs as `_modelmanagerd`. Every attach/trace needs root. Passwordless sudo
-   is not configured here; the operator runs the privileged steps.
-2. **AMFI disabled.** `TGOnDeviceInferenceProviderService.appex` is a hardened system extension;
-   `get-task-allow=false` blocks `task_for_pid`/debugging even as root under normal AMFI. Boot once
-   from Recovery with `nvram boot-args="amfi_get_out_of_my_way=1"` (SIP is already off), reboot,
-   revert after. **Verify first:** without this, `lldb -p <pid>` as root will still fail with a
-   Mach `(os/kern) failure` / code-signing error. This is the single biggest gate.
-3. **The calibrated oracle.** Any recovered bytes are validated with the existing semantic probe
-   (`/tmp/control.py`, `/tmp/gguf.py`): a genuine embedding scores **+0.53**; controls (id-matched
-   baseline + shift) reject artifacts. Never accept a recovery without it.
+Inspection of `TGOnDeviceInferenceProviderService.appex` on this machine (macOS 27.0, build
+26A5378j; SIP already **disabled**):
+- code-signing **flags=0x0 (none)** — *not* hardened runtime; **no `get-task-allow`** entitlement,
+  **TeamIdentifier not set**. It **is** a platform binary (`Platform identifier=26`).
+- The earlier attach failure was a pure **user mismatch** ("as user euler … running as
+  `_modelmanagerd`"), i.e. a permission error, **not** an AMFI/code-signing error.
 
-If (2) proves impossible (some macOS builds resist the boot-arg), the route is blocked and the
-teardown stands at its current boundary. **Validate the prerequisite before investing in tooling.**
+**Revised prerequisite (in likely-sufficient order):**
+1. **Developer mode enabled** — currently *disabled*. `sudo DevToolsSecurity -enable` (one-time).
+   macOS blocks `task_for_pid` on other processes without it.
+2. **Root** — the target runs as `_modelmanagerd`; attach as `euler` fails on the user check.
+   `sudo lldb` covers this. (Passwordless sudo is not configured; the operator runs privileged
+   steps.)
+3. **AMFI boot-arg — probably NOT required.** Because the binary is neither hardened-runtime nor
+   `get-task-allow`-restricted, root + developer mode is expected to suffice. The platform-binary
+   status *might* still gate `task_for_pid`; the definitive test below decides. Only if it fails
+   with a Mach `(os/kern) failure`/codesign error do you fall back to booting once from Recovery
+   with `nvram boot-args="amfi_get_out_of_my_way=1"` (revert after).
+4. **The calibrated oracle.** Recovered bytes are validated with the semantic probe
+   (`/tmp/control.py`, `/tmp/gguf.py`): genuine embedding **+0.53**; id-matched + shift controls
+   reject artifacts. Never accept a recovery without it.
+
+**Definitive go/no-go (operator runs, needs sudo, during inference):**
+```
+sudo DevToolsSecurity -enable                      # once
+echo hi | /Volumes/D/fix/afm >/dev/null &          # warm the model
+PID=$(pgrep -f TGOnDeviceInferenceProviderService | head -1)
+sudo lldb -o "process attach --pid $PID" -o detach -o quit
+#  GO : "Process <pid> stopped"       -> root+devmode suffices; proceed to Approach A
+#  NO : "(os/kern) failure"/codesign  -> AMFI boot-arg needed (step 3), then retry
+```
+Confirmed relevant entitlements (context for later phases): `com.apple.private.ane.
+mappingMutableWeightsBuffer.allow` (the `__MKERN` weight patching), `H11ANEInDirectPathClient`
++ `IOSurfaceRootUserClient` (ANE/IOSurface access), asset access to `GenerativeModels`/`Overrides`.
 
 ---
 
