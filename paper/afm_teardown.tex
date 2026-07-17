@@ -96,9 +96,15 @@ probe calibrated on a real 4-bit model ($+0.53$ for a genuine embedding) ${\appr
 offsets across the entire weight file score $\le+0.047$, i.e.\ \textbf{the embedding is not a $[V,D]$
 table in the shipped weights at all}. It is instead CPU-side and host-provided: the small on-device
 models ship it as an \code{fp16}, $[8,1,1]$-interleaved \code{load\_\allowbreak embeddings/weights.\allowbreak bin}
-(\S\ref{find:embformat}), but the 3B ships no such file, and a privileged live-memory capture of the
-running inference process (\S\ref{find:dyncap}) holds only the quantized source, dequantized
-per-token. We do, however, recover the \emph{deployed} sparse-FFN shape ($10$ active $+\,4$ shared
+(\S\ref{find:embformat}), but the 3B ships no such file. A privileged live-memory capture then \emph{recovers} the
+small model's embedding directly (\S\ref{find:embrecover})---under a repeated-token probe its
+CPU-side gather/dequant output is a byte-identical row buffer, and the recovered vectors pass the
+oracle ($\cos(\code{\_dog},\code{\_dogs}){=}{+}0.65$, $\cos(\code{\_king},\code{\_kings}){=}{+}0.66$),
+the first genuine recovery of an AFM embedding---whereas the same capture proves the \emph{3B}
+embedding is \emph{ANE-locked}: it is absent from an $8.2$\,GB full-memory core (wired and
+\code{IOSurface} pages included) because the 3B's gather/dequant is ANE-delegated, so the
+dequantized vector never reaches host DRAM (\S\ref{find:3bane}). We do, however, recover the
+\emph{deployed} sparse-FFN shape ($10$ active $+\,4$ shared
 experts per layer, with physical tile addresses) from \code{metadata.\allowbreak bin} (\S\ref{find:deployedffn}).
 The boundary is thus an \emph{information} limit---the embedding and the un-pruned pruning list live
 outside the shipped package---not remaining decode effort. The static analysis is read-only; the
@@ -674,6 +680,40 @@ form is the quantized source, dequantized per-token by the fused gather rather t
 decoded $[V,H]$ table. Recovering it is a live-instrumentation problem, not a static one.
 \end{finding}
 
+\begin{finding}[dynamic host-capture recovers the CPU-side embedding---for the small model, not the 3B]\label{find:embrecover}
+The live-instrumentation problem of Finding~\ref{find:dyncap} is solved for the \emph{small} on-device
+model. The fused gather/dequant that produces \code{in\_\allowbreak embeddings} runs on the host CPU for
+\code{afmplus-v11.\allowbreak 0-pico} ($D{=}1024$), so its output \emph{is} in host DRAM during a forward.
+Driving the model with a prompt of one token repeated ${\sim}1500\times$ turns the resident
+embedding-input buffer into a long run of \emph{byte-identical} $[1024]$ \textrm{fp16} rows---an
+unmistakable period-$D$ signature---which a privileged \code{lldb} core recovers cleanly (attach
+by-\textsc{pid} and \code{save-core} while the buffer is live; \code{--waitfor} resolves neither the
+E5RT symbols nor \code{qMemoryRegionInfo}, so it cannot core). One row per token, scored on the
+calibrated orthographic-pair oracle of Finding~\ref{find:embed}, gives genuine, semantically-structured
+embeddings: $\cos(\code{\_dog},\code{\_dogs}){=}{+}0.648$ and
+$\cos(\code{\_king},\code{\_kings}){=}{+}0.664$ (orthographic), against cross-category pairs at
+${+}0.01$--$0.20$ and shared-plural non-pairs at ${+}0.32$---the signature of a real embedding space.
+This is the first genuine recovery of an AFM token embedding, obtained by reading the \emph{dequantized
+output} rather than the storage codec. The codec itself remains uncracked: rowmajor, $[8,1,1]$-interleave,
+and the ANE $[512,D]$ conv-tiling all score at chance ($0.57$--$0.64$ zero-pattern/sign agreement) even
+when fitted against six exact ground-truth vectors, so a \emph{full} static table is still out of reach
+and the complete table would have to be harvested token-by-token.
+\end{finding}
+
+\begin{finding}[the 3B embedding is ANE-locked: unreachable by host capture]\label{find:3bane}
+The same capture, pointed at the 3B, fails---and shows why. Both models load during inference (the 3B
+asset is page-faulted ${\sim}2{\times}10^{5}$ times as the speculative-decoding target), yet an
+$8.2$\,GB \emph{full}-style core---wired and \code{IOSurface}-mapped pages included---taken during a
+repeated-token 3B prefill contains \textbf{zero} $D{=}1536$ identical-row buffers at any threshold,
+while the $D{=}1024$ pico buffers are present in the same core. The distinction is architectural: the
+3B's embedding gather/dequant is ANE-delegated (the \code{main-h16g-delegates} path), so its
+dequantized vector never crosses to host DRAM, whereas the pico's runs on the host CPU and does. This
+confirms the Finding~\ref{find:embed} boundary from the \emph{runtime} side: the 3B token embedding is
+reachable neither statically (absent or codec-locked in every shipped asset) nor by host-memory capture.
+Only ANE-internal instrumentation (\code{IOSurface}/\code{H11ANE} DMA capture) could reach it---a
+distinct, kernel-adjacent effort.
+\end{finding}
+
 \begin{finding}[the deployed sparse-FFN shape is recoverable from \code{metadata.bin}]\label{find:deployedffn}
 The sparse FFN has no per-constant palettized descriptor (it is IFP-fused); its deployed layout
 is in \code{metadata.\allowbreak bin}. The down-projection address table (marker \code{0x0600beef}, 24-byte
@@ -734,7 +774,8 @@ engineering one.
 \toprule
 Established & Remaining (information-limited) \\
 \midrule
-All $9.862$\,B \emph{linear} weights; codec; de-swizzle    & \textbf{Token embedding: ABSENT} \\
+All $9.862$\,B \emph{linear} weights; codec; de-swizzle    & \textbf{3B embedding: ANE-locked} \\
+Embedding recovery \emph{method} (dyn.\ capture, pico)     & \quad(host-unreachable; \S\ref{find:3bane}) \\
 Attention path, all 44 layers; $\mathrm{NKV}{=}4$ settled & $56{,}064$-wide gate/up/down alignment \\
 Norms: $\gamma$ folded; $\mathrm{QK}$-norm recovered      & $\mathrm{QK}$-norm$\to$layer mapping \\
 Expert-selection map \emph{proven unnecessary}            & (all unvalidatable: activations \\

@@ -40,7 +40,8 @@ sum over experts), so no selection map is needed to run it.
 | **`metadata.bin` swizzler** | ✅ **decoded = two physical FFN address tables** (down-proj `0x0600beef`, gate/up `0x0a00b0ef`) |
 | **down-proj experts** | ✅ **codec cracked = same as gate/up** (the missing factor was the per-block scale, not a z-order) |
 | **Tokenizer vocab size** | ✅ **262,144** (Gemma-style 2^18) — confirmed 4 ways; the previously-used `152,064` is *Qwen's* size, a borrowed constant |
-| **Embedding + tied unembed** | 🔴 **NOT recovered — prior "✅ exact" was a vacuous test** (self-ranking uses the same matrix on both sides, so *any* matrix — incl. noise — self-ranks 0). A validated semantic probe (calibrated at **+0.53** on a real 4-bit LM embedding) scores **+0.003–0.047** on every candidate: ~1.14 M raster offsets swept → **not in the raster**; the only vocab-structured table in the package (in the odix) is **proven not to be it**. Leading hypothesis: **ANE-baked into `binary_0.hwx`** / fused into the gather op |
+| **Embedding (pico, small model)** | 🟢 **RECOVERED via dynamic capture + validated** — pico's gather/dequant runs on the host CPU, so a repeated-token `lldb` core exposes the byte-identical embedding-row buffer. Recovered vectors pass the oracle: `dog~dogs = +0.648`, `king~kings = +0.664` (vs cross-category +0.01–0.20). First genuine AFM embedding recovery. Storage codec still uncracked (all layouts = chance vs 6 ground-truth rows) |
+| **Embedding (3B, `instruct_3b`)** | 🔴 **ANE-locked** — not a `[V,D]` table in any shipped asset (~1.14 M offsets ≤ +0.047), **and** absent from an 8.2 GB full-memory core (0 `D=1536` buffers) because the 3B's gather/dequant is **ANE-delegated** (`main-h16g-delegates`) — the dequantized vector never reaches host DRAM. Reachable only by ANE-internal (IOSurface/H11ANE) instrumentation |
 | **Attention forward** (all 44 layers) | ✅ runs stably (bounded residual growth) |
 | **Coherent text generation** | 🔴 **blocked by an information limit** — assembled 44-layer forward carries real signal (3.6× chance) but the summed-FFN direction is mis-aligned, and per-layer activations are ANE-internal so it can't be validated/bisected — see below |
 | **Running the real model** | ✅ via `afm` (Apple's `FoundationModels` runtime) |
@@ -121,6 +122,30 @@ format) gives a clean instrument: **a real embedding scores +0.53; 4-bit costs o
 `AFM_fused_interleaved_embedding_gather_dequant_reshape`** — consistent with the proven fact that
 the ANE performs embedding lookup, all 44 layers, and logits entirely on-chip. If so, a
 from-weights standalone forward may be **impossible from the shipped assets**.
+
+### Update (2026-07-17): dynamic capture RECOVERS the small model's embedding; the 3B's is ANE-locked
+
+The hypothesis above is now resolved, differently for each model.
+
+- **Small model (`afmplus-v11.0-pico`, D=1024): recovered.** Its gather/dequant runs on the **host
+  CPU**, so the dequantized `in_embeddings` is in host DRAM during a forward. A prompt of one token
+  repeated ~1500× makes the resident buffer a long run of **byte-identical `[1024]` fp16 rows** — an
+  unmistakable period-D signature — captured with a privileged `lldb` core (attach **by-PID** +
+  `save-core`; `--waitfor` cannot resolve E5RT symbols or save a core). Recovered vectors pass the
+  oracle: **`dog~dogs = +0.648`, `king~kings = +0.664`**, cross-category +0.01–0.20 — a real embedding
+  space. **First genuine recovery of an AFM token embedding.** (The storage codec in `program.odix`
+  stays uncracked — rowmajor / `[8,1,1]` / ANE `[512,D]`-tile all score at chance vs six ground-truth
+  rows — so this reads the *dequantized output*, not the codec; a full table would need token-by-token
+  harvest.)
+- **3B (`instruct_3b`, D=1536): ANE-locked.** Both models load during inference, but an **8.2 GB
+  full-memory core** (wired + IOSurface pages) taken during a repeated-token 3B prefill has **zero
+  D=1536 identical-row buffers**, while the D=1024 pico buffers are present in the same core. The 3B's
+  gather/dequant is **ANE-delegated** (`main-h16g-delegates`), so its dequantized embedding never
+  crosses to host DRAM. Confirmed from both sides (static absence + dynamic host-capture absence);
+  reachable only by ANE-internal (IOSurface/H11ANE DMA) instrumentation.
+
+Never committed: any recovered embedding bytes (Apple's proprietary weights) — only the method and the
+validation statistics.
 
 *Methodological note.* Six plausible-looking results were falsified by controls during this pass,
 including an `alloc_const [flags,offset,size,dtype]` claim in `ODIX_DECOMPILER.md` that was a u32
