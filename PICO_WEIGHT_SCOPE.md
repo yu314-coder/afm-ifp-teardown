@@ -110,8 +110,17 @@ The pico weight decode is **contiguous affine int4** `(q − 7.5)·S` — *no AN
   already contiguous, and the intra-tile order is ~row-major.
 
 So a per-tensor decode is: read `[Cout,Cin]` int4 contiguously from its `__KERN` offset, `(q−7.5)·S`.
-The only open mechanical items: (1) the 168 tensor **offsets** (order the 3053 `__TEXT` `__KERN_0`
-refs by program sequence, or structure-walk at each known shape), (2) **scale** pairing (fp16 blocks
-at `~0x01c8_0000`/`0x01f0_0000`/`0x0218_0000`), (3) decode + structure-validate + residual-stability
-assemble. No remaining information wall on the weights themselves — only the (ANE-internal-activation)
-limit on end-to-end token verification, identical to the 3B.
+The only open items: (1) the 168 tensor **offsets**, (2) **scale** pairing (fp16 blocks at
+`~0x01c8_0000`/`0x01f0_0000`/`0x0218_0000`), (3) decode + structure-validate + assemble. No
+information wall on the weights themselves — only the (ANE-internal-activation) limit on end-to-end
+token verification, identical to the 3B.
+
+### The one remaining hard sub-problem: tile→tensor assignment
+Getting the 168 offsets is harder than a simple ordered scan. The `__TEXT` weight-load refs resolve to
+**250 two-tile (128 KB) loads in a scheduled, interleaved order** (tile indices jump 1141→1446→15→8…),
+not a sequential per-tensor walk; and a blind structure sweep is irregular (≈48 clean `[256,512]` spots,
+missing small K/V and wide FFN tensors). So the tile→tensor map must come from decoding **which ANE
+compute op consumes which tiles** — i.e. parsing the `__TEXT` ANE program's operation stream and its
+operand bindings. That is a bounded but genuine ANE-ISA RE effort (H16 ISA v17), the same class of work
+as the 3B's ANE-program analysis. Everything *else* on the pico weights is solved; this scheduling/graph
+decode is the gate to a complete per-tensor extraction.
