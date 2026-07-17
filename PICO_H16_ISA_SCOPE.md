@@ -76,3 +76,13 @@ Do tasks 1–2 first as a **go/no-go**: if the `rt_op_map_nm_kernel_` ops decode
 `(dsid → __KERN offset)` bindings that line up with the 1740 tile-aligned refs, the rest is mechanical
 graph-walking; if the framing resists, fall back to the coreml2hwx route (compile a probe of each pico
 shape through Apple's toolchain and match byte permutations, as the 3B did for its de-swizzle).
+
+### Go/no-go RESULT (2026-07-17): the per-tensor map is in task 3, not task 2.
+The 108 `rt_op_map_nm_kernel_*` ops name **`KernelSymbolStart0/1/2`** (= the `__KERN_0/1/2` segments),
+each tied to a LoRA/seq **specialization variant** (`lora_32_extend_2048_8`, `…_ANE_region_0_0`, …).
+So this layer maps whole `__KERN` **segments** to regions — information **already recovered** from the
+`LC_SEGMENT_64` table. The **per-tensor `__KERN` offsets are therefore not in the `rt_op_map` layer**;
+they are in the per-op operands of the compute graph (**task 3**), which requires the full command
+framing (task 1) + operand decode. NET: the cheap shortcut is exhausted; a complete per-tensor pico
+weight set genuinely needs the task-1/3 ISA framing+graph decode (the ~1–2 week engineering effort),
+or the coreml2hwx fallback per shape. This is the true floor of the pico weight work.
