@@ -5,6 +5,35 @@ recover the 396 FFN constants' `(offset, size, shape)` in `ifp_rasterized_weight
 reader is `src/odix_fb.py`. This documents how far it gets and the exact remaining gap, so the
 next effort starts here rather than from scratch.
 
+## Constant inventory CRACKED via MLIR names (2026-07-15) — the big schema win
+
+The binary type-table resisted, but the **constant NAMES carry the full structure** (MLIR
+`_wrapped_model_*` symbols in the string pool). Extracted `odix_constant_inventory.json`:
+
+- **FFN decomposition:** `feed_forward_hidden_transform_linear_0` = **gate**, `linear_1` = **up**,
+  `feed_forward_output_transform` = **down**. (Dense layers carry all three as explicit
+  `palettized_indices_raw`; sparse FFN is the IFP-fused form.)
+- **Attention:** `attention_qkv_transform_wrapped_fused_linear` (standard, full QKV) vs
+  `attention_q_transform` (kv-reuse, q-only), `attention_output_transform`, plus
+  `attention_qk_norm_{query,key}_norm_weight`.
+- **Sandwich norms are EXPLICIT PLAIN constants** (0 of 449 `*_norm_weight` names are palettized):
+  `{attention,feed_forward}_residual_connection_{pre_residual,post}_norm_weight` + qk-norms +
+  one `output_norm_weight`. NB: the odix is the *export* graph (pre-ANE-compile); the *compiled*
+  mpsgraph folds these to parameter-free RMSNorm (see the "norm folding" finding) — both are true,
+  and the plain γ DATA lives in the odix constant-data section.
+- **193 physical `palettized_indices_raw`** weight constants; **12 dense layers** carry explicit
+  gate/up/down.
+- **Segments:** `dense_segment` layer 0..11 (12); `sparse_segment_standard_segment` 0..22;
+  `sparse_segment_kv_reuse_segment` 0..20 (q-only). The attention partition is standard-vs-kv-reuse;
+  the FFN partition is dense-vs-sparse. (Exact reconciliation to `num_layers`=44 still has a
+  naming-variant counting ambiguity — segment layer indices may restart per adapter config.)
+- Activation tensor-type strings present: `tensor1x{1024,1536,2048,3072}x1x{8,16,64}f16`
+  (hidden 1536, dense-FFN 3072, attn 2048/1024; the 8/16/64 = gather/seq batch).
+
+**STILL binary-locked:** per-sparse-layer expert `C_out` (the type-index→symbol-pool chain) and the
+per-constant data OFFSETS. Names give role+layer, not shape/offset. Deliverable:
+`odix_constant_inventory.json`.
+
 ## Solid (cracked)
 
 - **Root table** (`ir_start + u32(ir_start)`): `field[1]`=12 module ops, `field[2]`=114 values,
