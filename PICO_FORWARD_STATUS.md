@@ -141,3 +141,31 @@ canonical-convention-fixed.
 today. It is a real upgrade from "runs but wholly unvalidated" (144/168 tensors reduced to gauge), but it is
 **not** a proven byte-exact arrangement and **not** a validated semantic forward. Both of those require the
 oracle above.
+
+---
+
+## UPDATE 2026-07-19 — the functional oracle proposed above was built, and it changes the verdict
+
+The plan in §"Capture pico's real output … and use it as a functional oracle" is now **done**, using
+the model's real final logits recovered from `pico_full.core` (262000 live tokens, `▁Paris` argmax
+14.58). Full results: **`PICO_FFN_ALIGNMENT_RESULT.md`**. Headlines:
+
+- **A single-token oracle is unsafe.** Ranking one token over a 262k vocab reported the default
+  arrangement as "top 1.8%, real signal"; correlation against the whole logit vector scores that same
+  arrangement at **−0.028** (noise). That earlier reading is **retracted**.
+- **The model's real input was wrong in every prior forward run.** Decoded from the `in_embeddings`
+  buffer: the prompt is **lowercased** and carries a **Gemma-style chat template**
+  (`▁the ▁capital ▁of ▁france ▁is <end_of_turn> \n <start_of_turn> model \n`). A **safety-classifier
+  turn** precedes it.
+- **Per-layer ground truth does not exist.** A scan of all ~4M aligned offsets of the 8.2 GB core
+  finds no residual-stream buffer; only the input embeddings and final logits leave the ANE.
+- **The failure is one block, and it is the FFN.** depth0 (embed→tied unembed) puts ▁Paris at
+  **2213/262000**; one block sends it to 206862. Attention with the corrected **dim-major head
+  layout** is ~neutral (4120); **FFN alone** destroys it (238883).
+- **gate/up are mutually consistent and want `tileT=True`** (neuron-norm coupling 0.34 → **0.58**,
+  validated positive control). **down aligns with neither** under any coarse assembly (all at the
+  random-permutation null), so the residual blocker is **intra-tile element order in the down blocks** —
+  the same class of wall the 3B's down-proj presented.
+
+Net effect on §1: still **PARTIAL**, but the open item is now *localized* to the down-projection
+neuron axis rather than the whole 998-block arrangement.
