@@ -37,28 +37,40 @@ def _va_ns_at(file_off):
     return None
 
 
-def decode_block(file_off, codebook=True):
-    """One 512x512 block: 16 codebook-decoded [128,128] tiles in row-major 4x4 (assumed convention)."""
-    va, ns = _va_ns_at(int(file_off, 16) if isinstance(file_off, str) else file_off)
-    T = picolib.tiles_cb(va, ns) if codebook else picolib.tiles(va, ns)
-    return picolib.arrange(T, 4, 4)  # 4x4 -> [512,512]
+def decode_block(file_off, cls, cout):
+    """One weight block -> [cout, ncols] column-slab.
+
+    A block is always 16 tiles; the tile geometry is set by its class and the grid by the tensor's Cout:
+      class 'N': stride 0x2080, tile [128,128] (8192B payload)  -> 16 tiles = 262144 int4
+      class 's': stride 0x1080, tile [128, 64] (4096B payload)  -> 16 tiles = 131072 int4  (the 3200 remainder)
+    Grid = (cout//128) rows x (16 // that) cols, so e.g. cout=1024 -> 8x2:
+      N -> [1024,256], s -> [1024,128].  Values: codebook[nibble] * per-8row-group scale.
+    """
+    d = picolib._d
+    base = int(file_off, 16) if isinstance(file_off, str) else file_off
+    # N: 16 scales (8-row groups). s: only 8 scales (16-row groups) -- reading 16 pulls garbage.
+    stride, payload, th, tw, nsc = (0x2080, 8192, 128, 128, 16) if cls == "N" else (0x1080, 4096, 128, 64, 8)
+    tiles = []
+    for t in range(16):
+        o = base + t * stride
+        cb = np.frombuffer(bytes(d[o:o + 32]), dtype=np.float16).astype(np.float32)              # codebook
+        sc = np.frombuffer(bytes(d[o + 64:o + 64 + nsc * 2]), dtype=np.float16).astype(np.float32)  # per-group scale
+        r = np.asarray(d[o + 128:o + 128 + payload])
+        nib = np.empty(payload * 2, np.uint8); nib[0::2] = r & 0xF; nib[1::2] = r >> 4
+        W = cb[nib].reshape(th, tw) * np.repeat(sc, max(1, th // len(sc)))[:th][:, None]
+        tiles.append(W)
+    gr = max(1, cout // th); gc = max(1, 16 // gr)
+    return np.block([[tiles[i * gc + j] for j in range(gc)] for i in range(gr)])
 
 
 def decode_tensor(entry):
-    """Assemble a logical tensor [Cout,Cin] from its ordered N-block offsets (row-major block grid).
-    Skips class-L (palettized down) blocks -- those need the down-codec, not this uniform path."""
-    offs = entry["block_offsets"]
-    cls = entry.get("block_classes", ["N"] * len(offs))
+    """Assemble a logical tensor [Cout,Cin] by hstacking its blocks' column-slabs in program order."""
     cout, cin = entry["shape"]
+    cls = entry.get("block_classes", ["N"] * len(entry["block_offsets"]))
     if "L" in cls:
-        return None  # down-proj: palettized, use the ANE down-codec separately
-    blocks = [decode_block(o) for o, c in zip(offs, cls) if c == "N"]
-    if not blocks:
-        return None
-    # row-major block grid sized to [cout, cin] (assumed convention)
-    bpr = max(1, cin // 512)
-    rows = [np.hstack(blocks[i:i + bpr]) for i in range(0, len(blocks), bpr)]
-    W = np.vstack(rows)
+        return None  # down-proj handled by decode_down (palettized codec)
+    slabs = [decode_block(o, c, cout) for o, c in zip(entry["block_offsets"], cls)]
+    W = np.hstack(slabs)
     return W[:cout, :cin]
 
 
