@@ -20,7 +20,7 @@ WHAT IS ASSUMED (a fixed ANE conv-layout convention, provably SV-invisible, NOT 
 Requires the shared library `picolib.py` (validated symtab parser + tile/codebook decode).
 """
 import sys, json, numpy as np
-sys.path.insert(0, "/Volumes/D/fix/pico_shapes")
+import os as _os; sys.path.insert(0, _os.path.dirname(__file__)); sys.path.insert(0, "/Volumes/D/fix/pico_shapes")
 import picolib  # noqa: E402
 
 # logical tensor -> ordered block offsets comes from the committed map
@@ -82,9 +82,11 @@ def decode_down(entry):
         for t in range(16):
             o = base + t * 0x6480
             cb = np.frombuffer(bytes(d[o:o + 32]), dtype=np.float16).astype(np.float32)
+            sc = np.frombuffer(bytes(d[o + 64:o + 96]), dtype=np.float16).astype(np.float32)  # per-group scale
             r = np.asarray(d[o + 128:o + 128 + 25600])
             nib = np.empty(51200, np.uint8); nib[0::2] = r & 0xF; nib[1::2] = r >> 4
-            tl.append(cb[nib].reshape(200, 256))
+            W = cb[nib].reshape(200, 256)
+            tl.append(W * np.repeat(sc, int(np.ceil(200 / len(sc))))[:200][:, None])  # per-row-group scale
         cols.append(np.vstack(tl))  # [3200,256]
     return np.hstack(cols)          # [3200,1024]
 
