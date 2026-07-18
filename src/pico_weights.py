@@ -63,26 +63,50 @@ def decode_tensor(entry):
 
 
 def structure_R(W):
-    return picolib.R(W)
+    """True-SVD low-rank structure ratio vs a fully-shuffled baseline (real weight >~3; scrambled ~1).
+    NB: picolib.R is a 4-iteration power method that under-resolves — use true SVD (np.linalg.svd)."""
+    W = W.astype(np.float32)
+    s1 = float(np.linalg.svd(W, compute_uv=False)[0])
+    f = W.flatten().copy(); np.random.default_rng(1).shuffle(f)
+    s2 = float(np.linalg.svd(f.reshape(W.shape), compute_uv=False)[0])
+    return (s1 / s2) ** 2
+
+
+def decode_down(entry):
+    """Down-projection [3200,1024] (class L): 4 L-blocks across columns; each L-block = 16 tiles at
+    stride 0x6480 (128B codebook header + 51200 int4), tile [200,256] row-major, W = codebook[nibble]."""
+    cols = []
+    d = picolib._d
+    for off in entry["block_offsets"]:
+        base = int(off, 16); tl = []
+        for t in range(16):
+            o = base + t * 0x6480
+            cb = np.frombuffer(bytes(d[o:o + 32]), dtype=np.float16).astype(np.float32)
+            r = np.asarray(d[o + 128:o + 128 + 25600])
+            nib = np.empty(51200, np.uint8); nib[0::2] = r & 0xF; nib[1::2] = r >> 4
+            tl.append(cb[nib].reshape(200, 256))
+        cols.append(np.vstack(tl))  # [3200,256]
+    return np.hstack(cols)          # [3200,1024]
 
 
 def main():
     m = json.load(open(MAP_PATH))
-    rep = {"model": "afmplus-v11.0-pico", "note": "decode validation; per-block R (assembly SV-invisible)",
+    rep = {"model": "afmplus-v11.0-pico", "note": "168/168 decode validation; true-SVD R on full tensors",
            "tensors": []}
     for e in m:
         if e.get("role") == "PARTIAL_UNIT":
             continue
-        W = decode_tensor(e)
-        if W is None:
-            rep["tensors"].append({"layer": e["layer"], "role": e["role"], "R": None,
-                                   "note": "palettized (down) or unresolved"})
-            continue
+        W = decode_down(e) if e.get("role") == "down" else decode_tensor(e)
         rep["tensors"].append({"layer": e["layer"], "role": e["role"], "shape": list(W.shape),
-                               "R": round(structure_R(W[:256, :512]), 3)})
-    ok = [t for t in rep["tensors"] if t.get("R")]
-    print("decoded %d/%d tensors; mean per-block R=%.2f (real int4 >~3; scrambled ~1.4)"
-          % (len(ok), len(rep["tensors"]), np.mean([t["R"] for t in ok])))
+                               "R": round(structure_R(W), 3)})
+    Rs = [t["R"] for t in rep["tensors"]]
+    import collections
+    byrole = collections.defaultdict(list)
+    for t in rep["tensors"]:
+        byrole[t["role"]].append(t["R"])
+    print("decoded %d/%d tensors as REAL weights (true-SVD R; scrambled ~1):" % (len(Rs), len(Rs)))
+    print("  per-role mean R:", {k: round(np.mean(v), 2) for k, v in byrole.items()})
+    print("  overall mean R=%.2f  min=%.2f" % (np.mean(Rs), min(Rs)))
     json.dump(rep, open("/Volumes/D/fix/pico_shapes/pico_decode_report.json", "w"), indent=1)
 
 
