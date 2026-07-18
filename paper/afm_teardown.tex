@@ -118,9 +118,12 @@ exact input from memory, showing it is \emph{lowercased}, Gemma-style \emph{chat
 preceded by a safety-classifier turn (\S\ref{find:template}); and we localize the reconstruction's
 defect to a \emph{single} sublayer---the feed-forward---with the embedding into its tied unembedding
 alone ranking the correct token in the top $0.84\%$, the attention head layout shown to be dim-major,
-and the down-projection's neuron order isolated as the sole remaining blocker by an oracle-free
-gauge-theoretic alignment test whose positive control fires at $+0.58$ while every coarse assembly of
-the down projection sits at the permutation null (\S\ref{find:picoffn}).
+and the down-projection's neuron order isolated as the sole remaining blocker (\S\ref{find:picoffn}).
+We then show that the weight-statistics instrument used to screen candidate assemblies---decisive on
+Qwen3-4B, where it recovers the neuron pairing at $91.5\%$---is \textbf{vacuous on AFM}: measured on
+Apple's own dense layers, whose z-order is already cracked and correct, it reads null
+(\S\ref{find:vacuous}). The ${\approx}380$ assemblies it rejected are therefore not excluded, and the
+remaining route to the down-projection is ANE ground truth rather than weight statistics.
 The static analysis is read-only; the
 sole dynamic step is a user-privileged \code{lldb} core dump of the user's own running model on their
 own hardware, and no signing material was bypassed.
@@ -841,17 +844,56 @@ u_{:,j}\rVert){=}{+}0.34$, rising to $\mathbf{+0.58}$ when the gate/up tiles are
 transpose is not a column permutation, so this is genuine evidence of tile orientation, not gauge).
 The down projection agrees with \emph{neither}, at $|r|\!\le\!0.13$ against a random-permutation null of
 $0.045$ ($99$th pct), across twelve-plus shape-valid assemblies spanning block order, tile order,
-row/column-major and both candidate tile geometries. A geometry error is visible independently: the
+row/column-major and both candidate tile geometries---but see Finding~\ref{find:vacuous}: this
+particular test turns out to have \emph{no power} on AFM, so the down result carries no weight. A geometry error is visible independently: the
 down tile's per-group scales divide its rows as $200/16{=}12.5$, not an integer, whereas the other two
 tile classes divide cleanly ($128/16{=}8$, $128/8{=}16$); reading the tile as $[256,200]$ restores a
 clean $16$ rows per group and implies the tiles assemble into the \emph{transpose}.
-Because the control succeeds while every \emph{coarse} permutation sits at the null, the residual
-misalignment is finer than tile permutation---\textbf{intra-tile element order}, the same class of
-obstacle the 3B down-projection presented. Finally, a scan of all ${\approx}4{\times}10^6$ aligned
+(The inference originally drawn here---that the residual misalignment must therefore be finer than
+tile permutation---is \textbf{withdrawn}; Finding~\ref{find:vacuous} shows the control was the wrong
+one.) Finally, a scan of all ${\approx}4{\times}10^6$ aligned
 offsets of the $8.2$\,GB core finds \textbf{no} residual-stream buffer (no contiguous run of correlated
 rows; every hit sits at the $128$-dimensional noise floor), so \code{pico} too exposes only its two
 endpoints---corroborating Finding~\ref{find:aneint} from the small model's side and confirming that the
 alignment cannot be bisected layer-by-layer.
+\end{finding}
+
+\begin{finding}[a weight-statistics alignment test that is decisive on Qwen is \emph{vacuous} on AFM]\label{find:vacuous}
+Finding~\ref{find:picoffn} rejected every candidate down-projection assembly using neuron-magnitude
+coupling. That instrument must itself be validated on a model whose alignment is \emph{known} correct,
+and on the right pair of matrices---\code{gate}$\sim$\code{up} validates coupling between two
+\emph{input-side} matrices, not the \code{down}$\leftrightarrow$\code{up} coupling the test relies on.
+On Qwen3-4B the premise is overwhelming: $\mathrm{corr}(\lVert d_j\rVert,\lVert u_j\rVert){=}{+}0.68$
+against a permutation null of $0.026$; the per-neuron read/write \emph{vectors} (both live in the same
+residual basis) satisfy $\overline{\cos}(u_j,d_j){=}{+}0.308$ versus ${+}0.0001$ shuffled ($1508\sigma$);
+nearest-neighbour matching recovers the neuron pairing at $\mathbf{91.5\%}$ (chance $0.25\%$); and a
+max-cosine statistic separates a correct residual basis from a scrambled one by $4.8\times$ while
+remaining exactly invariant to the neuron permutation.
+\emph{None of it transfers.} AFM's own 3B ships twelve dense SwiGLU layers whose down-projection
+z-order was cracked bit-exactly and forward-validated; measured on those---correct by
+construction---the same statistics read
+$\mathrm{corr}(\lVert d\rVert,\lVert u\rVert){=}{-}0.029,{+}0.029,{-}0.136,{-}0.049$ at layers
+$0,3,7,11$; $\overline{\cos}(u_j,d_j){\approx}{\pm}5{\times}10^{-4}$; and a max-cosine ratio of
+$1.00$--$1.02\times$. \textbf{AFM's feed-forward exhibits no down/up coupling and no read-write vector
+alignment even when correctly assembled}, so a candidate that fails the test has not been shown to be
+wrong: the instrument reads null on the true answer. Every such rejection in
+Finding~\ref{find:picoffn}---and the ${\approx}380$ assemblies swept, including all factorizations of
+the 3B's own z-order---is therefore \emph{vacuous}. What survives is the part with a replicated
+control: \code{gate}$\sim$\code{up} coupling is present in Apple's model too (${+}0.317$ at 3B dense
+layer $0$), so the \code{tileT} orientation result stands. Re-scoring the candidates against the
+captured logits---the one oracle with demonstrated power---leaves them all at $|r|\!<\!0.06$; the
+best-ranking candidate reaches \code{\_Paris} rank $848$, \emph{better} than the $2213$ depth-$0$
+baseline, at correlation ${+}0.0086$: the same single-token artifact retracted in
+Finding~\ref{find:picooracle}, not a result. Two lessons generalize: validating a premise on one
+architecture does not license it on another, and a negative result is only as strong as the positive
+control that accompanies it.
+Recovering the 3B z-order's algebraic form from the cracked $48{\times}256$ table does, however,
+generalize its two known instances ($16{\times}768$ is $\mathrm{NOG}{=}1$, $48{\times}256$ is
+$\mathrm{NOG}{=}3$): $\mathrm{slot}=og\,(16\,\mathrm{NCOL})+ig\,16+lo$ with output row
+$og\,16+lo$ and input column $ig\oplus1$---$16$ outputs fastest, then input columns under an
+interleave-factor-$2$ pair swap. For pico this forces $\mathrm{NOG}\cdot\mathrm{NCOL}{=}3200$, every
+factorization of which yields exactly the $64$ observed tiles; but since the z-order is
+tile-shape-relative it must be re-derived at pico's geometry by positional read, not transplanted.
 \end{finding}
 
 Table~\ref{tab:runnable} summarizes the revised boundary. The model is
