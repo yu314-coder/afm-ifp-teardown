@@ -135,3 +135,63 @@ of blocker the 3B's down-proj presented, which was only cracked bit-exactly usin
 truth for the grouped-palettized z-order. Recovering pico's requires analogous ground truth; it is
 not reachable by sweeping assemblies, and blind widening of the sweep is what produced the retracted
 result in §1.
+
+---
+
+## 8. UPDATE — the weight-statistics alignment test is VACUOUS on AFM (retracts §5's inference)
+
+§5 concluded that down's misalignment "is finer than tile permutation" because the neuron-coupling
+control fired (gate~up +0.58) while every coarse down assembly sat at the null. **That inference is
+withdrawn.** The control was the wrong one: gate~up validates coupling *between two input-side
+matrices*, not the down↔up coupling the test actually relies on.
+
+**The correct control.** AFM's 3B ships 12 dense SwiGLU layers whose down-projection z-order was
+already cracked bit-exactly and forward-validated. Measuring the discriminator on *those* — where the
+alignment is known correct — gives:
+
+| layer | corr(‖down_n‖,‖up_n‖) | corr(‖gate_n‖,‖up_n‖) | mean cos(up_j,down_j) | max-cos correct/scrambled |
+|---|---|---|---|---|
+| 0  | −0.029 | +0.317 | +0.0005 | 0.0840 / 0.0836 (1.00×) |
+| 3  | +0.029 | +0.381 | −0.0003 | 0.0833 / 0.0831 (1.00×) |
+| 7  | −0.136 | +0.048 | −0.0005 | 0.0844 / 0.0838 (1.01×) |
+| 11 | −0.049 | +0.085 | +0.0002 | 0.0852 / 0.0832 (1.02×) |
+
+**AFM's FFN exhibits no down↔up norm coupling and no read/write vector alignment at all**, even when
+correct. So a candidate assembly failing that test has not been shown to be wrong. Every "down is
+misaligned" result in §5 and in the shape/z-order sweeps below is therefore **vacuous** — the
+instrument reads null on the correct answer.
+
+This is worth stating plainly because the premise looked well-founded: on Qwen3-4B the same
+statistics are overwhelming — corr(‖down‖,‖up‖) = **+0.68** (null 0.026), mean cos(up_j,down_j) =
+**+0.308** vs +0.0001 shuffled (1508σ), 1-NN recovery of the neuron pairing **91.5%** correct
+(chance 0.25%), and a basis statistic separating 4.8× while remaining invariant to the neuron
+permutation. All of it transfers to Qwen and none of it to AFM. Validating a premise on one
+architecture does not license it on another.
+
+**What survives.** gate~up coupling replicates on Apple's own model (+0.317 at 3B dense L0), so §5's
+other conclusion — that gate/up want `tileT=True` (coupling 0.34 → 0.58) — still stands.
+
+**What was searched, and what that is now worth.** Under the corrected reading these sweeps bound
+nothing about correctness, only about the test: ~300 plain-reshape assemblies (tile shape × grid ×
+block partition, contiguous and interleaved), plus ~84 assemblies under the 3B's z-order.
+
+That z-order's algebraic form was recovered from the cracked 48×256 table and is worth recording,
+since it generalizes the two known cases (16×768 is NOG=1; 48×256 is NOG=3):
+
+```
+slot = og*(16*NCOL) + ig*16 + lo      r(out) = og*16 + lo      c(in) = ig ^ 1
+```
+i.e. 16 outputs fastest, then input columns with an interleave-factor-2 pair swap. For pico
+(51200 slots) this forces NOG*NCOL = 3200, and every such factorization yields exactly 64 tiles.
+
+**Functional re-test.** Re-scoring the candidates against the captured logits — the one oracle with
+demonstrated power — leaves them all at correlation ≈ 0 (best +0.06). One candidate reaches ▁Paris
+rank 848, *better* than the depth-0 baseline of 2213, but at correlation **+0.0086**: the same
+single-token rank artifact retracted in §1, not a result.
+
+**Where this leaves the blocker.** Unresolved, but the space of usable methods is now bounded:
+weight-statistics alignment tests are ruled out *by proof* on this architecture. The remaining route
+is ANE ground truth — the positional-read procedure that cracked the 3B's tile (compile probe convs
+whose 4-bit payload encodes base-16 digits of the row/column index, then read the bijection off the
+compiled `.hwx`), re-run with pico's exact conv configuration. The z-order is tile-shape-relative, so
+it must be derived at pico's geometry rather than transplanted.
