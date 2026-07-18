@@ -1,0 +1,11 @@
+{
+ "formula": "o = 16*bank + (slot%16); i = slot//16",
+ "banks": 16,
+ "out_per_bank": 16,
+ "Cin": 3200,
+ "Cout_per_task": 256,
+ "pair_swap": false,
+ "OCGSize": 4,
+ "ActiveNE": 4,
+ "verified": "perfect bijection over 256x3200"
+}
