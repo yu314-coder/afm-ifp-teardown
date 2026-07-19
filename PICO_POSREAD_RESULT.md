@@ -117,3 +117,66 @@ problem but two identified configuration deltas and one unverified neighbouring 
 
 Artifacts: [`src/pico_downproj_zorder.py`](src/pico_downproj_zorder.py) (decoder),
 [`pico_zorder_formula.json`](pico_zorder_formula.json). No Apple weights are committed.
+
+---
+
+## 7. The bank interpretation: structure confirmed, forward still broken
+
+The positional read forces a reinterpretation of the whole pico weight map, and the arithmetic closes
+exactly for every tensor — but it does **not** yet produce a working forward. Both halves of that
+sentence matter.
+
+### What the structure is
+
+A "tile" is not a 2D spatial tile. It is an ANE **coefficient bank** holding a fixed number of output
+channels across **all** inputs, with the block being one ANE task:
+
+```
+N bank: 16384 nibbles = 16 out x 1024 in, 16 scales
+s bank:  8192 nibbles =  8 out x 1024 in,  8 scales
+L bank: 51200 nibbles = 16 out x 3200 in, 16 scales
+```
+
+This resolves several things that no earlier tile-shape hypothesis could:
+
+- **gate/up's `sNNNNNNNNNNNN` block structure**: 12 N blocks x 16 banks x 16 out = 3072, plus one
+  s block x 16 banks x 8 out = 128, giving exactly **3200**.
+- **why the `s` class has 8 scales and not 16**: 8 output channels per bank.
+- **the L class's 16 scales**, which fit none of the 20 candidate tile shapes tried earlier.
+- Every one of the seven roles builds to exactly its expected output count
+  (Q 1024, K 256, V 256, O 1024, gate 3200, up 3200, down 1024), with consistent magnitudes
+  (rms 0.028-0.040).
+
+Independently, Apple's own working 3B decoder (`afm_odix/build_model_state.py`) applies the per-1024
+fp16 scale **in raw index order before de-swizzling**, then `W = v.reshape(rows//8, Ci, 8).transpose(0,2,1)`.
+For a pico N block (256 out x 1024 in = 262144 elements) that is 256 scale groups — exactly the
+16 banks x 16 scales present. The scale accounting closes.
+
+### What still does not work
+
+None of it moves the oracle. Scored against the captured logits (depth-0 baseline: corr +0.0380,
+rank 2213):
+
+| assembly | attention only | FFN only |
+|---|---|---|
+| bank interpretation, per-output-channel scale | +0.047 / 25710 | −0.017 / 201688 |
+| 3B scheme, per-1024 raw-order scale, IF=8 | +0.026 / 104288 | −0.003 / 38784 |
+| 3B scheme, IF=16 | +0.020 / 112132 | +0.027 / 199737 |
+| deswizzle sweep (OB in {8,16} x IB in {64,128}) | +0.025..+0.039 / 24307..177240 | −0.027..−0.010 / 129656..216880 |
+
+Every entry is inside the noise band (|corr| < 0.06). Notably the bank interpretation makes
+*attention* worse than the earlier spatial-tile decode did, which is evidence against the specific
+index mapping even though the counts close.
+
+### Honest assessment
+
+The structural claim (blocks = ANE tasks, tiles = coefficient banks, counts closing exactly for all
+seven roles) is well supported and independently corroborated by the hwx config. The **ordering**
+within that structure is not solved: the recovered z-order is bit-exact for the config compiled at
+`OutTrans=0` with a plain-LUT header, and pico ships `OutTrans=1` with a scale-bearing header.
+
+A methodological note on why this is slow to converge: the functional oracle exercises the *entire*
+block at once — embedding, seven tensors, head layout, norms, RoPE, residual — so any single wrong
+element masks every other correct one, and §3 established there is no per-layer ground truth to
+bisect against. Enumerating whole-block configurations is therefore a poor search strategy, and the
+results above should be read as a record of what was excluded, not as progress toward a fit.
