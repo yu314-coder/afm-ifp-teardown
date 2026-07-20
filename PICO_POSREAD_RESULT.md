@@ -216,3 +216,70 @@ Environment note: this required coremltools with working native extensions
 (`libmilstoragepython`); the Python 3.14 install is pure-Python and raises `BlobWriter not loaded`
 on mlprogram save. Python 3.12 with the `cp312-none-macosx_11_0_arm64` wheel works (note the symbol
 is `_BlobStorageWriter` in v9.0, not `_BlobWriter`).
+
+---
+
+## 9. An mlprogram-capable ANE compiler exists — and it was already in the toolchain
+
+§8 named the blocking capability as "an mlprogram-capable ANE compiler." One exists, it was sitting
+unbuilt in this repo's own toolchain, and it works.
+
+**`mil_to_hwx`** (`coreml_to_ane_hwx/mil/mil_to_hwx.cc`) links `ANECompiler.framework` and calls
+`ANECCompile(optionsDict, flagsDict, callback)` directly on a `model.mil`, bypassing the espresso
+`NeuralNetwork` loader that `coreml2hwx` is built on. `make -C mil` builds it. The working pipeline is:
+
+```
+MIL builder -> mlprogram -> ct.optimize.coreml.palettize_weights
+            -> xcrun coremlcompiler compile   (handles mlpackage, incl. palettized)
+            -> mil_to_hwx -a <arch>           (ANECCompile: MIL -> hwx)
+```
+
+Xcode's `coremlcompiler` compiles the palettized `.mlpackage` without complaint, and the emitted
+`model.mil` confirms the composition is exactly as predicted:
+`constexpr_lut_to_dense` + `constexpr_blockwise_shift_scale`.
+
+**What this compiler accepts** (each verified end-to-end to a parseable `.hwx`):
+
+| input | result |
+|---|---|
+| plain fp16 conv, iOS16 and iOS18 | compiles |
+| 4-bit LUT palettization, iOS16 and iOS18 | compiles |
+| `per_tensor`, `per_grouped_channel` (gs = 16, 32, 256) | compiles |
+| architectures `h16`, `h17`, `h18`, and **`h16g`** | compiles |
+| `per_grouped_channel` gs=1 | rejected |
+| **LUT + `enable_per_channel_scale`** | **`InvalidMILProgram`** |
+
+The arch whitelist that rejected `h16g` is `mil_to_hwx`'s own, not `ANECCompile`'s; patched behind an
+`ANE_ARCH_ANY` env var, `h16g` — the architecture named in AFM's own `main-h16g.odix` — compiles fine.
+
+**What it does not do.** No configuration produces pico's coefficient layout. Every successful
+compile emits `CoeffSize[0] = 0x6440` (64-byte header), never pico's `0x6480` (128-byte header) —
+across all granularities, both palettization opsets, and all four architectures including `h16g`.
+
+**The residual difference is now exact.** Comparing the probe's ANE task against pico's shipped
+down-proj task, the geometry and kernel config match completely (`InDim C=3200`, `OutDim C=256`,
+`OCGSize=4`, `ActiveNE=4`, `Fmt=FLOAT16 Pal=1(4bit) SparseEn=0 Reuse=0 SBS=0 Asym=0`). Exactly three
+`MacCfg` fields differ:
+
+```
+                 probe      pico
+OutTrans           0          1
+FillLowerNE        0          1
+SmSrc              1          0
+```
+
+`FillLowerNE=1` is a plausible mechanical explanation for the header being exactly **2 x 64** bytes:
+coefficients laid out to fill both NE halves would duplicate the per-bank header. This is a
+hypothesis, not a demonstrated fact.
+
+These are compiler-*chosen* fields, not exposed flags, so reaching them requires finding the graph
+that makes `ANECCompile` select them. Mirroring pico's actual structure — four `3200 -> 256` convs
+concatenated to 1024 and added to a residual, with and without a preceding SwiGLU
+(`sigmoid`/`mul`/`mul`) — compiles cleanly but still yields `OutTrans=0, FillLowerNE=0, 0x6440` on all
+four convs.
+
+**Status.** The capability gap named in §8 is closed: MIL can be compiled to hwx, and the positional
+read can be run through the mlprogram path. The *mode* gap is not: pico's shipped coefficient layout
+has not been reproduced, so the read still cannot be performed in the shipped mode. The open question
+is now narrow and concrete — what makes `ANECCompile` select `OutTrans=1` / `FillLowerNE=1` — rather
+than "find a different compiler."
