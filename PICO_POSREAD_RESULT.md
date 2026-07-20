@@ -283,3 +283,13 @@ read can be run through the mlprogram path. The *mode* gap is not: pico's shippe
 has not been reproduced, so the read still cannot be performed in the shipped mode. The open question
 is now narrow and concrete — what makes `ANECCompile` select `OutTrans=1` / `FillLowerNE=1` — rather
 than "find a different compiler."
+
+**Next lead (unexplored).** `mil_to_hwx` calls `ANECCompile` *in-process* with its own flags dict.
+The production path is different: loading a model on ANE through CoreML dispatches to
+`ANECompilerService.xpc` (`/System/Library/PrivateFrameworks/AppleNeuralEngine.framework/XPCServices/`),
+which was observed running after a `CPU_AND_NE` load and predict. That service compiles with Apple's
+own flag set — plausibly the one that selects `OutTrans=1`/`FillLowerNE=1`. Its output is not cached
+as a `.hwx` anywhere on disk (a system-wide scan of `/private/var` and `~/Library` found only
+simulator handwriting models), and `~/Library/Caches/com.apple.e5rt.e5bundlecache` stays empty for
+plain CoreML models, so capturing it would require intercepting the XPC transaction or the service's
+in-memory buffer rather than reading a file.
