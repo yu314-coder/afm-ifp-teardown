@@ -90,3 +90,49 @@ Next step: parse the 7000-byte `odix` flatbuffer header properly (the project al
 grammar) to obtain the tensor descriptor directly, rather than continuing to guess layouts.
 
 No Apple weights are committed; this records only offsets, statistics, and findings.
+
+## 6. Further layout attempts, and a methodological correction
+
+**The odix header carries the tensor descriptor.** Parsing the 7000-byte flatbuffer locates an
+`NDArray` descriptor near offset `0x1a30` holding, as consecutive int64s,
+`262144, 1, 2048` — i.e. shape **`[V, 1, D]`**, repeated again at `0x1ac8`. So `[V, D]` is confirmed
+as the *logical* shape. Nearby strings: `IOSurface`, `Context.alloc`, `$load_embeddings`.
+
+**A correction that invalidates part of the sweep above.** Cosine similarity is invariant under any
+*fixed permutation applied to both operands*. The orthographic oracle therefore **cannot see
+dimension order at all** — it only tests whether the right *set* of nibbles is grouped into a token's
+row. This was visible in the data: low-nibble-first and high-nibble-first produced byte-identical
+scores. So the many "layouts" tried above collapse to far fewer distinct hypotheses, and the failure
+means the **row grouping** is wrong, not the intra-row order.
+
+Additional groupings tested, all at noise: ANE plane format (`dim` blocked by CB = 8, 16, 32, 64, 128,
+both channel-fast and width-fast), and nibble-order x zero-point variants (signed two's-complement,
+zero-point-8, raw). Best DELTA across all of these: **+0.020** against a genuine +0.46.
+
+**A tokenizer-free discriminator** (distribution of cosines over 400 random token pairs, calibrated on
+pico) is more informative than the paired oracle here:
+
+| source | mean | std | p95 | max |
+|---|---|---|---|---|
+| **pico (known-good control)** | +0.340 | 0.121 | +0.550 | **+0.988** |
+| 8-lane interleave | +0.114 | 0.101 | +0.237 | **+0.936** |
+| DV transposed | −0.004 | 0.168 | +0.278 | +0.538 |
+| plane CB=8 | +0.002 | 0.155 | +0.269 | +0.471 |
+| VD row-major | +0.011 | 0.043 | +0.104 | +0.341 |
+
+The 8-lane interleave — pico's own layout family — is the only candidate reproducing the
+**near-duplicate rows** (max cosine 0.94, cf. pico 0.99) characteristic of a real embedding table;
+plain row-major has no near-duplicates at all, which is itself evidence against it.
+
+**But the id mapping does not match pico.** A nearest-neighbour agreement test over a 600-token
+sample (does each token have the same nearest neighbour in both files?) gives 0.50% for the 8-lane
+layout, 1.17% row-major, 0.33% transposed, against 0.17% chance — no meaningful agreement, and
+top-10 neighbour overlap of 0.8–3.9%. So either the row grouping is still wrong, or this asset uses a
+**different vocabulary ordering** than the `tok_vocab.json` derived from the IFP/pico models. The
+latter is plausible: `embedding_dim = 2048` identifies this as the *nano* dense backbone, a different
+model from the 1536-wide IFP sparse one.
+
+**Bottom line unchanged from §5, with the search space now better characterised:** the file is
+present, correctly sized, and plausibly encoded, and one layout family (8-lane interleave) shows the
+right statistical signature — but the embedding has not been read out, and it cannot be validated
+against a semantic oracle until the vocabulary ordering for this asset is established.
