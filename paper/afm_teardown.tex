@@ -109,6 +109,10 @@ embedding is \emph{ANE-locked}: it is absent from an $8.2$\,GB full-memory core 
 dequantized vector never reaches host DRAM (\S\ref{find:3bane}). We do, however, recover the
 \emph{deployed} sparse-FFN shape ($10$ active $+\,4$ shared
 experts per layer, with physical tile addresses) from \code{metadata.\allowbreak bin} (\S\ref{find:deployedffn}).
+\textbf{A later OS build supersedes the embedding result}: macOS~27.0 build \code{26A5378n} ships a
+dedicated \code{3B\_\allowbreak EMBEDDINGS} cryptex ($262144\times2048$, $4$-bit, exact to the byte), so the
+embedding is no longer absent from the package---the remaining obstacle is decoding its element
+layout, not recovering the data (\S\ref{find:embshipped}).
 The boundary is thus an \emph{information} limit---the embedding and the un-pruned pruning list live
 outside the shipped package---not remaining decode effort. Finally, on the $300$\,M draft model---the one case where the model's \emph{own} output logits are
 host-recoverable---we replace the single-token rank oracle with correlation against the full
@@ -745,6 +749,40 @@ confirms the Finding~\ref{find:embed} boundary from the \emph{runtime} side: the
 reachable neither statically (absent or codec-locked in every shipped asset) nor by host-memory capture.
 Only ANE-internal instrumentation (\code{IOSurface}/\code{H11ANE} DMA capture) could reach it---a
 distinct, kernel-adjacent effort.
+\end{finding}
+
+\begin{finding}[a later OS build \emph{ships} the 3B embedding, superseding the ANE-locked result]\label{find:embshipped}
+Findings~\ref{find:embed} and \ref{find:3bane} concluded that the 3B token embedding is absent from
+the shipped package and unreachable by host capture. That was correct for the catalog then on disk.
+It is \textbf{no longer true}. On macOS~27.0 build \code{26A5378n} the
+\code{GenerativeModels} asset catalog grows from $118$ to $124$ assets, and one of the new assets is
+\code{UC\_\allowbreak FM\_\allowbreak LANGUAGE\_\allowbreak INSTRUCT\_\allowbreak 3B\_\allowbreak EMBEDDINGS\_\allowbreak \ldots\_\allowbreak H16G\_\allowbreak IFP\_\allowbreak Cryptex.dmg}:
+a read-only cryptex (mountable without root) containing
+\code{metadata.\allowbreak json} $=$ \code{\{"vocab\_\allowbreak size": 262144, "embedding\_\allowbreak dim": 2048\}} and a
+$268{,}442{,}456$-byte \code{main-h16g.\allowbreak odix}. The arithmetic is exact:
+$262144\times2048$ elements at $4$ bits is $268{,}435{,}456$ bytes, leaving precisely $7000$ bytes of
+header, whose \code{odix} flatbuffer contains the string \code{\$load\_\allowbreak embeddings} and an
+\code{NDArray} descriptor holding the int64 triple $262144,1,2048$. The payload is linear
+\emph{signed} $4$-bit (nibble histogram symmetric about zero, code $8$ unused), with no codebook and
+no \textrm{fp16} scale array in the header.
+So the embedding gap changes category---from an \emph{information} limit (the data is not in the
+package) to a \emph{decode} problem (the data is in the package, in a layout not yet identified).
+The dimension $2048$ identifies this as the dense \code{nano} backbone rather than the $1536$-wide
+sparse IFP model.
+We have \emph{not} yet read it out. Roughly $35$ row-grouping hypotheses---row-major, transposed,
+$n$-way token interleave with lane skews, ANE plane formats, and the proven $8{\times}128$
+de-swizzle---all score at noise ($\le{+}0.02$) against a genuine ${+}0.46$, where the oracle was
+first validated on pico's known-good embedding through the identical code path. Two methodological
+points arise. First, cosine is invariant under a fixed permutation applied to \emph{both} operands,
+so this oracle cannot see dimension order at all---only which \emph{set} of nibbles forms a token's
+row; low- and high-nibble-first orderings score identically, which collapses many nominally distinct
+hypotheses into one. Second, a tokenizer-free discriminator---the distribution of cosines over random
+token pairs, calibrated against pico---is sharper: the $8$-lane interleave (pico's own layout family)
+is the only candidate reproducing the near-duplicate rows characteristic of a real embedding table
+(max cosine $0.94$ versus pico's $0.99$), while plain row-major exhibits none (max $0.34$). A
+nearest-neighbour agreement test against pico nonetheless sits at chance for every candidate, so
+either the grouping is still wrong or this asset uses a different vocabulary ordering---plausible,
+since it serves a different backbone.
 \end{finding}
 
 \begin{finding}[the deployed sparse-FFN shape is recoverable from \code{metadata.bin}]\label{find:deployedffn}
