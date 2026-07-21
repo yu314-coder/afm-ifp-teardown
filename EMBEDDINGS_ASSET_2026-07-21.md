@@ -190,3 +190,76 @@ For completeness, the rest of the 2026-07-21 delta (none carries an embedding ta
 Two notes. The `300M`-named asset is a **9M** model by its own `model_config`, so the filename refers
 to the target it drafts for, not its own size — worth remembering when sizing assets by name. And all
 four cryptexes are `H16G`, consistent with the architecture string that `ANECCompile` accepts.
+
+## 9. The row geometry is solved; an 8-lane structure is proven
+
+Three independent results pin most of the layout.
+
+### 9.1 Row size and id order, confirmed by a cross-model coincidence
+
+Hashing the payload at 32-byte granularity finds one block repeated **4608** times, and those
+occurrences are **contiguous at the very end of the file**: the final $4608\times32 = 147{,}456$ bytes
+are a single repeated pattern. That is exactly **144 rows of 1024 bytes**.
+
+Independently, pico's captured logit vector has exactly **144 masked entries** (live vocab 262000).
+The two numbers agree, which simultaneously establishes that
+
+- the row stride is **1024 bytes** = 2048 int4 values, i.e. one row per token;
+- token ids map to file position with the **identity** ordering (padding sits at the tail, ids
+  262000–262143);
+- the trailing 144 vocab slots are unused in both models.
+
+### 9.2 Duplicate-group analysis proves an 8-lane structure
+
+Hashing all 262144 contiguous rows yields 332 duplicate groups (unused/untrained vocab slots).
+Every large group is **100% pure in `id mod 8`** and only ~50% pure mod 16:
+
+```
+group   size   purity of (id mod M):  M=2     M=4     M=8     M=16    M=32
+  #0     748                          100%    100%    100%     50%     25%
+  #1     747                          100%    100%    100%     50%     25%
+  #2     733                          100%    100%    100%     50%     25%
+  #3     707                          100%    100%    100%     50%     25%
+```
+
+So tokens sharing a value only decode identically when they share `t mod 8`. The lane count is
+exactly **8**.
+
+### 9.3 The lane structure, confirmed functionally against pico
+
+Splitting the cross-model Gram test by lane gives an unambiguous result:
+
+| pairs | n | Gram corr vs pico |
+|---|---|---|
+| **same-lane** | 50428 | **+0.3069** |
+| **cross-lane** | 354122 | **−0.0188** |
+
+and every individual lane is positive on its own — +0.313, +0.432, +0.315, +0.175, +0.314, +0.422,
++0.241, +0.373 for lanes 0–7. That is eight independent confirmations. It also explains the whole
+earlier puzzle: only 1/8 of random pairs share a lane, so the pooled signal was diluted to +0.245,
+and the orthographic oracle's test pairs (which mostly straddle lanes) read exactly zero.
+
+**Reading a contiguous 1024-byte row therefore recovers a token's values in a form that is internally
+consistent within a lane but not comparable across lanes.**
+
+### 9.4 A correction
+
+An earlier check in this session claimed the four largest duplicate groups were byte-multiset
+identical, i.e. permutations of one vector. That used a Python `set()` comparison, which tests only
+which distinct byte values occur — nearly vacuous over 1024 bytes. Re-checked with true
+`bincount` multisets, they are **not** identical (e.g. code-0 counts 136/216/184/152), so those four
+groups are four *different* unused vectors that happen to be lane-pure. The lane result in §9.2–9.3
+is unaffected: it rests on group purity and the Gram split, not on that claim.
+
+### 9.5 Remaining gap
+
+Extracting with an explicit 8-lane interleave (`pos = (t/8)(8D) + 8j + (t mod 8)`) **removes the lane
+asymmetry** — same-lane +0.150, cross-lane +0.142, i.e. finally non-zero across lanes — but at a lower
+magnitude than contiguous same-lane (+0.307). A dim-blocked variant recovers +0.319 same-lane but
+leaves cross-lane at +0.018.
+
+So the true mapping is close to an 8-way interleave but not exactly the naive one: the correct form
+must reach ~+0.31 **uniformly** across both same- and cross-lane pairs. That is now a
+one-dimensional question — the relative dim-order between lanes — with a sharp, cheap objective
+(cross-lane Gram correlation, currently 0 for the right-magnitude layouts and +0.14 for the
+lane-symmetric one).
