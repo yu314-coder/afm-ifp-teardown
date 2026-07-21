@@ -174,3 +174,19 @@ dilution destroys the singular/plural signal long before it destroys bulk geomet
 **Where that leaves it.** The row grouping is近 but not exact; the residual error is finer than the
 lane structure. The Gram test is the right objective to continue optimizing against, since it has a
 measured null, ~8σ of headroom, and is robust to the confounds that made earlier instruments useless.
+
+## 8. The other five new assets
+
+For completeness, the rest of the 2026-07-21 delta (none carries an embedding table):
+
+| asset | size | contents |
+|---|---|---|
+| `..._3B_OPEN_ENDED_EXTRACT_DRAFT_..._SPARSE_...` | 52 MB | speculative-decoding draft, `draft_steps 5`, ctx 8192; 36 MB `program.odix` + 10 MB `binary_0.hwx` |
+| `..._300M_OPEN_ENDED_EXTRACT_DRAFT_...` | 58 MB | **despite the name, `model_config: v11-9m`** — a 9M draft, ctx 4096, `draft_steps 7`; 34 MB odix + 19 MB hwx |
+| `..._3B_LW_PLANNER_V1_DRAFT_..._SPARSE_...` | 60 MB | planner draft, `draft_steps 13`, ctx 8192; 35 MB odix + 20 MB hwx |
+| adapter `9b2eb1f8` | 110 MB | `lora_48` for `afmplus-v11.1-ifp`, `backbone_signature 0a6fe237…` |
+| adapter `e9e1cee8` | 28 MB | `lora_32`, `backbone_signature cc4da08e…` |
+
+Two notes. The `300M`-named asset is a **9M** model by its own `model_config`, so the filename refers
+to the target it drafts for, not its own size — worth remembering when sizing assets by name. And all
+four cryptexes are `H16G`, consistent with the architecture string that `ANECCompile` accepts.
