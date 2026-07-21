@@ -780,9 +780,17 @@ hypotheses into one. Second, a tokenizer-free discriminator---the distribution o
 token pairs, calibrated against pico---is sharper: the $8$-lane interleave (pico's own layout family)
 is the only candidate reproducing the near-duplicate rows characteristic of a real embedding table
 (max cosine $0.94$ versus pico's $0.99$), while plain row-major exhibits none (max $0.34$). A
-nearest-neighbour agreement test against pico nonetheless sits at chance for every candidate, so
-either the grouping is still wrong or this asset uses a different vocabulary ordering---plausible,
-since it serves a different backbone.
+nearest-neighbour agreement test against pico nonetheless sits at chance for every candidate.
+\emph{A caution on this class of evidence:} a cross-model Gram-matrix test appeared to give strong
+($\approx8\sigma$) support for one candidate, but that used a \emph{shuffled}-id null, which destroys
+the vocabulary's regional structure; under a \emph{shift} null---which preserves regions and destroys
+only token correspondence---the signal is flat (no peak at shift $0$; shift $8$ scores higher than the
+true ids), so it measured vocabulary-region membership, not token identity. What survives is purely
+structural and exact-match: the row stride is $1024$ bytes with identity id order (the file's final
+$147{,}456$ bytes are one repeated pattern $=$ exactly $144$ rows, and pico's captured logits have
+exactly $144$ masked entries), and hashing all $262144$ rows yields duplicate groups that are
+$100\%$ pure in $\mathrm{id}\bmod 8$ and only ${\approx}50\%$ pure $\bmod\,16$, establishing an
+\textbf{eight-lane} structure. No extraction yet yields correct per-token vectors.
 \end{finding}
 
 \begin{finding}[the deployed sparse-FFN shape is recoverable from \code{metadata.bin}]\label{find:deployedffn}
