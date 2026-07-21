@@ -293,3 +293,53 @@ as a `.hwx` anywhere on disk (a system-wide scan of `/private/var` and `~/Librar
 simulator handwriting models), and `~/Library/Caches/com.apple.e5rt.e5bundlecache` stays empty for
 plain CoreML models, so capturing it would require intercepting the XPC transaction or the service's
 in-memory buffer rather than reading a file.
+
+---
+
+## 10. The N-class positional read: ground truth for gate/up/Q/K/V/O
+
+The remaining confound named in §5 was that gate/up's arrangement was never independently verified,
+so a correct down-projection could not show through. That confound is now removed.
+
+**N tile arithmetic.** `CoeffSize 0x2080` = 8320 B = 128 B header + 8192 B payload = 16384 nibbles;
+16 banks × 16384 = 262144 = **256 out × 1024 in**. So the probe geometry is `Cin=1024, Cout=256` —
+the same shape family as the L read, and the `s` class is the same with 8 outputs per bank
+(`0x1080` = 128 + 4096 → 8192 nibbles, 16 banks × 8 out × 1024 in = 128 out).
+
+**Result: a second perfect bijection.** Five digit probes compiled at that geometry decode to
+**262144 distinct (o, i) pairs — a complete bijection** — and satisfy exactly the same closed form
+recovered at the L geometry:
+
+```
+o = 16*bank + (slot % 16)        i = slot // 16
+```
+
+verified EXACT for all 16 banks. So the intra-tile z-order is now ground-truth-established for
+**both** tile classes, i.e. for every weight role in the model.
+
+**But it still does not decode the shipped weights.** Applying it to pico's real tensors and scoring
+against the captured logits (depth-0 baseline: corr +0.0380, rank 2213):
+
+| configuration | attention-only, layer 0 |
+|---|---|
+| per-output scale, head-major | corr +0.047 / rank 25710 |
+| **no scale, head-major** | **corr +0.090** / rank 4484 |
+| per-input-group scale, head-major | corr +0.034 / rank 62921 |
+| any of the above, dim-major | corr −0.014…+0.022 |
+
+The `no scale` line is **not** the breakthrough it appears to be. Without the per-output scales the
+attention output has r.m.s. **672** against a residual of order 1, so it does not update the residual
+stream — it replaces it. That correlation therefore describes the attention output in isolation, not
+a functioning layer, and it does not survive: the full 24-layer forward diverges (r.m.s. 672 → 3923,
+correlation −0.03). With scales applied the magnitudes are sane (r.m.s. 1.45 at depth 1) but
+correlation still decays monotonically with depth (+0.048 → −0.019 by depth 24).
+
+**Interpretation.** The z-order is correct *for the configuration the probe compiles*
+(`OutTrans=0`, 64-byte plain-LUT header). pico ships `OutTrans=1` with a 128-byte scale-bearing
+header. Two independent geometries now give the same closed form and neither reproduces the shipped
+weights, which strengthens rather than weakens the conclusion of §8–§9: the residual difference is
+the **compiled mode**, not the tile geometry or the element order within a mode.
+
+The gate/up confound is eliminated — their arrangement is now known on the same footing as the
+down-projection — and the pico forward still does not work. That localises the remaining error to
+the mode difference alone.
