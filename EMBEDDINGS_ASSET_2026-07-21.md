@@ -136,3 +136,41 @@ model from the 1536-wide IFP sparse one.
 present, correctly sized, and plausibly encoded, and one layout family (8-lane interleave) shows the
 right statistical signature — but the embedding has not been read out, and it cannot be validated
 against a semantic oracle until the vocabulary ordering for this asset is established.
+
+## 7. A real but partial layout signal, via a cross-model Gram test
+
+The paired oracle is the wrong instrument for *searching* this space (§6: it cannot see dimension
+order). A **cross-model Gram-matrix test** is far better, and it is dimension-independent, so pico's
+$1024$-wide embedding can be used as a reference for a $2048$-wide one: take $N$ token ids, build each
+model's $N\times N$ cosine matrix, and correlate the off-diagonals. Same tokenizer plus correct row
+grouping should give a positive correlation; the null is a shuffled id mapping.
+
+**Result for the 8-lane interleave (pico's own layout family):**
+
+| test | value |
+|---|---|
+| raw Gram correlation vs pico | **+0.245** |
+| shuffled-id null (20 draws) | −0.003 ± 0.029 (max +0.046) |
+| after removing row-norm effects | +0.251 |
+| after removing row-norms **and** token-id distance | **+0.245** |
+| Spearman (rank-based, outlier-robust) | **+0.300** |
+| Pearson excluding the top 10% of \|values\| | +0.244 |
+
+That is roughly **8σ above the null** and survives every confound tested: row norms, token-id
+locality (pico's own id-locality is only +0.055, far too small to explain it), rank transformation,
+and outlier removal. By contrast plain row-major scores **+0.054** on the same test.
+
+So the tokenizer **is** shared with pico, the token ids **are** aligned, and the 8-lane interleave
+recovers genuine embedding structure. Other families tested and rejected on the same instrument:
+chunked-vocab interleave and chunked token-major (all ≤ +0.042, at null), and `lane = t mod L`
+dim-major for L = 2, 4, 16, 32, 64 (all below L = 8).
+
+**But it is not the full answer.** The same layout scores **−0.011** on the orthographic oracle, which
+does have power (+0.46 on pico). A layout that is entirely correct must score on both. The pattern —
+coarse cross-model geometry preserved, fine morphological structure absent — is what one expects if
+each recovered row is a **mixture** that includes the right token's elements alongside wrong ones:
+dilution destroys the singular/plural signal long before it destroys bulk geometry.
+
+**Where that leaves it.** The row grouping is近 but not exact; the residual error is finer than the
+lane structure. The Gram test is the right objective to continue optimizing against, since it has a
+measured null, ~8σ of headroom, and is robust to the confounds that made earlier instruments useless.
