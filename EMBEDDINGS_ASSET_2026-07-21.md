@@ -318,3 +318,45 @@ Purely structural results, derived from exact hashing and byte arithmetic rather
 **Not established:** that any extraction tried so far yields correct per-token vectors. The
 orthographic oracle — the one instrument here with a validated positive control (+0.46 on pico) —
 reads zero for every layout tested, and that remains the honest bottom line.
+
+## 12. A trustworthy model-internal oracle, and what it shows
+
+The retraction in §10 left no usable instrument: the paired oracle is blind to dimension order, and
+the cross-model Gram test measures vocabulary regions rather than token identity. This section builds
+one that has neither defect.
+
+**The instrument.** Harvest morphological pairs directly from the vocabulary — every token `▁X` whose
+inflection `▁Xs`, `▁Xes`, `▁Xing`, `▁Xed`, `▁Xly`, `▁Xer` is also a token — giving **17,674 pairs**.
+Score = mean cosine over pairs minus mean cosine over an id-matched control (each `a` paired with a
+different pair's `b`). This is **entirely internal to the 3B file**: no cross-model assumption, so the
+shift-null failure mode cannot arise. Validated on pico over the same pair set: **DELTA +0.3487**.
+
+**Result.** Splitting by lane:
+
+| rows | same-lane pairs | cross-lane pairs |
+|---|---|---|
+| **3B contiguous 1024 B** | **+0.1019** | −0.0085 |
+| pico (control) | +0.3487 | — |
+
+This is the **first trustworthy positive result** on this asset. It confirms model-internally, with a
+validated control and no cross-model step, that **contiguous 1024-byte rows carry real token data**,
+consistent within a lane and not across it.
+
+**What was ruled out for the cross-lane mapping**, all scored on 3000 cross-lane morphological pairs:
+
+- **Linear-assignment fitting** (Hungarian on the outer-product cost matrix from cross-lane pairs):
+  train DELTA +0.22–0.25 but **held-out test +0.003–0.008, identical to a shuffled-fit null**
+  (+0.003–0.006). With ~140 constraints against a 2048-element permutation this overfits completely.
+  Reported here because the train figure looks like success and is not.
+- **~40 structured permutation families** — `(p + L·c) mod 2048` for c ∈ {1…512}, `p XOR (L≪k)` for
+  k ∈ {0…10}, block rotations and in-block rotations for block sizes 8–256. Every one lands at
+  −0.007 to −0.008, i.e. exactly the identity's −0.0087. No simple structured lane permutation works.
+- **8-lane interleave extraction** (`pos = (t/8)(8D) + 8j + (t mod 8)`), the "mixture" hypothesis:
+  **destroys** the same-lane signal (+0.102 → +0.005) while lifting cross-lane only to +0.003. Lane
+  reversal and dim reversal behave identically. So the mixture model is excluded as well.
+
+**Status.** Contiguous rows are confirmed as token data with a real 8-lane boundary. The cross-lane
+dimension mapping is not a simple structured permutation, not recoverable by fitting from the
+available constraint count, and not explained by an interleave. The honest position is that the
+per-lane arrangement remains unknown, and that the next constraint should come from the ANE side
+(what the `load_embeddings` op's gather actually does) rather than from more statistical search.
