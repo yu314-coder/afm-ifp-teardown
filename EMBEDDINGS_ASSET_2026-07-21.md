@@ -263,3 +263,58 @@ must reach ~+0.31 **uniformly** across both same- and cross-lane pairs. That is 
 one-dimensional question — the relative dim-order between lanes — with a sharp, cheap objective
 (cross-lane Gram correlation, currently 0 for the right-magnitude layouts and +0.14 for the
 lane-symmetric one).
+
+## 10. RETRACTION: the Gram evidence was built on an inadequate null
+
+**§7's "~8σ" result and the token-alignment conclusion drawn from it are withdrawn.**
+
+The cross-model Gram test used a **shuffled-id** null. Shuffling destroys the vocabulary's *regional*
+structure completely, so any correlation arising from region membership — rather than token identity —
+appeared as signal. The correct null is a **shift**, which preserves regional structure while
+destroying token correspondence.
+
+Under a shift null the signal vanishes:
+
+```
+shift      0      8      16     64     256    1024   4096   16384  40000
+corr    +0.245 +0.308 +0.225 +0.204 +0.215 +0.245 +0.197 +0.093 +0.003
+```
+
+There is **no peak at shift 0** — shift 8 scores *higher* than the true ids — and the correlation
+decays smoothly with shift magnitude, reaching zero only at ~40000. That is exactly what regional
+structure produces: nearby ids occupy similar vocabulary regions (byte-fallback, control tokens,
+frequent words, rare words), and both models' cosine matrices reflect region membership.
+
+A directly equivalent check: substituting pico ids shifted by +1000 into the same-lane test scores
+**+0.3435** against **+0.3708** for the true ids — indistinguishable.
+
+**Consequences.** The following do NOT stand: that the tokenizer/id alignment was confirmed by Gram;
+that the 8-lane interleave "recovers genuine embedding structure"; that same-lane extraction yields
+correct token vectors. The +0.307 same-lane vs −0.019 cross-lane *asymmetry* is still a real
+observation, but it shows only that cross-lane rows are mutually incomparable — not that same-lane
+rows are correct.
+
+This is the fourth instrument in this project to produce a confident-looking result with an
+inadequate control (after "self-ranks 0", the single-token rank oracle, and the weight-statistics
+alignment test). The recurring failure mode is identical each time: **a null that destroys more
+structure than the hypothesis under test**. A null must differ from the hypothesis in exactly one
+respect — here, token identity — and preserve everything else.
+
+## 11. What actually stands
+
+Purely structural results, derived from exact hashing and byte arithmetic rather than statistics:
+
+1. **The asset exists and is correctly sized.** `262144 × 2048` int4 = 268,435,456 B, plus a 7000-byte
+   `odix` header naming `$load_embeddings`, with an `NDArray` descriptor of `[262144, 1, 2048]`.
+2. **Row stride is 1024 bytes and the id order is identity.** The file's final 147,456 bytes are one
+   repeated pattern = exactly 144 rows, and pico's captured logits have exactly 144 masked entries
+   (live vocab 262000). Two independent sources agreeing on 144 fixes both facts.
+3. **The payload is linear signed int4** — histogram symmetric about zero, code 8 (−8) unused, no
+   codebook, no fp16 scale array in the header.
+4. **There is an 8-lane structure.** Hashing all 262144 contiguous rows gives 332 duplicate groups;
+   every large group is **100% pure in `id mod 8`** and ~50% pure mod 16. This is exact-match
+   evidence, independent of any statistical oracle.
+
+**Not established:** that any extraction tried so far yields correct per-token vectors. The
+orthographic oracle — the one instrument here with a validated positive control (+0.46 on pico) —
+reads zero for every layout tested, and that remains the honest bottom line.
