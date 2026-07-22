@@ -343,3 +343,62 @@ the **compiled mode**, not the tile geometry or the element order within a mode.
 The gate/up confound is eliminated — their arrangement is now known on the same footing as the
 down-projection — and the pico forward still does not work. That localises the remaining error to
 the mode difference alone.
+
+---
+
+## 11. Round-trip validation of the decoder, and the definitive blocker
+
+Two clean results this pass settle where the pico forward actually stands.
+
+**The decoder is provably correct (for the compilable mode).** Compiling a conv with *known* random
+fp16 weights at `Cin=1024, Cout=256` (the mode `mil_to_hwx`/`coreml2hwx` can produce, `OutTrans=0`,
+64-byte plain-LUT header) and decoding its `__kern_0` stream with the recovered z-order gives:
+
+```
+codebook[nibble] decode, no scale:   correlation 0.981 vs true weights
+```
+
+0.981 is the 4-bit palettization floor — the z-order and codebook decode are **exact up to
+quantization**. (Applying a "scale" from bytes [64:96] here drops it to 0.51, because this compiled
+mode has no scale table there; that is a property of the *mode*, not a decoder error.)
+
+**The scale location is confirmed for shipped tiles.** pico's real `0x6480` headers carry the
+codebook at fp16[0:16] and a genuine per-output scale at **fp16[32:48]** (= bytes [64:96]): Q reads
+0.089–0.257, down reads 0.099–0.443, and the `s` class has exactly 8 plausible values there
+(matching 8 outputs/bank) before garbage. The decoder already reads this slice. So for shipped
+weights the decode is `codebook[nibble] · scale[output]` with `o = 16·bank + slot%16, i = slot//16`,
+and every component of that is now independently validated.
+
+**Therefore the forward's failure is not the decoder.** With the decode confirmed, the residual gap
+is the one difference that remains between the probe and the shipped tiles: **the shipped down-proj
+runs `OutTrans=1`** (four consecutive `3200→256` conv tasks fed by the SwiGLU `Mul`, all
+`OutTrans=1`), while every conv this toolchain can compile is `OutTrans=0`.
+
+**`OutTrans=1` is not reproducible with the available tooling.** It is a graph-scheduling decision,
+not a shape or flag: sweeping conv shapes `(Cin,Cout,S)` ∈ {(1024,256,64), (3200,256,64),
+(1024,1024,64), (256,1024,64), (1024,256,{1,256}), (64,64,1024), (256,256,64), (2048,256,64)}
+through `mil_to_hwx` yields `OutTrans=0` in every case, and reproducing pico's `Mul→conv` fragment
+also compiles to `OutTrans=0`. The transpose is chosen by the ANE scheduler from the full-graph
+context (what consumes the output), which cannot be recreated from an isolated op.
+
+**Weak structural lead.** Under the scale-decontaminated low-rank statistic R (genuine weights ≫
+noise), the FFN roles score *higher* transposed — `gate` R 6.0 vs 4.9, `down` R 10.4 vs 5.8 — while
+`Q` prefers the untransposed order (10.2 vs 7.6). This hints the `OutTrans=1` coefficient order for
+the FFN tiles is closer to a within-bank transpose, but R rewards structure that a transpose
+preserves, so it is suggestive only; the functional oracle does not confirm the transpose (§10).
+
+## 12. Honest status of the pico (300M) reconstruction
+
+**Component-complete and validated:** embedding (bit-exact, semantically validated), tied unembed
+(depth-0 ranks ▁Paris 2213/262000), all weight *values* and the intra-tile z-order (round-trip
+0.981, both tile classes, closed form `o=16·bank+slot%16, i=slot//16`), the per-output scale
+location, the norms (γ folded, QK-norm unit), the true input (lowercased, chat-templated), and the
+functional oracle (captured full logits).
+
+**Not achieved:** a coherent from-weights forward. It degrades monotonically with depth from the
+depth-0 baseline, and the sole unresolved variable is the **`OutTrans=1` coefficient ordering of the
+shipped tiles**, which cannot be read because no available compiler emits `OutTrans=1` for an
+isolated conv, and pico's own activations are ANE-internal (so it cannot be captured at runtime
+either). This is a genuine tooling/observability wall, not a remaining search: the decoder is proven,
+the geometry is proven, and the missing piece is one scheduler-chosen storage transpose that the
+shipped assets exercise but the reproduction path does not.
