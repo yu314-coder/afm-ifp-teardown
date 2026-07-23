@@ -402,3 +402,64 @@ isolated conv, and pico's own activations are ANE-internal (so it cannot be capt
 either). This is a genuine tooling/observability wall, not a remaining search: the decoder is proven,
 the geometry is proven, and the missing piece is one scheduler-chosen storage transpose that the
 shipped assets exercise but the reproduction path does not.
+
+---
+
+## 13. What `OutTrans=1` actually selects: the residual-writing ops
+
+Parsing every conv task in pico's own `binary_0.hwx` (1003 tasks with a `CoeffSize`) and grouping by
+shape and mode gives a clean decomposition. Every projection is emitted as `→256` output chunks:
+
+```
+InC    OutC   OutTrans  CoeffSize   count
+1024   256    0         0x2080       546
+1024   256    1         0x2080        72     = 18 layers x 4
+3200   256    1         0x6480        72     = 18 layers x 4
+1024   128    0         0x1080        36
+```
+
+Reading the task sequence within one layer identifies them exactly. Tasks 174–177 are four
+`1024→256` `OutTrans=1` convs immediately after the attention softmax/reshape ops — the **O
+projection** (`1024→1024` split into 4 chunks). Tasks 218–221 are the four `3200→256` `OutTrans=1`
+convs immediately after the SwiGLU `Mul` (task 217) — the **down projection**. Tasks 184–209, the
+gate/up matrices (`1024→3200` = 12×256 + 1×128), are all `OutTrans=0`.
+
+**The rule is architectural:**
+
+> `OutTrans=1` is used by exactly the ops that **write into the residual stream** — the attention
+> output projection and the FFN down projection (plus their LoRA up-projections, the `32→1024`
+> `OutTrans=1` tasks). Everything that reads from the normed hidden state — Q, K, V, gate, up — is
+> `OutTrans=0`.
+
+**Consequence: most of pico is already decoded correctly.** `OutTrans=0` is precisely the mode the
+positional read validated (round-trip 0.981), so **Q, K, V, gate and up are correct as decoded
+today**. Only the two residual-writing roles carry the unknown ordering. That shrinks the open
+problem from "all seven roles" to two, and from "an arbitrary intra-tile order" to what is most
+likely an output-channel permutation.
+
+**Mixed-mode results.** Decoding Q/K/V/gate/up with the validated order and varying only O/down:
+
+| O/down order | depth 1 | depth 6 | depth 24 |
+|---|---|---|---|
+| `ofast` (as OutTrans=0) | +0.0475 / 51875 | −0.0081 / 97114 | −0.0185 / 158351 |
+| `ifast` (intra-bank transpose) | **+0.0811** / 90127 | +0.0212 / 131657 | −0.0039 / 203113 |
+| `obank` (bank-transposed output map) | −0.0009 / 39452 | +0.0119 / 15704 | +0.0234 / 28104 |
+| `ifast_obank` (both) | +0.0365 / 122117 | +0.0479 / 19598 | +0.0275 / **3749** |
+
+Two things改善 measurably relative to the uniform decode: `ifast` doubles the depth-1 correlation
+(+0.081 vs +0.047) at identical scaling, so it is not a magnitude artifact; and `ifast_obank` is the
+first configuration whose **full 24-layer** forward does not collapse — rank 3749 against the depth-0
+baseline of 2213, where the uniform decode reaches 158351.
+
+**But this is not a solve.** Every correlation remains inside the ±0.06 noise band established
+earlier, and no configuration exceeds the depth-0 correlation of +0.0380. The honest reading is that
+restricting the unknown to the residual-writing roles is a real structural advance, and that the
+specific output permutation is still unidentified.
+
+**Separate observation worth recording.** The same trace shows pico's graph carries **rank-32 LoRA
+adapters** inline: `1024→32→1024` around the O projection (tasks 171–173), `1024→32→3200` + `Add`
+for gate and for up (210–215), and `3200→32→1024` for down (222–223). The base asset's 998 weight
+blocks are fully accounted for by the 168 base tensors, so these adapter *weights* live in the
+separate `lora_32`/`lora_48` assets rather than the base file — but if the captured-logit oracle was
+recorded with an adapter resident, the reconstruction is missing an additive term that no weight
+ordering can compensate for. That is an untested confound on the oracle itself.
