@@ -463,3 +463,58 @@ blocks are fully accounted for by the 168 base tensors, so these adapter *weight
 separate `lora_32`/`lora_48` assets rather than the base file — but if the captured-logit oracle was
 recorded with an adapter resident, the reconstruction is missing an additive term that no weight
 ordering can compensate for. That is an untested confound on the oracle itself.
+
+---
+
+## 14. The LoRA confound: resolved negative
+
+Finding §13 raised the possibility that the captured-logit oracle was recorded with a LoRA adapter
+resident, which would leave the reconstruction missing an additive term that no weight ordering could
+compensate for — making the target unattainable by construction. **That is not the case.**
+
+pico's own `metadata.json` declares its adapter slots explicitly:
+
+```json
+"backbone_signature": "cc4da08ebb47cce3de0d53aa90ba5453639c06db28f487d395c72f2fff4196cf",
+"adapter_type_to_signature_mapping": {
+    "lora_32": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lora_64": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
+```
+
+Both signatures are **SHA-256 of the empty string** (verified directly). The same value appears as
+`adapter_signature` in **47 of the 49** adapter assets in the catalog, including the `lora_32` asset
+whose `backbone_signature` matches pico's exactly — i.e. the adapter that targets this model.
+
+So the graph carries LoRA *slots* (the `1024\to32\to1024` and `1024\to32\to3200` conv pairs visible
+in the task trace) but no adapter *data*. The captured logits therefore reflect base weights alone,
+the reconstruction is not missing an additive term, and the oracle remains a valid target. The
+confound is closed, and the forward failure stays attributable to the `OutTrans=1` ordering.
+
+A second, independent check agrees: pico's weight file contains **998** coefficient blocks, and the
+base architecture accounts for exactly **960** of them (24 layers × 40 = Q 4 + K 1 + V 1 + O 4 +
+gate 13 + up 13 + down 4). No block budget remains for LoRA weights.
+
+## 15. Thirty-eight unaccounted blocks: a layer-shaped unit after layer 23
+
+The same audit surfaces something not previously noticed. The 38 blocks beyond the base 960 sit in
+the weight map's `PARTIAL_UNIT` entry, and they lie **after every mapped layer** (offset range
+`0xb327040`–`0xb889cc0`, where layer 23 ends at `0xb2c0800`). Their class composition is
+
+```
+32 N + 2 s + 4 L
+```
+
+which is exactly one layer (40 blocks) **minus K and V** (one N block each). Splitting them by file
+order against a normal layer's block order confirms it: gate, up and down assemble to the **exact**
+expected shapes — `(1024, 3200)`, `(1024, 3200)`, `(3200, 1024)` — leaving 8 N blocks for Q and O.
+This is a complete, correctly-shaped transformer layer without its own K/V projections, consistent
+with a **KV-reusing** layer (the `odix` architecture notes already record that some pico layers reuse
+KV).
+
+Running it as a 25th layer, with K/V carried over from layer 23, changes the result but does not fix
+it (correlation −0.019 → +0.002, rank 158351 → 124513): still noise, as expected while the ordering
+is unresolved everywhere. So this is recorded as a **structural** finding, not a functional one — but
+it means both the from-weights forward and the GGUF export currently omit a layer-shaped unit that
+the shipped model contains, and the "24 dense layers" figure derived from the `odix` op census should
+be treated as provisional.
