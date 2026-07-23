@@ -446,7 +446,7 @@ likely an output-channel permutation.
 | `obank` (bank-transposed output map) | −0.0009 / 39452 | +0.0119 / 15704 | +0.0234 / 28104 |
 | `ifast_obank` (both) | +0.0365 / 122117 | +0.0479 / 19598 | +0.0275 / **3749** |
 
-Two things改善 measurably relative to the uniform decode: `ifast` doubles the depth-1 correlation
+Two things improve measurably relative to the uniform decode: `ifast` doubles the depth-1 correlation
 (+0.081 vs +0.047) at identical scaling, so it is not a magnitude artifact; and `ifast_obank` is the
 first configuration whose **full 24-layer** forward does not collapse — rank 3749 against the depth-0
 baseline of 2213, where the uniform decode reaches 158351.

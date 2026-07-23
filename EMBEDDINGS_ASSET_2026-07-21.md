@@ -171,7 +171,7 @@ coarse cross-model geometry preserved, fine morphological structure absent — i
 each recovered row is a **mixture** that includes the right token's elements alongside wrong ones:
 dilution destroys the singular/plural signal long before it destroys bulk geometry.
 
-**Where that leaves it.** The row grouping is近 but not exact; the residual error is finer than the
+**Where that leaves it.** The row grouping is close but not exact; the residual error is finer than the
 lane structure. The Gram test is the right objective to continue optimizing against, since it has a
 measured null, ~8σ of headroom, and is robust to the confounds that made earlier instruments useless.
 

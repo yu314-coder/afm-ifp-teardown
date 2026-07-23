@@ -114,7 +114,18 @@ dedicated \code{3B\_\allowbreak EMBEDDINGS} cryptex ($262144\times2048$, $4$-bit
 embedding is no longer absent from the package---the remaining obstacle is decoding its element
 layout, not recovering the data (\S\ref{find:embshipped}).
 The boundary is thus an \emph{information} limit---the embedding and the un-pruned pruning list live
-outside the shipped package---not remaining decode effort. Finally, on the $300$\,M draft model---the one case where the model's \emph{own} output logits are
+outside the shipped package---not remaining decode effort. We further perform the ANE positional read at both of pico's tile geometries, obtaining
+\emph{perfect bijections} ($819{,}200$ and $262{,}144$ positions) that satisfy one closed form,
+$o{=}16\,\mathrm{bank}{+}(\mathrm{slot}\bmod16)$, $i{=}\lfloor\mathrm{slot}/16\rfloor$, and we
+validate the resulting decoder by round-trip against known weights at correlation $0.981$---the
+$4$-bit quantization floor (\S\ref{find:posread}). This reinterprets the weight container: the
+``tiles'' are ANE coefficient \emph{banks} partitioning output channels. We then identify what the
+shipped mode selects: \textbf{$\mathrm{OutTrans}{=}1$ marks exactly the projections that write into
+the residual stream}---attention-output and FFN-down---while $Q$, $K$, $V$, gate and up are
+$\mathrm{OutTrans}{=}0$ and therefore \emph{already correctly decoded}, shrinking the open problem
+from seven roles to two (\S\ref{find:outtrans}). The reconstruction exports to a GGUF that
+\code{llama.cpp} loads and runs, though its output remains incoherent under the open ordering.
+Finally, on the $300$\,M draft model---the one case where the model's \emph{own} output logits are
 host-recoverable---we replace the single-token rank oracle with correlation against the full
 ${\approx}262$k-token logit vector and \textbf{retract} a previously-reported arrangement result that
 the stronger oracle scores at noise ($r{=}{-}0.028$, \S\ref{find:picooracle}); we recover the runtime's
@@ -940,6 +951,83 @@ $og\,16+lo$ and input column $ig\oplus1$---$16$ outputs fastest, then input colu
 interleave-factor-$2$ pair swap. For pico this forces $\mathrm{NOG}\cdot\mathrm{NCOL}{=}3200$, every
 factorization of which yields exactly the $64$ observed tiles; but since the z-order is
 tile-shape-relative it must be re-derived at pico's geometry by positional read, not transplanted.
+\end{finding}
+
+\begin{finding}[the ANE coefficient z-order, read positionally and validated by round-trip]\label{find:posread}
+Finding~\ref{find:vacuous} concluded that only ANE ground truth could settle the pico weight
+arrangement. That read has now been performed, at both of pico's tile geometries.
+Pico's own \code{binary\_\allowbreak 0.hwx} gives the target configuration directly: the down projection is
+\emph{four} ANE tasks of $\mathrm{Cin}{=}3200\!\to\!\mathrm{Cout}{=}256$ with
+$\mathrm{OCGSize}{=}4$, $\mathrm{ActiveNE}{=}4$, $4$-bit palettization and \textbf{sixteen
+coefficient banks}. This reinterprets the weight container: the ``blocks'' of the weight map are
+per-task coefficient allocations and the ``tiles'' are the ANE's coefficient \emph{banks}, which
+partition \emph{output} channels---so a bank holds $16$ outputs $\times$ \emph{all} inputs
+($16\times3200 = 51200$ nibbles, matching the observed payload exactly), and the $16$ header scales
+are one per output channel. The same arithmetic fixes the other class: an \code{N} tile is
+$128$\,B header $+$ $8192$\,B payload $=16384$ nibbles, i.e. $16$ banks $\times$ $16$ out $\times$
+$1024$ in.
+Compiling digit probes at each geometry---weights whose $4$-bit index at $(o,i)$ encodes a base-$16$
+digit of $o$ or $i$---and decoding every physical nibble yields a \textbf{perfect bijection at both}:
+$256\times3200 = 819{,}200$ and $256\times1024 = 262{,}144$ distinct $(o,i)$ pairs, each satisfying
+the identical closed form
+\[ o \;=\; 16\,\mathrm{bank} + (\mathrm{slot} \bmod 16), \qquad i \;=\; \lfloor \mathrm{slot}/16 \rfloor, \]
+exact for all $16$ banks. Notably there is \emph{no} input pair swap here, unlike the 3B's
+$ig\oplus1$: the interleave differs at this geometry, which is why transplanting the 3B formula
+produced noise.
+Two practical corrections were required and are worth recording. All-zero/all-\code{F} probes cannot
+isolate weight bytes, because a constant tensor collapses the palette to a single entry and every
+index becomes $0$; payload positions must be taken structurally instead. And each digit must be
+decoded through \emph{its own} per-bank codebook: probes whose digit spans all $16$ values compile to
+an identity LUT, but \code{i8} (which reaches only $12$, since $3200<16^3$) compiles to
+$[0,1,2,2,3,4,5,6,6,7,8,9,10,10,11,12]$, where index $\neq$ value.
+\emph{The decoder is then validated by round-trip.} Compiling a conv with \emph{known} random weights
+and decoding its coefficient stream with the recovered order returns the true weights at correlation
+$\mathbf{0.981}$---the $4$-bit palettization floor, i.e. exact up to quantization. The scale location
+is likewise confirmed on shipped tiles: codebook at $\mathrm{fp16}[0{:}16]$ and a genuine per-output
+scale at $\mathrm{fp16}[32{:}48]$ (the \code{s} class carrying exactly $8$ there, matching $8$
+outputs per bank). So the shipped decode---$\mathrm{codebook}[\mathrm{nibble}]\cdot
+\mathrm{scale}[o]$ under the closed form above---has every component independently verified.
+\end{finding}
+
+\begin{finding}[\code{OutTrans}$=1$ marks the residual-writing projections, shrinking the open problem to two roles]\label{find:outtrans}
+The reconstruction nevertheless does not run, and the reason is now precisely located. Every conv
+this toolchain can compile emits $\mathrm{OutTrans}{=}0$, whereas pico's down projection ships
+$\mathrm{OutTrans}{=}1$. Sweeping conv shapes and reproducing pico's $\mathrm{Mul}\!\to\!\mathrm{conv}$
+fragment never triggers it: the transpose is chosen by the ANE scheduler from full-graph context, not
+from shape or a flag, so it cannot be recreated from an isolated op.
+Grouping all $1003$ coefficient-bearing tasks in pico's \code{hwx} by shape and mode, and then reading
+the \emph{task order} within a layer, identifies exactly which projections use it. Four
+$1024\!\to\!256$ $\mathrm{OutTrans}{=}1$ convs sit immediately after the attention softmax---the
+\textbf{output projection}, $1024\!\to\!1024$ in four chunks---and four $3200\!\to\!256$
+$\mathrm{OutTrans}{=}1$ convs sit immediately after the SwiGLU \code{Mul}---the \textbf{down
+projection}. The gate and up matrices are $\mathrm{OutTrans}{=}0$. The rule is architectural:
+\begin{quote}
+$\mathrm{OutTrans}{=}1$ is used by exactly those ops that \emph{write into the residual stream}---the
+attention output projection and the FFN down projection (and their LoRA up-projections). Everything
+that reads the normed hidden state---$Q$, $K$, $V$, gate, up---is $\mathrm{OutTrans}{=}0$.
+\end{quote}
+Since $\mathrm{OutTrans}{=}0$ is precisely the mode the round-trip validates, \textbf{$Q$, $K$, $V$,
+gate and up are already correctly decoded}; only the two residual-writing roles carry an unknown
+ordering, most plausibly an output-channel permutation. Decoding the five validated roles correctly
+and varying only $O$/down does move the oracle---an intra-bank transpose doubles the depth-$1$
+correlation ($+0.081$ versus $+0.047$, at identical scaling, so not a magnitude artifact), and one
+combination is the first whose \emph{full} $24$-layer forward does not collapse (\code{\_Paris} rank
+$3749$ against a depth-$0$ baseline of $2213$, where the uniform decode reaches $158{,}351$). But every
+correlation remains inside the ${\pm}0.06$ noise band and none exceeds the depth-$0$ correlation of
+$+0.038$, so this is a structural narrowing, not a solution.
+One further observation bears on the oracle itself rather than the ordering. The same trace shows
+pico's graph carries inline \textbf{rank-$32$ LoRA adapters}: $1024\!\to\!32\!\to\!1024$ around the
+output projection, $1024\!\to\!32\!\to\!3200$ with an \code{Add} for gate and for up, and
+$3200\!\to\!32\!\to\!1024$ for down. The base asset's $998$ weight blocks are fully accounted for by
+its $168$ base tensors, so those adapter weights live in the separate \code{lora\_\allowbreak 32}/\code{lora\_\allowbreak 48}
+assets. If the captured-logit oracle was recorded with an adapter resident, the reconstruction is
+missing an additive term that \emph{no} weight ordering can compensate for---which would make the
+target unattainable by construction rather than by mis-assembly. This is untested, and it should be
+resolved before further ordering work.
+Finally, the reconstruction is exportable: the validated embedding, weights, norms and architecture
+write to a GGUF that \code{llama.cpp} loads and runs at ${\approx}15$ tokens/s. Its output is
+incoherent, exactly as the open ordering predicts---so the export is a correct container around
+partially-ordered weights, useful as a harness into which any ordering fix drops directly.
 \end{finding}
 
 Table~\ref{tab:runnable} summarizes the revised boundary. The model is
