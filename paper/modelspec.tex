@@ -1,0 +1,192 @@
+\section{Recovered Model Specifications}\label{sec:modelspec}
+
+This section consolidates every architectural quantity recovered for the three language backbones,
+together with the physical layout of their weight containers. Values are marked \emph{stated} when
+read directly from a shipped \code{metadata.\allowbreak json} or \code{config.\allowbreak json},
+\emph{recovered} when derived from the binary and cross-checked, and \emph{provisional} where noted.
+
+\subsection{The draft model \code{afmplus-v11.0-pico}}
+
+This is the most completely characterized of the three: every architectural quantity is recovered,
+the weight container is mapped block by block, and the embedding is decoded bit-exactly.
+
+\begin{center}\small
+\begin{tabular}{@{}llp{0.36\textwidth}@{}}
+\toprule
+Property & Value & Provenance \\
+\midrule
+Model config          & \code{v11-pico} & stated \\
+Context length        & $4096$ & stated \\
+Model dim $d$         & $1024$ & stated; confirmed by captured embedding row \\
+Layers                & $24$ dense, no MoE markers & \code{odix} op graph \\
+Attention             & $16$ query : $4$ KV heads, head dim $64$ & \code{odix}; $Q$ width $1024$, $K/V$ width $256$ \\
+Head layout           & dim-major, $[T,d_h,n]\to$ transpose & recovered by ablation \\
+QK-norm               & per-head RMSNorm, unit $\gamma$ & recovered \\
+Positional            & RoPE, $\theta = 500000$ & recovered \\
+Residual norms        & RMSNorm, pre-norm; $\gamma$ compile-folded & \S\ref{find:normfold} \\
+FFN                   & dense SwiGLU, intermediate $3200$ & \code{odix} \\
+Vocabulary            & $262{,}144$ ($262{,}000$ live $+\ 144$ padding) & recovered, two independent sources \\
+Embedding             & tied to the unembedding & recovered \\
+Parameters            & ${\approx}295$\,M transformer & computed \\
+Chat template         & Gemma-style; input lowercased & \S\ref{find:template} \\
+\;\;\code{bos} / \code{eos} & $1$ / $110$ (\code{<end\_of\_turn>}) & recovered \\
+Adapter slots         & \code{lora\_32}, \code{lora\_64}; both empty & stated (signatures are SHA-256 of $\varnothing$) \\
+Role                  & speculative-decoding draft for the $3$B & stated \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Weight container.} The file holds $998$ coefficient blocks. The base architecture accounts
+for exactly $960$ of them --- $24$ layers $\times\ 40$ blocks, distributed as
+
+\begin{center}\small
+\begin{tabular}{@{}lllr@{}}
+\toprule
+Role & Shape & Blocks per layer & Total \\
+\midrule
+$Q$    & $1024 \to 1024$ & $4$ \code{N}                 & $96$ \\
+$K$    & $1024 \to 256$  & $1$ \code{N}                 & $24$ \\
+$V$    & $1024 \to 256$  & $1$ \code{N}                 & $24$ \\
+$O$    & $1024 \to 1024$ & $4$ \code{N}                 & $96$ \\
+gate   & $1024 \to 3200$ & $12$ \code{N} $+\ 1$ \code{s} & $312$ \\
+up     & $1024 \to 3200$ & $12$ \code{N} $+\ 1$ \code{s} & $312$ \\
+down   & $3200 \to 1024$ & $4$ \code{L}                  & $96$ \\
+\midrule
+\multicolumn{3}{@{}l}{Base total} & $960$ \\
+\multicolumn{3}{@{}l}{Unaccounted (see below)} & $38$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The remaining $38$ blocks lie \emph{after} every mapped layer (offsets \code{0xb327040}--\code{0xb889cc0};
+layer $23$ ends at \code{0xb2c0800}) and compose as $32\,\code{N} + 2\,\code{s} + 4\,\code{L}$ --- exactly
+one layer minus its $K$ and $V$ projections. Split by file order against a normal layer, gate, up and
+down assemble to the exact expected shapes, leaving eight \code{N} blocks for $Q$ and $O$. This is a
+complete, correctly-shaped \textbf{KV-reusing layer}, consistent with the KV-reuse the \code{odix} graph
+already records elsewhere. Running it as a $25$th layer changes the reconstruction's output but does not
+repair it, so it is reported as a structural result: the layer count should be treated as
+\emph{provisional} pending a direct re-derivation from the \code{odix} op stream.
+
+\paragraph{Tile classes.} Three block geometries occur. Each is $16$ ANE coefficient banks; a bank holds
+$n_{\mathrm{out}}$ output channels across \emph{all} inputs, and the header carries one \textrm{fp16}
+scale per output channel.
+
+\begin{center}\small
+\begin{tabular}{@{}llrrrl@{}}
+\toprule
+Class & \code{CoeffSize} & Header & Payload & Nibbles & Bank geometry \\
+\midrule
+\code{N} & \code{0x2080} & $128$\,B & $8192$\,B & $16384$ & $16$ out $\times\ 1024$ in \\
+\code{s} & \code{0x1080} & $128$\,B & $4096$\,B & $8192$  & $8$ out $\times\ 1024$ in \\
+\code{L} & \code{0x6480} & $128$\,B & $25600$\,B & $51200$ & $16$ out $\times\ 3200$ in \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Header layout} (all classes): \textrm{fp16}$[0{:}16]$ is the $16$-entry codebook,
+\textrm{fp16}$[16{:}32]$ is zero padding, \textrm{fp16}$[32{:}48]$ (bytes $64{:}96$) is the per-output
+scale vector --- the \code{s} class carrying exactly eight plausible values there, matching its eight
+outputs per bank --- and the remaining $32$ bytes are unidentified.
+
+\paragraph{Decode.} With the z-order of \S\ref{find:posread},
+\[
+  W[i,\;16\,b + o] \;=\; \mathrm{codebook}\!\left[\mathrm{nibble}\right] \cdot \mathrm{scale}[o],
+  \qquad o = \mathrm{slot} \bmod 16, \quad i = \lfloor \mathrm{slot}/16 \rfloor,
+\]
+for bank $b$, validated by round-trip at correlation $0.981$. This is exact for the five roles the ANE
+emits with $\mathrm{OutTrans}{=}0$ ($Q$, $K$, $V$, gate, up) and not yet resolved for the two emitted with
+$\mathrm{OutTrans}{=}1$ ($O$, down); see \S\ref{find:outtrans}.
+
+\paragraph{Embedding.} Recovered bit-exactly and validated semantically. The table is stored as an
+$8$-way token interleave with a per-lane skew: for token $t$ and dimension vector $\mathbf{d}$,
+\[
+  \mathrm{nib}(t) \;=\; \mathrm{NIB}_0 + \lfloor t/8 \rfloor \cdot 8192 + 8\,\mathbf{d} + \ell + \mathrm{SKEW}[\ell],
+  \qquad \ell = t \bmod 8,
+\]
+with $\mathrm{SKEW} = (0,0,0,0,8184,8184,8184,8184)$ and $8184 = 8\cdot1024 - 8$. Values are signed
+\textrm{int4} with zero-point $0$, scaled by a $1024$-entry \textrm{fp16} per-dimension vector. On the
+calibrated orthographic-pair oracle the recovered table scores
+$\cos(\code{\_dog},\code{\_dogs}) = +0.648$ and $\cos(\code{\_king},\code{\_kings}) = +0.664$ against
+cross-category controls at ${+}0.01$--${+}0.20$; the pooled margin over an id-matched control is
+$+0.4565$. Embedding into the tied unembedding with no transformer layers ranks the correct
+continuation token at $2213$ of $262{,}000$.
+
+\subsection{The sparse MoE backbone \code{afmplus-v11.1-ifp}}
+
+\begin{center}\small
+\begin{tabular}{@{}llp{0.34\textwidth}@{}}
+\toprule
+Property & Value & Provenance \\
+\midrule
+Layers            & $44 = 12$ dense $+\ 32$ sparse & stated \\
+Model dim $d$     & $1536$ & stated \\
+Attention         & $Q = 2048\ (16{\times}128)$, $KV = 1024$ & recovered \\
+\;\;GQA           & $16$ query : $4$ KV heads, dim $128$ & recovered; $\mathrm{NKV}{=}4$ settled by ablation (\S\ref{find:ablate}) \\
+QK-norm           & per-head RMSNorm on $Q$ and $K$ & recovered \\
+Residual norms    & pre \emph{and} post, attention and FFN & recovered \\
+Positional        & RoPE, $\theta = 500000$ & recovered \\
+Dense FFN         & SwiGLU, intermediate $3072$ & recovered \\
+MoE FFN           & \code{ifp1}: $10$ active $+\ 4$ shared, selection freq.\ $32$ & stated \\
+\;\;\code{ifp3}   & $46$ active $+\ 23$ shared, \code{active\_ffn\_dim} $11776 = 46 \times 256$ & stated \\
+\;\;expert size   & $256$ & stated \\
+Vocabulary        & $262{,}144$ & recovered \\
+Context           & $8192$ & stated \\
+Baked adapters    & LoRA rank $48$ & stated \\
+Parameters        & $9.862$\,B linear, $100.00\%$ of the weight file & recovered (\S\ref{find:budget}) \\
+Origin framework  & \code{tamm} / \code{coreflow} & stated \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Expert storage.} The ANE program \code{binary\_0.hwx} ($441$\,MB) contains $83$ specialized
+regions covering \code{compute\_logits} and \code{lora\_48\_ifp\{1,2,3\}\_r48} in extend/prompt variants,
+dense-only and sparse-only, at sequence lengths $256$ through $8192$. Expert coefficients live in
+runtime-patched mutable kernels --- \code{ifp1} in a $202$\,MB kernel, \code{ifp2} in $437$\,MB,
+\code{ifp3} in $671$\,MB --- each patched from \code{ifp\_rasterized\_weights} via a content-hash
+descriptor id. The gather is a runtime affine offset supplied by the driver, and the identical
+machinery appears in dense-only regions, which establishes it as weight-blob relocation rather than
+per-expert selection. No static router-index$\to$slot table exists in the \code{.hwx}.
+
+\subsection{The dense backbone \code{afmplus-v11.0-nano}}
+
+Stated in \code{metadata.\allowbreak json} (\code{model\_config: v11-nano}): context $4096$, hidden size
+$2048$, FFN $6656$ gated SwiGLU, $56$ transformer layers emitted in two ANE segments ($35 + 21$),
+grouped-query attention, RoPE, RMSNorm, adapter slots at LoRA ranks $16$ and $32$ (empty in the base),
+prompt template \code{afm\_cider\_v2}. The \code{base.generic} image is $1.3$\,GB, i.e.\
+${\approx}2$ bits per weight. The $3$B embedding asset of \S\ref{find:embshipped} declares
+\code{embedding\_dim} $2048$ and therefore serves this backbone rather than the $1536$-wide sparse one.
+
+\subsection{The shipped \texorpdfstring{$3$B}{3B} embedding asset}
+
+\begin{center}\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Property & Value \\
+\midrule
+Asset & \code{UC\_FM\_LANGUAGE\_INSTRUCT\_3B\_EMBEDDINGS\_\ldots\_H16G\_IFP\_Cryptex.dmg} \\
+Container & read-only cryptex, mountable without privilege \\
+Declared shape & \code{vocab\_size} $262144$, \code{embedding\_dim} $2048$ \\
+Payload file & \code{model.odixpackage/main-h16g.odix}, $268{,}442{,}456$\,B \\
+Arithmetic & $262144 \times 2048$ at $4$ bits $= 268{,}435{,}456$\,B $+\ 7000$\,B header \\
+Header & \code{odix} flatbuffer; strings include \code{\$load\_embeddings}; \code{NDArray} descriptor $[262144,1,2048]$ \\
+Encoding & linear signed \textrm{int4}; histogram symmetric about zero, code $8$ unused \\
+Codebook / scale & none of either \\
+Row stride & $1024$\,B, token ids in identity order \\
+Padding & final $147{,}456$\,B $=$ exactly $144$ rows, one repeated pattern \\
+Lane structure & $8$ lanes; $332$ duplicate-row groups, every large one $100\%$ pure in $\mathrm{id} \bmod 8$ \\
+Status & per-token vectors \textbf{not} recovered \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The $144$-row padding figure is corroborated independently: the draft model's captured logit vector
+carries exactly $144$ masked entries, giving a live vocabulary of $262{,}000$ in both models.
+
+\subsection{Weight codec, common to all three}
+
+Four-bit LUT palettization: a $4$-bit index selects from a $16$-entry \textrm{fp16} codebook, scaled by
+a per-block \textrm{fp16} factor, stored under an Apple Neural Engine tile permutation. For the $3$B the
+de-swizzle is $W = v.\mathrm{reshape}(C_o/8,\,C_i/128,\,128,\,8).\mathrm{transpose}(0,3,1,2)$ with the
+scale applied in raw index order \emph{before} de-swizzling. For the draft model the equivalent
+transform is the bank z-order given above. Under a scale-decontaminated low-rank structure test,
+genuine weights score $R \approx 9$ and noise $R \approx 1$; the decode scores $R = 13$--$69$.

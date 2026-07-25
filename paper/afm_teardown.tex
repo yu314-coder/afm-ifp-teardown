@@ -222,7 +222,7 @@ totalling $\approx$10.0\,GB of disk images; versions span \code{0.\allowbreak 0.
 with the bulk at \code{14.\allowbreak x} (build \code{13M204130}/\code{13M204216}).
 
 \section{Model Families}
-Table~\ref{tab:families} groups the 118 assets; six families are present.
+Table~\ref{tab:families} groups the assets; six families are present. The catalogue held $118$ assets when first inventoried and $124$ on macOS~27.0 build \code{26A5378n}; \S\ref{find:embshipped} covers the delta.
 \begin{table}[ht]\centering\small
 \setlength{\tabcolsep}{6pt}
 \begin{tabular}{@{}lr>{\raggedright\arraybackslash}p{0.5\textwidth}@{}}
@@ -280,7 +280,7 @@ Embedding              & int scalar-quant (scale $+$ zero) \\
 Output                 & tied embedding $+$ \code{output\_\allowbreak norm} \\
 Baked adapters         & LoRA rank 48 (\code{lora\_\allowbreak i1\_\allowbreak r48}) \\
 Context                & 8192 \\
-Vocabulary (est.)      & 152{,}064 \\
+Vocabulary             & $262{,}144$ (\S\ref{sec:modelspec}) \\
 Origin framework       & \code{tamm} / \code{coreflow} \\
 \bottomrule
 \end{tabular}
@@ -1133,6 +1133,8 @@ A practical corollary: Apple's \code{FoundationModels} runtime remains the turnk
 the earlier claim that a from-weights standalone requires reverse-engineering the ANE
 instruction set no longer holds---the wiring is not ANE-locked behavior but a permutation-free
 sum over recovered blocks, reducing the standalone to a component-assembly exercise.
+
+\input{modelspec}
 
 \section{Container Formats}\label{sec:containers}
 The on-disk stack is summarized in Figure~\ref{fig:stack}.
