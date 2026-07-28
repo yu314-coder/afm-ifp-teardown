@@ -136,3 +136,38 @@ same theta-is-not-a-literal situation — so the family recipe transfers; only t
 All findings reproduced this pass from the on-disk asset via `numpy`/`struct` (MLIR-bytecode
 prefix-varint section walk; hwx LC_SYMTAB census; AttrType/host-section constant scans; manifest parse).
 Scratch scripts under `/Volumes/D/fix/pico_shapes/`.
+
+---
+
+## Addendum: positive confirmation of gamma = 1 from the weights themselves
+
+Everything above rests on **negative** evidence — an exhaustive search that found no gamma anywhere.
+A negative search cannot distinguish "gamma was folded into the linears" from "there was never a
+gamma". `gamma_folding_test.py` closes that gap with a **positive** test on the decoded weights.
+
+If a per-layer gamma had been folded, it would multiply the **input rows** of every conv reading that
+norm's output. So `gate` and `up` (which both read the FFN norm) would carry the *identical*
+`diag(gamma_ffn_L)` and their per-input-row norm profiles would correlate far more tightly **within** a
+layer than the same role does **across** layers. Measured over 8 layers:
+
+| comparison | shares a gamma if folded? | mean correlation |
+|---|---|---|
+| within-layer `gate ~ up` | yes (`gamma_ffn_L`) | **+0.6501** |
+| cross-layer `gate ~ gate`, `up ~ up` | no (different layers) | **+0.6308** |
+| within-layer `Q~K`, `Q~V`, `K~V` | yes (`gamma_attn_L`) | **+0.2906** |
+| cross-layer `Q ~ Q` | no | **+0.2585** |
+
+At **both** norm sites the within-layer figure is statistically indistinguishable from the
+cross-layer control. **No per-layer multiplicative factor is present in the weights.** The residual
+correlation (~0.63 for FFN, ~0.26 for attention) is a *global* per-dimension scale structure shared by
+every layer — a property of the trained residual stream, not a per-layer gain.
+
+Combined with the negative search, this pins the conclusion: **pico's hidden RMSNorms are genuinely
+parameter-free (gamma = 1)**, matching the independently-proven QK-norm result in section 2. Nothing
+was folded because there was nothing to fold.
+
+**Consequence for the export:** `pico_to_gguf.py` writing every `*_norm.weight` as ones is **correct**,
+and the norms are *not* a contributor to the incoherent output. This removes a candidate explanation
+that would otherwise compete with the `OutTrans=1` ordering blocker, leaving that ordering as the sole
+identified cause. (Recorded because the earlier one-line justification, "gamma folded at ANE compile",
+gave the right answer via reasoning this test shows is not the actual mechanism.)
