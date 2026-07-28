@@ -2433,3 +2433,82 @@ The attention block as a whole is partially decoded, which is a broader statemen
 Both are consistent with a fine-grained intra-tile scramble that leaves some positions correct --
 which is exactly what "9x above random, 9x below correct" looks like for Q/K, and what a total loss
 of the OV pairing looks like for V/O.
+
+## 46. A real decode bug, found and proven: the tile payload starts at +96, not +128
+
+Sections 43-45 established that the attention block is only partially decoded and that no coarse
+layout hypothesis repairs it. Looking for the cause rather than more hypotheses turned up an actual
+bug in the decoder.
+
+### 46.1 The tell: four hot channels shared by every tensor
+
+Per-input-channel magnitude profiles were compared across tensors that share the residual basis. In
+Qwen3-4B these are essentially uncorrelated (-0.03 to 0.20). In pico:
+
+| pair | pearson | spearman |
+|---|---|---|
+| L0.Q(in) vs L0.gate(in) | **0.907** | 0.146 |
+| L0.Q(in) vs L5.Q(in) | **0.899** | 0.148 |
+| L0.Q(in) vs L0.O(**out**) | 0.075 | 0.046 |
+
+High Pearson with near-zero Spearman means a few extreme channels shared by every decode -- an
+artifact, not trained structure. They are channels **1020-1023**, the last four of the input axis,
+at 3.2x the median norm. Four input channels is exactly 64 nibbles = **32 bytes**.
+
+### 46.2 The tile header is 96 bytes, and the proof is the padding
+
+Dumping a tile header:
+
+```
++0..32      codebook, 16 fp16, cleanly sorted   (-0.791 -0.604 -0.461 -0.360 ...)
++32..64     zeros (reserved)
++64..96     scales, 16 fp16, small positives    ( 0.089  0.123  0.114  0.140 ...)
++96..128    FULL ENTROPY -- 27-32 distinct bytes of 32; as fp16 it is nan / 3.8e4
+```
+
+The decoder read the payload from **+128**, treating `+96..128` as header. The decisive test is the
+other end of the tile: if the payload runs `96 -> 8288`, the final 32 bytes must be padding.
+
+**All 64 tiles have bytes `8288..8320` exactly zero.** So the layout is
+
+```
+header 96 | payload 8192 | zero pad 32   =  8320 = 0x2080 stride
+```
+
+and the same 96-byte header with 64-byte alignment reproduces the other two classes exactly:
+`96 + 4096 -> 4224 = 0x1080` ('s') and `96 + 25600 -> 25728 = 0x6480` ('L'). The stride alone never
+disambiguated this -- `128 + payload` also matches all three -- which is why it survived so long.
+
+### 46.3 Effect
+
+| payload offset | Q/K sharpness | ch1020-23 / median |
+|---|---|---|
+| 120 | 0.0446 | 2.64 |
+| **128 (previous)** | 0.0468 | 3.20 |
+| **96 (correct)** | **0.6058** | **1.02** |
+
+A 13x improvement in attention sharpness, sharply peaked at 96 alone, and the outlier artifact
+disappears. Re-sweeping the remaining decode assumptions on the corrected payload confirms the
+`omin` z-order decisively (0.47-0.61 versus 0.008-0.02 for the transposed rule).
+
+**Every decode-variant experiment in this project ran against a payload shifted by 32 bytes** -- the
+same class of error as the QK-norm in sec.43, and their negative results are void.
+
+### 46.4 What it does not fix
+
+Honesty about scope. With the corrected offset:
+
+* OV circuit z remains **0.003-0.10** across all variants -- V/O is still at the noise floor.
+* Teacher-forced NLL is **13.372**, still above chance (12.477); `top1-next` is still 0.
+* Generation is still incoherent.
+
+Also worth flagging rather than celebrating: sharpness 0.6058 *exceeds* Qwen3-4B's 0.4149, and the
+raw attention logits reach 33-53. That may indicate saturation rather than superior structure, so
+the sharpness figure should not be read as "better than a real model".
+
+### Standing
+
+One genuine, structurally proven decode bug is fixed -- the first defect in this project identified
+by its cause rather than inferred from a metric. It substantially improves Q/K and removes an
+artifact that contaminated every tensor. It does not by itself make the model work, so at least one
+further defect remains, and V/O is still the outstanding one.
