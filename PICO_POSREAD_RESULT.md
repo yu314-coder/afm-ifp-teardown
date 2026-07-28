@@ -1531,3 +1531,77 @@ provide one.
 **Consequence:** every on-machine route to a different ANE compiler is now eliminated. The system
 `ANECompiler.framework` (macOS 27.0, build 26A5388g) is the only one that exists here, and the
 requirement reduces to a Mac running a different macOS build.
+
+## 33. What `OutTrans=1` actually DOES: a strided, interleaved output write (from Apple's L2 registers)
+
+A source never previously mined: each ANE task descriptor carries **L2 buffer addressing** --
+`L2_Src1Base`, `L2_ResultBase`, and per-axis strides `L2_*Strides: C=...`. These describe where in
+ANE local memory a task reads and writes its channels, i.e. the **activation layout**, straight from
+Apple's binary.
+
+### The flag is perfectly determined by the result stride
+
+Over all **988** weight-bearing tasks in pico's `binary_0.hwx`:
+
+| `OutTrans` | `SrcStrideC` | `ResStrideC` | count | example |
+|---|---|---|---|---|
+| 0 | `0x90` | **`0x80`** | 675 | 1024 -> 256 |
+| 0 | `0x80` | **`0x80`** | 133 | 1024 -> 256 |
+| 1 | `0x80` | **`0x810`** | 144 | 1024 -> 256 |
+| 1 | `0x80` | **`0x800`** | 36 | 32 -> 1024 |
+
+> **`OutTrans=1` tasks with a large result stride: 180 of 180.
+> `OutTrans=0` tasks with a large result stride: 0 of 808.**
+
+A perfect, exceptionless correlation. `OutTrans=0` writes channels **contiguously** (`0x80` = 128 B =
+64 fp16, exactly one row). `OutTrans=1` writes them **16x strided** (`0x800` = 16 x 128 B, plus a
+`0x10` pad in the 1024->256 case).
+
+### The down-projection's actual addresses
+
+```
+task 202  3200 -> 256   Src 0x0e8000 (strideC 0x80)   Res 0x14c040   strideC 0x810   OutTrans=1
+task 203  3200 -> 256   Src 0x0e8000 (strideC 0x80)   Res 0x14c240   strideC 0x810   OutTrans=1
+task 204  3200 -> 256   Src 0x0e8000 (strideC 0x80)   Res 0x14c440   strideC 0x810   OutTrans=1
+task 205  3200 -> 256   Src 0x0e8000 (strideC 0x80)   Res 0x14c640   strideC 0x810   OutTrans=1
+```
+
+Two facts follow directly:
+
+* **`down` reads its 3200 FFN inputs CONTIGUOUSLY** (`SrcStrideC = 0x80` from the SwiGLU buffer at
+  `0x0e8000`, which the preceding elementwise task 200 writes in place). So down's *input* axis is
+  the natural contiguous FFN order -- it is not permuted at the activation level.
+* **`down`'s four tasks write INTERLEAVED**: bases `0x14c040/240/440/640` are `0x200` apart while the
+  per-channel stride is `0x810`. Since `0x200` = 4 channels and `0x810` ~ 16 channels, the four tasks
+  each contribute 4 channels into every 16-channel block.
+
+This is the first direct evidence of what `OutTrans=1` does, and it confirms the flag is an
+**activation-layout** property -- consistent with §19 (the LoRA Rosetta showed the *coefficient*
+order is unchanged) and with §25/§26 (the positional read gave the same bijection in both header
+modes).
+
+### The derived mapping -- tested, only marginally better
+
+Reading the interleave as `physical = (j//4)*16 + t*4 + (j%4)` (four tasks x four channels per
+16-block) and applying it to `down`'s output:
+
+| | mean z, `down -> gate(L+1)` |
+|---|---|
+| current decode | +0.5 |
+| L2-derived interleave | **+1.4** |
+| *Qwen3 control* | **+328** |
+
+Directionally right but nowhere near correct, so the exact byte arithmetic is still off: `0x810`
+is `16 x 0x80 + 0x10`, and that `0x10` padding means channel slots are not uniformly spaced, so the
+naive division is not the true index map. The ANE register maps shipped with the tooling document
+`PlaneStride` fields but do not define the `OutTrans` layout, and the second `OutTrans` field in
+`PECfg` is not emitted for these task types.
+
+### Why this matters anyway
+
+The flag has gone from an unexplained scheduler decision to a **measured, quantified layout
+transform** whose parameters are visible in the binary. The remaining unknown is narrow and concrete:
+how the `0x810` stride with its `0x10` padding maps task-local channel `j` to a physical residual
+channel. That is a question about ANE L2 tiling arithmetic, and it can be answered exactly by a
+weight-bearing `OutTrans=1` compile on any host that emits one -- which is precisely what the probe
+kit tests for.
