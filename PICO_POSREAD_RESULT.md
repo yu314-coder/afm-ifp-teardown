@@ -643,3 +643,80 @@ the residual stream are the `OutTrans=1` ones" survives this much sharper test.
 No readable config field separates the two populations (diffing every `key=value` in both groups
 returns only incidental address/`Tag` differences), consistent with the flag being assigned by the
 scheduler rather than derived from any property recorded in the task.
+
+## 19. A LoRA Rosetta stone: `OutTrans` does **not** change coefficient order
+
+### The unbacked-segment discovery
+
+Dumping the hwx segment table (`hwx_parsing -s`) shows two segments with **`File Size 0`** -- allocated
+in VM but not backed by any bytes in the file:
+
+| segment | VM size | = |
+|---|---|---|
+| `__MKERN_0` | `0x1c50000` = **29,687,808** | `lora_32_constant_data.bin` = **29,687,808** exactly |
+| `__MKERN_9` | `0x38a0000` = **59,375,616** | `lora_64_constant_data.bin` = **59,375,616** exactly |
+
+The sizes match exactly, so the constant-data files are DMA'd **verbatim** into ANE coefficient
+memory. Their bytes therefore *are* the ANE coefficient stream, already in tile order -- the same
+runtime-patched mutable-kernel pattern recorded for the 3B.
+
+This is a Rosetta stone, because the LoRA tensors are **unpalettized fp16** (task 157 carries no `Pal`
+field; `CoeffSize 0x1000 x 16 banks = 65536 B` for `32x1024` = exactly 2 B/element), so there is no
+quantization loss, **and both `OutTrans` modes appear in the same file**: the `32 -> 1024`
+up-projections are `OutTrans=1` (36 tasks) while `32 -> 3200` are `OutTrans=0` (36 tasks).
+
+### File layout (derived exactly, zero residual)
+
+`14,843,904 fp16 = 24 layers x 618,496`, and the rank-32 adapters for all seven roles sum to exactly
+618,496 per layer: `Q/O` `1024*32 + 32*1024`, `K/V` `1024*32 + 32*256`, `gate/up` `1024*32 + 32*3200`,
+`down` `3200*32 + 32*1024`. Tensor boundaries were then confirmed empirically from log-RMS
+discontinuities (9 of the derived boundaries land exactly on measured jumps; the `K`/`V` sub-region is
+the one part that does not resolve cleanly and was excluded from the test).
+
+### The test and the result
+
+A `32 -> out` tensor is stored as 16 banks; each bank holds `out/16` output channels x 32 ranks. The
+**rank axis is global** (the same 32 latent directions in every bank) while the **output axis is local**
+(different channels per bank). So under the *correct* intra-bank order the per-rank norm profile
+extracted from each bank measures the same quantity in every bank and correlates across banks; under
+the wrong order it mixes output channels and decorrelates.
+
+Method validated on the **known** `OutTrans=0` mode first, then applied to `OutTrans=1`:
+
+| tensor | mode | `in_fast` | `out_fast` | outcome |
+|---|---|---|---|---|
+| `gate_B` (32->3200) | `OutTrans=0` (known) | mean **+0.125**, positive 21/24 | ~0 | validates the method |
+| `Q_B` (32->1024) | **`OutTrans=1`** | mean **+0.088**, positive 23/24 | −0.009, positive 7/24 | `in_fast` wins **24/24 layers** |
+| `down_B` (32->1024) | `OutTrans=1` | +0.031, positive 10/24 | −0.001 | **ambiguous**, 12/24 |
+
+`Q_B` is boundary-confirmed and behaves exactly like the known `OutTrans=0` tensor, at comparable
+signal strength. `down_B` does not separate and is reported as inconclusive rather than as support.
+
+### What this means
+
+> On this evidence **`OutTrans` does not change the intra-bank coefficient order.** It is an
+> **output-activation layout** flag -- which is what the name says, and what the synthetic
+> reproduction independently showed in #18: every `OutTrans=1` task generated there was a *weightless*
+> shuffle with identical `InDim`/`OutDim`, i.e. a task that moves activations, not weights.
+
+That makes the long-standing "`OutTrans=1` coefficient ordering" framing a likely **misdiagnosis**. If
+the flag never permutes coefficients, then `O` and `down` are already decoded with the correct order
+and the incoherent forward has a different cause.
+
+**Caveat, stated plainly:** the Rosetta tensors are unpalettized fp16 while the base `O`/`down` tiles
+are 4-bit palettized with per-output scales, so this transfers the *flag semantics*, not a
+byte-identical layout proof for the palettized path. `down_B` being inconclusive leaves room for the
+result not to generalize across every role. This is strong evidence, not a closed proof.
+
+### Where the search should go next
+
+With `OutTrans` demoted, the prime suspects become the **arrangement conventions** already enumerated
+as knobs in `src/pico_forward.py` -- each a small discrete choice, jointly a far smaller space than an
+unknown permutation:
+
+* `kv_mode` -- the single 512x512 K/V block -> `[1024,256]` (`reshape` vs `topslice`)
+* `s_position` / `s_tile_shape` -- where the `s` half-block sits in `gate`/`up` (`[1024,128]` columns)
+* `rope_interleaved` -- rotate-half pairing (`#4` of `PICO_NORMS.md` fixes rotate-half; the pairing
+  convention in the reconstruction is still a choice)
+* head ordering / GQA fan-out
+* the **38-block KV-reusing 25th layer** (#15), currently omitted from both the forward and the GGUF
