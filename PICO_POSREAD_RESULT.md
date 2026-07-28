@@ -720,3 +720,49 @@ unknown permutation:
   convention in the reconstruction is still a choice)
 * head ordering / GQA fan-out
 * the **38-block KV-reusing 25th layer** (#15), currently omitted from both the forward and the GGUF
+
+## 20. Residual-basis test: the defect is the O/down **output** ordering (a fast static oracle)
+
+`O` and `down` **write** the residual stream; `Q/K/V/gate/up` **read** it. All five readers decode in
+the round-trip-validated order, so their INPUT axis is a trustworthy sample of the residual basis. If
+the writers' OUTPUT axis were correctly ordered it would describe the same per-position structure.
+
+| measurement | mean over 8 layers |
+|---|---|
+| **calibration** `gate_in ~ up_in` (two known-correct readers) | **+0.6501** |
+| `O_out ~ gate_in` (writer vs reader, same layer) | **+0.0112** |
+| `down_out ~ Q_in(L+1)` (writer vs next layer's reader) | **+0.0219** |
+| randomly shuffled control | +0.0034 |
+
+The writers are **statistically indistinguishable from a random permutation** against a basis the
+readers agree on at +0.65. This localises the defect precisely: it is the **output-channel ordering of
+`O` and `down`**, i.e. the `ob + b*nout + o` global output index in the decoder (which
+block/bank group of 16 lands where) -- *not* the intra-bank order, consistent with #19.
+
+It also supplies what the project has lacked: a **fast, purely static oracle** with a large signal gap
+(0.65 vs 0.003) that needs no forward pass, no captured logits, and no runtime. Any candidate ordering
+must lift `O_out ~ gate_in` toward +0.65.
+
+### Attempted solve, and why it failed
+
+The permutation maximising the correlation of two 1-D vectors is rank-matching, so the permutation was
+fitted by rank-matching grouped norm profiles against `gate`, then scored on readers **excluded from
+the fit** (`up`, and next-layer `Q`):
+
+| group size | fit (gate) | held-out `up` | held-out `Q(L+1)` | random-perm baseline |
+|---|---|---|---|---|
+| 16 (64 groups) | +0.97 | +0.331 | **+0.028** | +0.057 |
+| 64 (16 groups) | +0.97 | +0.112 | +0.014 | +0.100 |
+| 256 (4 groups) | +0.93 | +0.144 | −0.273 | −0.184 |
+
+**This is a negative result.** The fitted correlation (+0.97) is meaningless -- rank-matching attains
+it by construction. The apparent +0.331 on `up` is not evidence either: `up` is itself correlated with
+the fit target `gate` at +0.65, so a permutation tuned to `gate` transfers to `up` automatically. The
+honest read is the genuinely independent reader, next-layer `Q`, which scores **+0.028 -- exactly the
+random baseline** at every granularity.
+
+Conclusion: **the per-channel norm profile localises the defect but does not identify the
+permutation.** A scalar per channel is too little information to pin a 64-way (or finer) assignment;
+recovering it needs a statistic that uses the weight *vectors*, not their magnitudes -- for example
+matching the writer's output directions against the reader's input directions in the shared residual
+subspace, which is the natural next attempt.
