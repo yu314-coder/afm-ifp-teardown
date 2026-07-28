@@ -78,3 +78,30 @@ That fraction, not the file, is what stands between this artifact and coherent t
 `ifast_obank`) to make the output look better -- all of them remain inside the measured noise band,
 so shipping one would present an unvalidated guess as a solve. The default export deliberately keeps
 the honest, round-trip-validated `OutTrans=0` order everywhere.
+
+## A real export defect found and fixed: missing QK-norm (`qwen3` build)
+
+`PICO_NORMS.md` §3 proves pico applies **per-head QK-norm** to Q and K (RMSNorm over `head_dim=64`;
+48 of its 96 normalizations), with gamma = 1. The original export used the **`llama`** architecture,
+which has **no QK-norm at all** -- so the exported model never applied that normalization and fed
+unnormalized Q/K into the attention scores. That is a genuine functional defect, independent of any
+weight-ordering question.
+
+`tools/pico_to_gguf_qwen3.py` re-exports under llama.cpp's **`qwen3`** architecture -- RMSNorm +
+per-head QK-norm + GQA + SwiGLU + RoPE, i.e. pico's exact recipe -- adding
+`blk.N.attn_q_norm.weight` / `blk.N.attn_k_norm.weight` as ones (unit *gain*, but the normalization
+now actually happens):
+
+```
+afmplus-v11.0-pico-qwen3-F16.gguf   1.14 GB   266 tensors   20 metadata keys
+```
+
+Verified: loads clean, and tokenization is confirmed correct
+(`The capital of France is` -> `<bos> The(673) capital(5283) of(533) France(7005) is(567)`),
+ruling the tokenizer out as a fault source.
+
+**Output is still incoherent.** So QK-norm was a real defect but not the cause. Both this and the
+`llama` build are kept: the `qwen3` one is architecturally faithful, the `llama` one is the historical
+artifact. Neither is a working language model, for the reason established in
+`PICO_POSREAD_RESULT.md` §20 -- the `O`/`down` output-channel ordering, which that section shows is
+statistically indistinguishable from random against the residual basis.
