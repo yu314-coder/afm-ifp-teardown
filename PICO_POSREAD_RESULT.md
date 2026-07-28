@@ -1128,3 +1128,81 @@ is in what the scale-bearing mode does differently -- most likely how the 16 per
 to the payload -- and that mode is currently **unreproducible on this toolchain**, so it cannot be
 read positionally. This is a tooling limit, stated as such: not "we could not find the permutation",
 but "the one mode that differs cannot be compiled here to be measured".
+
+## 26. The `0x6480` mode is a BIAS, not a scale table -- and the L-class decode is confirmed in pico's exact mode
+
+§25 hit a wall: pico ships `CoeffSize 0x6480` (128-byte header) but every scale-bearing
+palettization config failed to compile (`InvalidMILProgram`), so the shipped mode could not be
+positionally read. That wall is now broken, by a route that avoids the rejected op entirely.
+
+### What actually produces the 128-byte header
+
+Testing fusion patterns that use only ops the compiler accepts:
+
+| graph | emitted |
+|---|---|
+| `conv` (palettized) | `0x6440` |
+| `conv -> mul` by per-output-channel constant | `0x6440` |
+| **`conv` with a `bias`** | **`0x6480`** |
+| `conv` with `bias`, then `mul` | `0x6480` |
+
+The extra 64 bytes appear when the conv carries a **bias** -- not from per-channel scaling. Verified
+directly by compiling with `bias[o] = 100 + o` and reading the header back:
+
+```
+bank 0  header[64:96] as fp16 : 100 101 102 ... 115     (= bias for outputs  0..15)
+bank 1  header[64:96] as fp16 : 116 117 118 ... 131     (= bias for outputs 16..31)
+```
+
+Exact match. So that header slot carries a **per-output-channel bias** in this mode.
+
+**This does not mean pico's decoder is wrong.** pico's values in the same slot are all *positive* and
+tightly banded (0.073–0.443 for `O`, 0.082–0.443 for `down`, 0.106–0.155 for `gate`), while its
+codebook spans ~±0.8. That is the signature of a per-output **scale** (codebook x scale gives
+plausible weight magnitudes), not a bias -- LLaMA-style models carry no biases, and a uniformly
+positive bias on every output would be unexplainable. The slot is evidently reused by mode. The
+decoder's `cb[nb] * sc[o]` is therefore retained.
+
+### Positional read in pico's exact shipped mode
+
+With `bias` forcing `0x6480`, the L-class positional read was rerun in the mode pico actually ships:
+
+```
+819,200 distinct (o,i) pairs over 256 x 3200  -- PERFECT BIJECTION
+o = 16*bank + (slot % 16)        i = slot // 16      (identical to the 0x6440 result)
+```
+
+**The payload layout does not change between the two modes.** The L-class decode -- geometry, codec,
+and slot decomposition -- is now confirmed against ANE ground truth *in pico's own configuration*.
+
+### The audit is sound: per-pairing controls on a known-good model
+
+`down`'s pairings involve an attention block or the SwiGLU nonlinearity, so they are not equivalent to
+the direct `O -> gate` pairing and needed their own controls. On Qwen3-4B (correct):
+
+| pairing type | Qwen3 (correct) | pico |
+|---|---|---|
+| `O -> gate` [direct] | +406 | **+105** (transposed) |
+| `up -> down` [SwiGLU between] | +407 | −1.4 |
+| `down -> gate(L+1)` [attention between] | +328 | +1.3 |
+| `gate -> down` [SwiGLU between] | +57 | −2.6 |
+
+Every pairing type scores strongly in a correct model, including across attention and SwiGLU. So the
+pairings are informative and **`down` is genuinely broken** -- the §24 audit stands.
+
+### `down`: what has now been eliminated, on the validated oracle
+
+| hypothesis | best z | control |
+|---|---|---|
+| slot decomposition | **confirmed correct** by positional read (bijection) | -- |
+| 4-block output assembly, all 24 permutations | +1.1 | +328 |
+| composite `(blk,bank,o)` digit orderings + reversals (48) | +2.5 | +328 |
+| intra-bank `ofast` / `ifast`, chunked `G = 1..3200` | +2.4 | +328 |
+| scale applied / omitted / reversed | +2.1 | +328 |
+| QAP on **raw** Gram matrices, group level | +3.3, cross-layer agreement 2.6% (chance 1.6%) | +328 |
+
+Every level of the decode that can be tested is confirmed correct, and every reordering hypothesis is
+rejected against a control that reaches +328. `down` remains broken, and the cause is now *not*
+locatable within the decode model as currently understood -- which points at an assumption upstream
+of it (for example whether the four L-blocks the weight map assigns to `down` are in fact that
+tensor) rather than at any ordering within it.
