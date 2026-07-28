@@ -2562,3 +2562,62 @@ sub-chance NLL. It did not fix V/O, and the model still does not generate cohere
 remaining defect is now sharply characterised: something in every block that is *cumulative* --
 harmless for three or four layers, fatal by twenty-four -- with V/O the only role still measured at
 its noise floor.
+
+## 48. Continuing past the +96 fix: four more hypotheses, all null, and a reasoning correction
+
+### 48.1 The residual basis (O's output axis)
+
+The cumulative signature -- harmless for 3-4 layers, fatal by 24 -- is what a misaligned residual
+basis produces: Q/K/V/gate/up *read* the residual, O and down *write* it, and a permutation between
+the two mixes the stream a little more each block while every tensor still looks internally fine.
+The earlier Hungarian run permuted O's *input* axis; the residual is O's *output* axis, and it has
+its own exact solver (`Cost = Y^T O` with `Y = (V R)^T G`).
+
+Solved on five layers, validated on seven held out. **Null, and worse than before**: the solution
+does not improve even the training layers (0.056/0.042/0.015/0.048/0.003 against identity's
+0.010/0.033/0.078/0.009/0.033). There is not enough signal in the objective to overfit, let alone
+transfer.
+
+### 48.2 Scale indexing
+
+An N bank is 16 outputs x 1024 inputs with 16 fp16 scales, which is equally consistent with
+per-output scaling and with group-wise input quantization at 64 inputs per group -- the more common
+4-bit scheme, and mis-indexing it would damage every tile slightly.
+
+| scale index | L0 sharpness | NLL |
+|---|---|---|
+| **per-output (current)** | **0.5966** | 13.422 |
+| per-input-group (64) | 0.4777 | 13.711 |
+| input mod 16 | 0.4390 | 13.100 |
+| none | 1.0000 (saturated) | 13.545 |
+
+Per-output is confirmed. The `none` row is instructive rather than competitive: without scales
+attention saturates completely (sharpness 1.0), so the scales are both real and correctly indexed.
+
+### 48.3 Layer order
+
+The `layer` field in the weight map was inferred and never validated functionally. Identity 13.422,
+reversed 13.883, block-reversed 13.217, even-odd 13.115 -- and **the best of five random orderings
+scores 12.756, beating identity.** No ordering hypothesis is supported, but the control result is
+itself informative: if the blocks were performing correct sequential computation, scrambling them
+would be catastrophic. It is not. The blocks are largely interchangeable, which is what a stack of
+mostly-noise-injecting layers looks like.
+
+### 48.4 A correction: the OV metric is probably the wrong probe
+
+Sections 43-45 treated "V/O at the OV noise floor" as *the* blocker. That reading does not survive
+sec.47.2. Layers 3-13 produce **below-chance** NLL, and those layers contain V and O -- a completely
+broken V/O could not yield a sub-chance truncated model. The consistent reading is that pico's OV
+circuits do not perform embedding-copying at all, so the metric measures something this model simply
+does not do, and its null was never evidence of a defect.
+
+This does not restore V/O to "confirmed" -- it has no positive evidence either. It moves V/O from
+"proven broken" back to "untested", and removes the justification for the large search effort spent
+on it in sec.44-45 and sec.48.1.
+
+### Standing
+
+The +96 payload fix (sec.46) remains the session's one proven advance. Everything attempted since is
+null: residual-basis solve, scale indexing, norm placement, embedding scale, layer order. The defect
+remains cumulative and unlocated, and the most reliable handle on it is still the depth profile --
+sub-chance through layer 13, degrading monotonically thereafter.
