@@ -2287,3 +2287,73 @@ entire search history was conducted through a forward crippled by a QK-norm this
 The useful development is methodological. The OV test needs no working forward and no FFN, so V/O
 can now be attacked directly instead of end-to-end -- which is the first time any single tensor role
 in this reconstruction has had an isolating test with a positive control.
+
+## 44. V/O: values are trained, layout is not recoverable by any coarse permutation
+
+Section 43 introduced the OV-circuit test and showed pico registers ~0 where a known-good model
+registers strongly. This section establishes how sensitive that test is, and how far the V/O defect
+goes.
+
+### 44.1 The metric is layout-sensitive -- verified, not assumed
+
+Scrambling O's input axis on Qwen3-4B collapses the score by two orders of magnitude:
+
+| Qwen3-4B layer | identity | random permutation (max of 10) |
+|---|---|---|
+| 0 | 3.583 | 0.066 |
+| 2 | 3.777 | 0.069 |
+| 5 | 4.587 | 0.062 |
+| 34 | **8.576** | 0.074 |
+
+So the test genuinely measures layout, and a model with correct V/O cannot hide from it. pico scores
+**0.386 with identity and 0.387 for the best of 12 random permutations** -- it is at its own noise
+floor. The 0.386 is therefore *not* evidence of partial correctness, and sec.43's tenfold
+"improvement" from transposing O must be read only as an orientation effect, not as recovered
+structure. (Note the orientation asymmetry is still real and still agrees with sec.22/30: the
+dimensionally-valid convention for the control is `A = Wv.T R Wo.T`, whereas pico only scores
+above floor as `A = Wv.T R Wo` -- i.e. pico's O is stored transposed relative to the GGUF
+convention.)
+
+### 44.2 The values are trained weights
+
+Stable rank `||W||_F^2 / ||W||_2^2` and the ratio of largest to median singular value, against a
+matched Gaussian and against Qwen3-4B:
+
+| model | tensor | stable rank | s0/s_med |
+|---|---|---|---|
+| random | Gaussian 1024x1024 | 257.6 | 2.47 |
+| pico | attn_v | 27.3 | 3.65 |
+| pico | attn_output | 16.2 | 15.89 |
+| pico | ffn_down | 47.5 | 5.84 |
+| Qwen3-4B | attn_output | 63.6 | 7.59 |
+| Qwen3-4B | ffn_down | 155.5 | 4.36 |
+
+Every pico tensor is heavy-tailed and far from random. **The decode recovers genuine trained
+matrices**; what is wrong is where the numbers sit, not what they are.
+
+### 44.3 No coarse layout hypothesis recovers V/O
+
+Swept against the metric, all with random-permutation controls:
+
+* orientation: `Wo` vs `Wo.T`
+* 27 structured bijections of O's input axis (1024) and 21 of V's output axis (256) -- every
+  factorization transpose, block reversal, and transpose-then-reverse
+* **joint** head-layout conventions, which a per-axis sweep cannot express because V's output axis
+  and O's input axis must agree: head-major (`h*64+d`) vs dim-major (`d*nh+h`) on each, times three
+  KV-to-Q head assignments (blocked, interleaved, blocked-reversed) -- 24 combinations
+
+Every joint configuration scored **0.362-0.386**, flat against a 0.39 noise floor. The dim-major
+convention recorded in the pico head-layout note does not help, alone or jointly.
+
+### Standing
+
+Confirmed correct: embedding, token mapping, tokenizer, RoPE convention, head count, gamma=1, and now
+the *values* of every decoded tensor. Confirmed broken: the placement of V/O, by a metric with a
+positive control that is 100x sensitive to exactly this. Ruled out for V/O: orientation alone, all
+coarse axis permutations, and all head-layout conventions.
+
+What remains for V/O is therefore the same class of problem already known for the down projection --
+a fine-grained **intra-tile** scramble, where the ANE tile decode emits correct values at wrong
+positions below the granularity any coarse permutation can express. That is a considerably more
+specific statement of the defect than "V/O are wrong", and unlike the FFN's channel permutation it
+comes with a fast isolating test that needs no working forward.
