@@ -1283,3 +1283,66 @@ is a low-rank update, and `W^T dW = W^T A B` has no reason to be diagonal -- dia
 require `dW ~ c*W`, which is not how LoRA trains. Unlike every other test in §24-§27 there is also no
 way to control it, since the reference model ships no adapters. Recorded here so the negative is not
 mistaken later for evidence that `gate`/`up`/`down` are all mis-ordered.
+
+## 29. `down`'s VALUES are correct; the fault is ordering on both axes -- and both are independently confirmed
+
+A test that separates two things earlier sections conflated. **Permutation preserves singular
+values**, so the spectrum distinguishes "wrong order" from "wrong values":
+
+| role | s1/s10 | s1/s100 | eff. rank |
+|---|---|---|---|
+| `Q` | 2.11 | 4.11 | 546 |
+| `O` | 2.41 | 5.07 | 502 |
+| `gate` / `up` | 2.81 / 2.98 | 5.33 / 4.53 | 834 / 880 |
+| **`down`** | **2.11** | **2.90** | 806 |
+| *random control* | **1.02** | **1.14** | 940 |
+
+`down` is unambiguously **trained**, nothing like the random control. So its decoded *values* are
+right and the defect is purely **ordering** -- which also means the codec, scales and slot map are
+all working, consistent with the positional read.
+
+The two oracle tests are also cleanly **independent**, which was not previously noted: permuting
+`down`'s columns cannot change `||gate @ down||_F`, and permuting its rows cannot change
+`||down @ gate(L+1)||_F`. So `gate -> down` probes *only* down's input axis and
+`down -> gate(L+1)` probes *only* its output axis. Both fail, so **both axes are independently
+misaligned** -- neither result is an artefact of the other.
+
+### A structural asymmetry that explains why
+
+`gate`'s residual axis is its **`i` axis** (`i = slot // 16`), and `O`'s residual axis is *also* its
+`i` axis (that is what the §22 transpose amounts to) -- which is exactly why `O -> gate` aligns at
++105. But `down`'s residual axis is its **`(blk, bank, o)` composite**, and its FFN axis is the `i`
+axis while `gate`'s FFN axis is *its* composite. So on both of `down`'s axes a *composite* index is
+being matched against an *i* index. Two different constructions of the same physical channel order.
+
+That is a coherent explanation for both failures at once. What it does not yield is the mapping
+between them: every transformation tried is rejected against a +328 control.
+
+| hypothesis (this round) | gate->down | down->gate(L+1) |
+|---|---|---|
+| identity (current) | +0.1 | +1.2 |
+| rolls of the 3200 axis (+-128, +-256), reverse | best +2.5 | -- |
+| gate-composite order / reversed blocks | +1.1 | -- |
+| swap `bank`<->`o` within 256-chunks (both axes) | −0.9 | −0.7 |
+| reverse `o` / reverse `bank` within chunks | −0.7 | −1.1 |
+| scale indexed by `i//200`, `(i//16)%16`, `i%16` | best +1.1 | best −0.2 |
+| *Qwen3 control* | **+57** | **+328** |
+
+Note the scale variants also **lower** `s1/s100` (3.25 current -> 2.6-2.8), i.e. they make the
+spectrum flatter/less trained -- independent evidence that the current per-output scale indexing is
+the right one and should not be changed.
+
+### Assessment
+
+Everything checkable about `down` is confirmed correct, its values are confirmed trained, the failure
+mode is understood structurally (composite-vs-`i` index construction), and every concrete mapping
+between the two constructions has been rejected against a strong control. Further blind enumeration
+is not a good use of effort: the space of "plausible reorderings" has been covered, and the answer is
+evidently not in it.
+
+The one variable never isolated remains `OutTrans=1` itself. Every tile that decodes correctly is
+`OutTrans=0`; both tiles needing intervention (`O`, `down`) are `OutTrans=1`; and `O`'s fix turned out
+to be a **transpose**, not a permutation -- a class of transform no reordering search can reach. The
+bias trick reaches pico's `0x6480` *header* but still compiles at `OutTrans=0`, so the payload effect
+of that flag has never been observed. Obtaining a weight-bearing `OutTrans=1` conv requires a
+toolchain that compiles it, which this host does not provide.
