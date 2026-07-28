@@ -33,7 +33,7 @@ sum over experts), so no selection map is needed to run it.
 | **Dense linear weights** | ✅ **validated against coreml2hwx ground truth** — real-weight decay 8–11 (scrambled ≈1.45) |
 | **Architecture** (32 full-qkv + 12 kv-reuse attn; 12 dense + 32 expert FFN) | ✅ recovered |
 | **Attention KV geometry** | ✅ **NKV=4 settled** (ablation: rank 53k vs 72k at NKV=8; live qkv is 3072-wide, Q2048+K512+V512) |
-| **Norms** | ✅ **RMSNorm γ compile-time *folded* into linears (γ=1 correct); QK-norm[128] the only explicit γ (35 recovered)** |
+| **Norms** | ✅ **γ = 1 (parameter-free) — now proven *positively* from the weights, not just by absent evidence (see PICO_NORMS.md addendum); QK-norm[128] the only explicit γ (35 recovered)** |
 | **Tokenizer** | ✅ working (byte-BPE, validated round-trip) |
 | **Router** (`ExportableExpertSelector`, plain fp16) | ✅ extracted — but ⚠️ **proven UNNECESSARY** (false blocker) |
 | **Expert-selection map** (which-of-219, "missing constant table") | ✅ **proven irrelevant AND ungated full-219 sum confirmed *optimal*** (selection/gating/scaling all score strictly worse) |
@@ -47,6 +47,50 @@ sum over experts), so no selection map is needed to run it.
 | **Running the real model** | ✅ via `afm` (Apple's `FoundationModels` runtime) |
 
 ---
+
+## pico (300M draft): six of seven weight roles proven, one tensor open
+
+The 300M draft model `afmplus-v11.0-pico` is the furthest-advanced reconstruction. Its status is
+tracked in detail in [PICO_POSREAD_RESULT.md](PICO_POSREAD_RESULT.md) §24–§37 and in the paper
+(§"What `OutTrans=1` Is").
+
+| component | status |
+|---|---|
+| embedding, tokenizer | ✅ correct (tokenization verified against real prompts) |
+| hidden RMSNorm γ | ✅ **γ = 1 proven positively** (not merely "not found") |
+| per-head QK-norm | ✅ present — **was missing from the GGUF export**, fixed by moving to the `qwen3` architecture |
+| `Q`, `K`, `V`, `gate`, `up` | ✅ correct |
+| **`O` (attention output)** | ✅ **solved — stored transposed**, three independent confirmations |
+| **`down` (FFN down-proj)** | 🔴 **open** — values proven correct, channel ordering not recovered |
+| GGUF export | ✅ compiles and runs (~15 tok/s); ❌ output incoherent |
+
+**What `OutTrans=1` actually is.** An *activation-layout* flag, not a coefficient encoding: it writes
+output channels 16× strided and interleaved. Determined perfectly by the L2 result stride across all
+**988** weight-bearing tasks in the shipped binary — 180/180 of the `OutTrans=1` tasks have a large
+stride, 0/808 of the `OutTrans=0` tasks do.
+
+**The coefficient layout is confirmed, in the shipped mode.** The 128-byte coefficient header turns
+out to be emitted by a **bias**, not a per-channel scale. Forcing that mode and running a positional
+read recovers a **perfect bijection over all 819,200 positions**, identical to the 64-byte mode:
+`o = 16·bank + (slot mod 16)`, `i = ⌊slot/16⌋`.
+
+**Why `down` still resists.** Its values are provably correct — permutation preserves singular
+values, and its spectrum is clearly trained (`s₁/s₁₀ = 2.11`) against a random control (`1.02`). Only
+the ordering is wrong. But the 3200-wide FFN axis is referenced by *only four tensors, all of which
+are among the ones in question*, so the constraint system is **underdetermined from the shipped
+data** — which is why ~15 controlled ordering hypotheses all failed.
+
+**The compiler is not the variable.** Two macOS builds spanning a major `ANECompiler` version gap
+(10.24.3 vs 9.509.0), two Xcode versions, six ANE architecture targets and two optimisation settings
+all produce byte-identical results. `ANECompiler` ships with macOS, not Xcode; simulator runtimes
+have no Neural Engine at all. A portable probe kit for testing further machines is in
+[`tools/ane_probe_kit/`](tools/ane_probe_kit).
+
+**On method.** Six instruments used in this work were later withdrawn. The two most recent were
+discarded because a null result was being read as evidence from a statistic never shown to carry
+information. The remedy now used throughout is a **positive control** — calibrate the instrument on a
+correctly-ordered reference model first (it separates true from random pairings at *z* ≈ +300 to
++400), and only then apply it. Every retraction is recorded in place.
 
 ## The current boundary — component-complete, blocked by absent ground truth
 

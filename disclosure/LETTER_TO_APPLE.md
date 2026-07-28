@@ -96,11 +96,22 @@ channel you prefer rather than over a shared link.
 
 ## Report
 
+The full technical report and all of my own analysis code are public on GitHub:
+
+**https://github.com/yu314-coder/afm-ifp-teardown**
+
+That repository is the primary, citable copy — it contains only my own original analysis and
+decoder source (the report PDF is at `paper/afm_teardown.pdf`), and, as noted above, a filter
+blocks weight and asset file types from ever being committed to it, so it is safe to browse or
+share further.
+
+For convenience I have also placed the same report PDF in a Drive folder, restricted to this
+thread:
+
 [GOOGLE DRIVE LINK]
 
-The folder contains the full technical report (PDF, 23 pages) and the decoder source. The report
-documents the recovery pipeline in full, including the parts that failed: four of my own
-intermediate results are retracted in place, each traceable to a control that destroyed more
+The report documents the recovery pipeline in full, including the parts that failed: four of my
+own intermediate results are retracted in place, each traceable to a control that destroyed more
 structure than the hypothesis it was testing.
 
 I am happy to answer questions, to walk through any part of the method, or to delay further

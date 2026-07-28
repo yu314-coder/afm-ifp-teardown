@@ -1,0 +1,194 @@
+\section{What \texorpdfstring{$\mathrm{OutTrans}{=}1$}{OutTrans=1} Is, and Why One Tensor Still Resists}\label{sec:outtrans}
+
+The reconstruction reported in \S\ref{sec:reconstruct} left seven weight roles per layer, of which
+five decoded correctly and two did not. This section resolves one of the two, identifies what the
+$\mathrm{OutTrans}$ flag physically does, narrows the remaining failure to a single tensor, and
+records the instruments that had to be discarded along the way.
+
+\subsection{A validated instrument}\label{sec:oracle}
+
+Every earlier attempt to score a candidate weight ordering used a statistic that was \emph{assumed}
+to work. One of them was later shown to be invalid outright (\S\ref{sec:retract-basis}). The
+instrument used here is derived from the computation rather than from weight statistics, and is
+calibrated against a model whose ordering is known to be correct before being applied to the
+recovered weights.
+
+The attention output projection $O$ writes residual position $j$; the FFN gate reads it. The composed
+map therefore contracts the residual index,
+\[
+  \mathrm{residual}_j=\textstyle\sum_i \mathrm{attn}_i\,O[j,i],\qquad
+  \mathrm{ffn}_k=\textstyle\sum_j \mathrm{residual}_j\,\mathrm{gate}[k,j],
+\]
+so a mis-ordered residual axis degrades $\lVert \mathrm{gate}\cdot O\rVert_F$. Scoring a candidate
+permutation $\pi$ against random re-pairings gives a $z$-score. (This is a quadratic-assignment
+objective with \emph{raw} Gram matrices; earlier attempts used row-normalised cosine matrices, which
+discard exactly the magnitude information the objective depends on---a likely reason they found
+nothing.)
+
+\begin{finding}[the instrument is calibrated, not assumed]\label{find:oracle}
+On a correctly-ordered reference model of the same architecture family (RMSNorm, per-head QK-norm,
+GQA, SwiGLU), the true pairing separates from random re-pairings at $z\approx+300$ to $+400$
+depending on the pairing type. Only then was it applied to the recovered weights.
+\end{finding}
+\noindent\emph{Evidence.} Reference control, averaged over layers: $O\!\to\!\mathrm{gate}$ (direct)
+$+406$; $\mathrm{up}\!\to\!\mathrm{down}$ (SwiGLU between) $+407$;
+$\mathrm{down}\!\to\!\mathrm{gate}(L{+}1)$ (an attention block between) $+328$;
+$\mathrm{gate}\!\to\!\mathrm{down}$ $+57$. Every pairing type is informative, including across
+nonlinearities.
+
+\subsection{The attention output projection is stored transposed}
+
+\begin{finding}[$O$ is stored transposed]\label{find:otrans}
+The attention output projection is stored with its axes swapped relative to the
+$\mathrm{OutTrans}{=}0$ roles: the axis the decoder treats as the input is in fact the residual
+(output) axis.
+\end{finding}
+\noindent\emph{Evidence.} Three mutually independent methods agree.
+(i) \emph{Composition}: as decoded, $z=+2.9$ (random); transposed, $z=+96$ to $+105$.
+(ii) \emph{Attention-head signature}: one axis of $O$ must be the head-concatenation
+($16\times64$), which shows $64$-periodic block structure. Calibrating on tensors whose orientation
+is not in doubt gives a head axis at $+0.0217$ and a residual axis at $-0.0005$; $O$'s two axes
+measure $+0.0195$ and $-0.0015$ respectively---i.e.\ reversed.
+(iii) \emph{Per-role census}: scoring every role against a verified residual reference,
+$Q$ $+300.7$, $K$ $+184.9$, $V$ $+174.5$, $\mathrm{up}$ $+523.9$ all confirm the convention
+(input $=$ residual); $O$ alone violates it, at $+160.1$ on the opposite axis.
+
+This reduces the open problem from two roles to one: with $O$ transposed, six of seven roles per
+layer are positively confirmed.
+
+\subsection{What the flag physically does}
+
+The ANE task descriptors carry L2 buffer addressing---base addresses and per-axis strides---which
+describes the \emph{activation} layout directly.
+
+\begin{finding}[$\mathrm{OutTrans}{=}1$ is a strided, interleaved output write]\label{find:outtrans2}
+The flag is perfectly determined by the L2 result stride: $\mathrm{OutTrans}{=}0$ writes channels
+contiguously, $\mathrm{OutTrans}{=}1$ writes them $16\times$ strided, with the tasks of one tensor
+interleaved into each block.
+\end{finding}
+\noindent\emph{Evidence.} Over all $988$ weight-bearing tasks in the shipped binary: every one of the
+$180$ $\mathrm{OutTrans}{=}1$ tasks has a large result stride (\code{0x810} or \code{0x800}); none of
+the $808$ $\mathrm{OutTrans}{=}0$ tasks does---those use \code{0x80}, exactly one $64$-wide
+\textrm{fp16} row. For the down-projection specifically, the four tasks read their FFN inputs
+contiguously (\code{SrcStrideC}${=}$\code{0x80}) but write to bases \code{0x14c040}, \code{0x14c240},
+\code{0x14c440}, \code{0x14c640}---\code{0x200} apart, i.e.\ four channels---under a \code{0x810}
+per-channel stride.
+
+Two consequences follow. First, the flag governs activation storage, not coefficient encoding, which
+is consistent with the positional read below. Second, the down-projection's \emph{input} axis is not
+permuted at the activation level; only its output side is in question.
+
+\subsection{The coefficient layout, read in the shipped configuration}
+
+The shipped tiles use a $128$-byte coefficient header (\code{CoeffSize} \code{0x6480}) where a
+straightforwardly compiled convolution emits $64$ bytes (\code{0x6440}). That mode initially could
+not be produced: the per-channel-scale palettization that seemed to explain it lowers to an operator
+the ANE compiler rejects.
+
+\begin{finding}[the extra header is a bias, and the payload layout is unchanged]\label{find:bias}
+The $128$-byte header is emitted when the convolution carries a \emph{bias}, not a per-channel scale.
+With that mode forced, a positional read reproduces the identical coefficient map as in the
+$64$-byte mode.
+\end{finding}
+\noindent\emph{Evidence.} Compiling with $\mathrm{bias}[o]=100+o$ and reading the header back gives
+\code{100 101 \dots 115} for bank~$0$ and \code{116 \dots 131} for bank~$1$---an exact match. A
+positional read at the shipped geometry ($3200\to256$, $16$ banks) then recovers a \emph{perfect
+bijection} over all $819{,}200$ positions,
+\[
+  o = 16\,b + (\mathrm{slot} \bmod 16), \qquad i = \lfloor \mathrm{slot}/16 \rfloor,
+\]
+identical in both header modes. The shipped tiles' geometry, codec and slot decomposition are
+therefore confirmed against hardware ground truth, not assumed.
+
+(The shipped values in that header slot are all positive and tightly banded, $0.07$--$0.44$, against
+a codebook spanning $\pm0.8$---the signature of a per-output scale rather than a bias. The slot is
+evidently reused by mode, and the decoder's interpretation is retained.)
+
+\subsection{The remaining defect, and why it is hard}
+
+\begin{finding}[the failure is confined to one tensor]\label{find:downonly}
+With $O$ transposed, every weight pairing that does not involve the FFN down-projection is aligned,
+and every pairing that does involve it sits at the random level.
+\end{finding}
+\noindent\emph{Evidence.} $O\!\to\!\mathrm{gate}$ $+104.7$ and $Q\!\to\!O$ $+70.7$ (aligned) against
+$\mathrm{down}\!\to\!Q(L{+}1)$ $+1.4$, $\mathrm{down}\!\to\!\mathrm{gate}(L{+}1)$ $+1.3$,
+$\mathrm{gate}\!\to\!\mathrm{down}$ $-2.6$, $\mathrm{up}\!\to\!\mathrm{down}$ $-1.4$. The two tests
+are independent: permuting the tensor's columns cannot change $\lVert\mathrm{gate}\cdot
+\mathrm{down}\rVert_F$, and permuting its rows cannot change the other, so both axes are implicated
+separately.
+
+The tensor's \emph{values} are correct. Permutation preserves singular values, and the recovered
+down-projection has a clearly trained spectrum ($s_1/s_{10}=2.11$, $s_1/s_{100}=2.90$) against a
+random control at $1.02$ and $1.14$. The defect is ordering alone.
+
+Reading the channel assignment out of the L2 addresses gives the right direction but not the answer.
+The thirteen tasks building one FFN tensor write to \emph{descending} addresses as the task index
+rises, spanning \code{0x064000}--\code{0x0c8000} $=3200\times128$\,B exactly, so the file order is
+\emph{reversed} relative to channel order and the $128$-wide half-block---first in the file---holds
+the \emph{last} $128$ channels. Applying that map improves
+$\mathrm{gate}\!\to\!\mathrm{down}$ from $+0.3$ to $+2.3$, and the analogous interleave improves
+$\mathrm{down}\!\to\!\mathrm{gate}(L{+}1)$ from $+0.4$ to $+3.0$. Both improve consistently across
+layers, and both remain an order of magnitude short of the calibrated reference. The likely obstacle
+is arithmetic the traces do not pin down: the stride \code{0x810} is $16\times$\code{0x80}${}+{}$\code{0x10},
+so channel slots are not uniformly spaced and any clean closed form is an approximation.
+
+\begin{observation}[the constraint system is underdetermined]\label{obs:underdet}
+The $3200$-wide FFN channel axis is referenced by only four tensors---$\mathrm{gate}$ and
+$\mathrm{up}$ (outputs), $\mathrm{down}$ (input), and the corresponding adapter factor---all of which
+are among the tensors in question. The residual axis, by contrast, is touched by seven roles, which
+is why it could be pinned. No external anchor for the FFN ordering exists in the shipped data.
+\end{observation}
+
+\subsection{The compiler is not the variable}
+
+Because the ANE compile is performed by \code{ANECompiler.framework}, which ships with the operating
+system rather than with the developer toolchain, it was natural to expect a different OS build to
+emit the configuration needed to read the layout directly. It does not.
+
+\begin{finding}[compiler version and target do not change the outcome]\label{find:compiler}
+Across two macOS builds spanning a major \code{ANECompiler} version difference, two toolchain
+versions, six ANE architecture targets and two optimisation settings, no configuration emits
+$\mathrm{OutTrans}{=}1$ on a convolution that carries coefficients.
+\end{finding}
+\noindent\emph{Evidence.} \code{ANECompiler} $10.24.3$ (macOS~$27.0$) and $9.509.0$
+(macOS~$26.5.2$) produce byte-identical task structure on all five probe graphs: the flag appears on
+$1$, $2$ and $4$ tasks for the transpose and attention graphs and is weight-bearing on \emph{none}.
+Two toolchain versions on one host likewise agree exactly, including identical failures---expected,
+since the toolchain supplies only the front end. Older ANE targets (h14, h15) never emit the flag at
+all; h16--h18 emit it only on weightless shuffle tasks. Simulator runtimes cannot substitute: the
+simulator has no Neural Engine, ships no ANE frameworks, and its own weight files are suffixed
+\code{\_nonane}.
+
+The difference in the shipped binary---which contains $180$ weight-bearing $\mathrm{OutTrans}{=}1$
+tasks---therefore originates upstream of the compiler, in how the graph reaches it.
+
+\subsection{Instruments discarded}\label{sec:retract-basis}
+
+Two more instruments were withdrawn during this work, in both cases because a null result was being
+read as evidence when the statistic had never been shown to carry information.
+
+\textbf{The residual-magnitude oracle.} A statistic scoring whether a writer's per-channel magnitude
+tracks a reader's was used to localise the defect. Calibrated afterwards on the correctly-ordered
+reference model, the reader-to-reader baseline it depends on measures $-0.176$---writer and reader
+magnitudes simply do not track each other in a correct model, so the recovered weights scoring $\approx 0$
+was the expected result rather than a defect. Every localisation drawn from it was withdrawn.
+
+\textbf{Adapter data as ground truth.} The shipped adapter constant-data file is loaded verbatim into
+an unbacked mutable kernel segment (its size matches the segment's VM size exactly, and the file is
+layer-major with autocorrelation $0.893$ at that period), which made it attractive as
+quantization-free ground truth spanning both $\mathrm{OutTrans}$ modes. Its internal role offsets
+were re-derived exactly---segmenting by RMS \emph{level} rather than by jump, then requiring the run
+lengths to be a permutation of the architecturally fixed multiset, which recovers $14$ segments and
+corrects the role order---but the file still cannot be validated against the base weights, because no
+controllable test exists for whether a randomly-initialised adapter factor \emph{should} align with
+the weight it adapts. Conclusions drawn from it are therefore not used.
+
+\subsection{Status}
+
+Six of seven weight roles per layer are positively confirmed rather than assumed. The
+down-projection's values are correct, its geometry, codec and slot decomposition are verified against
+hardware ground truth in the shipped configuration, and its channel layout is partially recovered
+from the shipped addressing. A coherent forward pass is still not achieved: one mis-ordered
+residual-writing projection is sufficient to destroy it, and closing the gap requires either the ANE
+tiling specification or a weight-bearing $\mathrm{OutTrans}{=}1$ compile, neither of which is
+reachable from the shipped assets and available toolchains.

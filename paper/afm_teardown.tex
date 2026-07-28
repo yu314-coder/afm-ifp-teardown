@@ -107,15 +107,25 @@ router$\rightarrow$expert map is \emph{mathematically irrelevant} to the output
 (Finding~\ref{find:ungated}), and the ``missing constant table'' has a shipped runtime equivalent
 (Finding~\ref{find:metabin}).
 
-\textbf{What still does not work.} A coherent from-weights forward pass. The remaining gap is narrow
-and identified: the ANE emits residual-writing projections under a coefficient ordering
-($\mathrm{OutTrans}{=}1$) that no available compiler reproduces for an isolated operator
-(Finding~\ref{find:outtrans}). Five of seven weight roles per layer are decoded correctly; two are
-not.
+\textbf{What still does not work.} A coherent from-weights forward pass---though the gap is now one
+tensor wide. The $\mathrm{OutTrans}$ flag is identified as an activation-layout property, a strided
+interleaved output write, determined perfectly by the L2 result stride across all $988$ weight-bearing
+tasks (Finding~\ref{find:outtrans2}); the attention output projection is shown to be stored
+\emph{transposed} by three independent methods (Finding~\ref{find:otrans}); and the shipped
+coefficient layout is confirmed by positional read \emph{in the shipped header mode}, a perfect
+bijection over all $819{,}200$ positions (Finding~\ref{find:bias}). \textbf{Six of seven weight roles
+per layer are now positively confirmed.} The FFN down-projection alone resists: its values are
+provably correct (a trained singular-value spectrum against a random control), but its channel
+ordering is not recovered, and the constraint system for that axis is underdetermined from the
+shipped data (Observation~\ref{obs:underdet}). One mis-ordered residual writer is enough to destroy
+the forward pass.
 
-\textbf{On negative results.} Four instruments used during this work produced confident-looking
-conclusions that later proved unfounded, each because the null hypothesis destroyed more structure
-than the hypothesis under test. Those retractions are recorded in place rather than removed
+\textbf{On negative results.} Six instruments used during this work produced confident-looking
+conclusions that later proved unfounded---four because the null hypothesis destroyed more structure
+than the hypothesis under test, and two (\S\ref{sec:retract-basis}) because a null result was read as
+evidence from a statistic never shown to carry any. The remedy adopted here is a positive control:
+calibrate the instrument on a system whose answer is known before trusting it
+(Finding~\ref{find:oracle}). Those retractions are recorded in place rather than removed
 (Findings~\ref{find:picooracle}, \ref{find:vacuous}, and \S\ref{sec:embretract}), because the
 failure mode is the most transferable result here.
 
@@ -1133,6 +1143,8 @@ A practical corollary: Apple's \code{FoundationModels} runtime remains the turnk
 the earlier claim that a from-weights standalone requires reverse-engineering the ANE
 instruction set no longer holds---the wiring is not ANE-locked behavior but a permutation-free
 sum over recovered blocks, reducing the standalone to a component-assembly exercise.
+
+\input{outtrans}
 
 \input{modelspec}
 
