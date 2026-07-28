@@ -721,7 +721,38 @@ unknown permutation:
 * head ordering / GQA fan-out
 * the **38-block KV-reusing 25th layer** (#15), currently omitted from both the forward and the GGUF
 
-## 20. Residual-basis test: the defect is the O/down **output** ordering (a fast static oracle)
+> # ⚠ SECTIONS 20, 21 AND 23 ARE RETRACTED — THE ORACLE THEY USE IS INVALID
+>
+> Sections 20, 21 and 23 all score candidates with a "residual-basis oracle" resting on one
+> assumption that was never checked: that in a correct transformer the magnitude with which a
+> **writer** (`O`, `down`) writes residual position *j* correlates with the magnitude with which a
+> **reader** (`gate`, `up`, `Q`) reads position *j*. pico's readers agreeing at +0.65 was taken as
+> the reference, and the writers scoring ~0 was read as a defect.
+>
+> `validate_oracle.py` tests that assumption on **Qwen3-4B-Instruct** — a real, correctly-ordered
+> model in pico's own architecture family (RMSNorm + per-head QK-norm + GQA + SwiGLU), dequantized
+> from Q4_K/Q6_K. Averaged over 12 layers:
+>
+> | quantity | Qwen3-4B (known correct) | pico (assumed reference) |
+> |---|---|---|
+> | `O_out ~ gate_in` | **−0.122** | +0.011 |
+> | `down_out ~ gate_in` | +0.040 | +0.022 |
+> | `gate_in ~ up_in` (the "reference") | **−0.176** | +0.650 |
+>
+> **The reader-reader reference is itself negative in a correct model.** Writer and reader
+> magnitudes do not track each other, so "pico's writers score ~0" is the *expected* result, not a
+> defect. The oracle measures nothing about ordering correctness.
+>
+> **Withdrawn:** the §20 localisation of the defect to the O/down output ordering; the §21 QAP and
+> structured-layout verdicts *as evidence about ordering* (the searches ran correctly, but their
+> scores are uninformative); the §23 conclusions about `down`. The §19 LoRA Rosetta result and the
+> §22 transpose finding are **unaffected** — §19 uses cross-bank rank consistency and §22 was
+> independently confirmed by the attention-head signature, neither of which touches this oracle.
+>
+> **Net effect:** the reconstruction is still broken, but its fault is *not* localised. The claim
+> "the defect is the O/down output ordering" is no longer supported by evidence.
+
+## 20. Residual-basis test: the defect is the O/down **output** ordering (a fast static oracle) — RETRACTED, see above
 
 `O` and `down` **write** the residual stream; `Q/K/V/gate/up` **read** it. All five readers decode in
 the round-trip-validated order, so their INPUT axis is a trustworthy sample of the residual basis. If
@@ -936,8 +967,8 @@ decomposition". The search space is larger than the retracted argument implied, 
 | hidden RMSNorm gains | correct (gamma = 1, proven positively, `PICO_NORMS.md` addendum) |
 | per-head QK-norm | **was missing from the export**; fixed by moving to the `qwen3` architecture |
 | `Q`, `K`, `V`, `gate`, `up` | correct (round-trip validated, `OutTrans=0`) |
-| `O` | **orientation solved** (stored transposed, two independent confirmations); residual ordering may still be imperfect -- recovers ~48% of reference, not 100% |
-| `down` | **unsolved** -- output ordering wrong on the sound oracle; mechanism unidentified (input-axis claim retracted) |
+| `O` | **stored transposed** -- established by the attention-head signature, which is independent of the retracted oracle |
+| `down` | **unknown** -- the oracle that localised a fault here is retracted; no evidence currently isolates the defect |
 
 `down` is now the single identified blocker, and it is a harder object than the ordering question it
 replaced: the failure of both axes simultaneously means the fix is a change to the slot decomposition,
