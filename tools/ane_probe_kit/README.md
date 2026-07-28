@@ -38,12 +38,16 @@ Apple's own weight files inside it are literally suffixed `_nonane`.
 
 ## Will macOS 26.5 work?
 
-**Unknown — that is exactly the experiment.** Being honest rather than encouraging:
+**Unknown — that is exactly the experiment**, but it is a *strong* candidate. Measured versions:
 
-* 26.5 ships a *different* `ANECompiler.framework` than 27.0, so it is a genuine, independent shot.
-* But there is no positive evidence it behaves differently on this specific scheduler decision. Treat
-  it as roughly a coin flip, not a known fix.
-* It is cheap: ~5 minutes, and the result is unambiguous either way.
+| host | macOS | `ANECompiler` |
+|---|---|---|
+| reference (answers NO) | 27.0 (26A5388g) | **10.24.3** |
+| macOS 26.5.2 (25F84) | 26.5.2 | **9.509.0** |
+
+That is a **major** version gap (10.x vs 9.x), not a point release — exactly the kind of difference
+that can change a scheduler decision. Worth running. Still not a guarantee: no positive evidence yet
+that 9.x decides this differently.
 
 **Any macOS build is worth trying**, not just 26.5 — older, newer, or beta. Run it on every Mac you
 have access to; each one either solves it or eliminates a build.
@@ -63,7 +67,10 @@ python3 -m venv venv && ./venv/bin/pip install -q coremltools numpy
 `coremltools` wheel disagree — create the venv with a Python that has a matching wheel (3.11 works
 well).
 
-Xcode (any version) must be installed, because `xcrun coremlcompiler` is used for the front-end step.
+**Full Xcode is NOT required.** The kit prefers `xcrun coremlcompiler` if present, and otherwise
+compiles through `coremltools` + the system CoreML framework, which works with only
+CommandLineTools installed. If neither path works the script says **ENVIRONMENT FAILURE** and
+explicitly does *not* claim the build was ruled out.
 
 ---
 
@@ -89,6 +96,11 @@ To run the pieces manually:
 ## How to read the result
 
 `01_outtrans_probe.py` ends with one of two verdicts.
+
+### `ENVIRONMENT FAILURE -- nothing was compiled`
+
+Nothing was tested; the build is **not** ruled out. Usually an old `coremltools`:
+`./venv/bin/pip install -U coremltools`, then re-run.
 
 ### `RESULT: NO weight-bearing OutTrans=1 on this host`
 

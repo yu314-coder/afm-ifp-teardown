@@ -118,6 +118,35 @@ GRAPHS = [('bare_conv', g_bare), ('Lclass_bias', g_lclass_bias),
 
 
 # ------------------------------------------------------------------ compile + audit
+def _compile_mlpackage(pkg, tag):
+    """Produce a .mlmodelc. Prefer xcrun (full Xcode); fall back to coremltools, which
+    uses the system CoreML framework and needs NO Xcode -- only CommandLineTools."""
+    mlc = 'mlc_' + tag
+    subprocess.run(['rm', '-rf', mlc])
+    r = subprocess.run(['xcrun', 'coremlcompiler', 'compile', pkg, mlc],
+                       capture_output=True, text=True)
+    got = glob.glob('%s/*.mlmodelc' % mlc)
+    if got:
+        return got[0], 'xcrun'
+    # ---- fallback: no Xcode needed ----
+    try:
+        import shutil
+        # NOTE: get_compiled_model_path() returns a TEMPORARY directory whose lifetime is
+        # tied to the MLModel object. The reference must be held until the copy completes,
+        # otherwise the model is garbage-collected and the directory vanishes mid-copy.
+        ml = ct.models.MLModel(pkg)
+        cp = ml.get_compiled_model_path()
+        dst = os.path.abspath(tag + '.mlmodelc')
+        shutil.rmtree(dst, ignore_errors=True)
+        shutil.copytree(cp, dst)
+        del ml
+        return dst, 'coremltools'
+    except Exception as e:
+        return None, 'both failed (xcrun: %s | coremltools: %s)' % (
+            (r.stderr or r.stdout).strip().splitlines()[-1][:70] if (r.stderr or r.stdout) else '?',
+            str(e)[:70])
+
+
 def compile_graph(progfn, tag):
     m = ct.convert(progfn(), convert_to='mlprogram',
                    minimum_deployment_target=ct.target.iOS18,
@@ -126,19 +155,17 @@ def compile_graph(progfn, tag):
         nbits=4, mode='kmeans', granularity='per_tensor', weight_threshold=256)))
     pkg = tag + '.mlpackage'
     subprocess.run(['rm', '-rf', pkg]); m.save(pkg)
-    mlc = 'mlc_' + tag
-    subprocess.run(['rm', '-rf', mlc])
-    r = subprocess.run(['xcrun', 'coremlcompiler', 'compile', pkg, mlc], capture_output=True, text=True)
-    got = glob.glob('%s/*.mlmodelc' % mlc)
-    if not got:
-        return None, 'coremlcompiler failed: %s' % ((r.stderr or r.stdout)[-160:].replace('\n', ' '))
+    src, how = _compile_mlpackage(pkg, tag)
+    if src is None:
+        return None, 'compile: %s' % how
     hx = 'hx_' + tag
     subprocess.run(['rm', '-rf', hx])
-    r2 = subprocess.run([MIL2HWX, '-a', 'h16g', '-i', got[0] + '/', '-o', hx, tag],
+    r2 = subprocess.run([MIL2HWX, '-a', 'h16g', '-i', src + '/', '-o', hx, tag],
                         capture_output=True, text=True, env=dict(os.environ, ANE_ARCH_ANY='1'))
     h = glob.glob('%s*/model.hwx' % hx)
     if not h:
         return None, 'mil_to_hwx failed: %s' % ((r2.stderr or r2.stdout)[-160:].replace('\n', ' '))
+    COMPILED_VIA.add(how)
     return h[0], None
 
 
@@ -166,6 +193,8 @@ print('=' * 74)
 print('%-22s %-7s %-11s %-14s' % ('graph', 'tasks', 'OutTrans=1', 'weight-bearing'))
 found = []
 report = {}
+COMPILED_VIA = set()
+n_ok = 0
 for name, fn in GRAPHS:
     try:
         hwx, err = compile_graph(fn, name)
@@ -173,6 +202,7 @@ for name, fn in GRAPHS:
         print('%-22s EXC %s' % (name, str(e)[:44])); continue
     if err:
         print('%-22s FAILED  %s' % (name, err[:44])); report[name] = {'error': err}; continue
+    n_ok += 1
     tasks = audit(hwx)
     ot1 = [t for t in tasks if t['OutTrans'] == '1']
     wb = [t for t in ot1 if t['banks'] > 0]
@@ -186,6 +216,18 @@ with open(os.path.join(RESULTS, 'outtrans_probe.json'), 'w') as f:
     json.dump(report, f, indent=2)
 
 print()
+print('compiled via: %s' % (', '.join(sorted(COMPILED_VIA)) or 'nothing'))
+print()
+if n_ok == 0:
+    print('!' * 74)
+    print('ENVIRONMENT FAILURE -- nothing was compiled, so NOTHING WAS TESTED.')
+    print('!' * 74)
+    print('  This is NOT a negative result and does NOT rule out this macOS build.')
+    print('  Every graph failed before reaching the ANE compiler. Common cause: no full')
+    print('  Xcode AND a coremltools too old for the fallback. Fix and re-run:')
+    print('     ./venv/bin/pip install -U coremltools')
+    print('  Then:  ./run_probe.sh')
+    sys.exit(2)
 if found:
     print('*' * 74)
     print('RESULT: *** WEIGHT-BEARING OutTrans=1 FOUND ***')
@@ -201,6 +243,6 @@ if found:
     sys.exit(0)
 else:
     print('RESULT: NO weight-bearing OutTrans=1 on this host')
-    print('  (every OutTrans=1 task, if any, was a weightless shuffle -- same as the reference host)')
+    print('  (%d of %d graphs compiled successfully, so this IS a real test)' % (n_ok, len(GRAPHS)))
     print('  This macOS build is ruled out. Please still send back results/ and the console output.')
     sys.exit(1)
