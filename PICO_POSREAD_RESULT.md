@@ -766,3 +766,75 @@ permutation.** A scalar per channel is too little information to pin a 64-way (o
 recovering it needs a statistic that uses the weight *vectors*, not their magnitudes -- for example
 matching the writer's output directions against the reader's input directions in the shared residual
 subspace, which is the natural next attempt.
+
+## 21. Second-order statistic: premise holds, but free and structured searches both fail
+
+The second-order upgrade is the group-level **direction-similarity** matrix `C[g,h]` (cosine between
+the mean weight direction of residual groups `g` and `h`) -- a 64x64 matrix rather than 64 scalars.
+
+**Premise test (passes).** Second-order structure transfers robustly between roles and across layers:
+
+| | mean |
+|---|---|
+| `gate ~ up` (two known-correct readers) | **+0.680** |
+| `gate ~ Q` | +0.527 |
+| `gate ~ gate(L+1)` (across layers) | **+0.724** |
+| shuffled control | −0.006 |
+| `O_out ~ gate` (the writer, as decoded) | **+0.130** |
+
+The writer scoring +0.130 rather than ~0 says the decode is *partially* aligned, not fully scrambled.
+
+**Free-permutation QAP (fails).** A first run appeared to reject the hypothesis but was invalid: the
+solver returned permutations scoring *below* the identity (+0.070 vs +0.137), because scipy's QAP
+maximises a raw inner product while the target is the off-diagonal *correlation* -- with an
+all-ones diagonal and an uncentred mean, the surrogate optimum is not the target optimum. After
+zeroing the diagonal, centring, and seeding a restart with the identity, the solver **never beat the
+identity on any layer**. So the group-level assignment is not an arbitrary permutation.
+
+**Structured-layout enumeration (fails).** The output index is built from three fields
+(`blk` x4, `bank` x16, `o` x16), so every digit ordering and per-field reversal -- 3! x 2^3 = 48
+candidates -- was tested exhaustively. A first pass appeared to find a winner (`o/bank/blk`,
++0.28 vs +0.10) but that was a **grouping confound**: it grouped channels in 16s *after* permuting,
+so the score partly rewarded "forms coherent groups". Re-run per channel (where a permutation is an
+exact symmetric reindex `C[perm][:,perm]`), the ranking collapses:
+
+| | 2nd-order | 1st-order |
+|---|---|---|
+| reference (two known-correct readers) | **+0.117** | **+0.729** |
+| best of all 48 structured layouts | +0.008 | +0.019 |
+| current decode | +0.002 | +0.029 |
+| shuffled control | −0.003 | −0.033 |
+
+**No digit-reordering of `(blk, bank, o)` recovers the ordering.** Both the free and the structured
+hypothesis classes are eliminated.
+
+## 22. `O` is stored **transposed** -- confirmed on two independent metrics, but it does not fix generation
+
+Testing a different *kind* of hypothesis -- not a permutation but an axis swap -- gives the clearest
+positive signal of the whole investigation. Comparing O's two axes against the residual basis:
+
+| | 1st-order (norms) | 2nd-order (directions) |
+|---|---|---|
+| O **columns** as residual (what the decoder assumes) | +0.015 | +0.003 |
+| O **rows** as residual (i.e. O stored transposed) | **+0.336** | **+0.057** |
+| reference (two known-correct readers) | +0.700 | +0.117 |
+
+Both metrics are independent, both agree, and the effect holds in **all 8 layers tested**, growing
+with depth (1st-order: L0 +0.18 -> L4 +0.52). Transposing recovers **~48% of the reference on both
+scales** (0.336/0.700 and 0.057/0.117). This is also the reading the flag name most directly
+supports: `OutTrans` = *output transpose*, set on exactly the two roles whose decode this corrects.
+
+**But it does not produce a working model, and that must be stated plainly.** Rebuilding the GGUF with
+`O` transposed (`afmplus-v11.0-pico-qwen3-Ot-F16.gguf`) makes generation *degenerate* rather than
+better: the model emits EOS immediately, and with `--ignore-eos` it produces empty output, versus
+word-salad for the untransposed build.
+
+Two readings, not yet separated:
+1. the transpose is right for `O` but `down` -- which is `[3200,1024]` and so cannot be transposed in
+   the same dimension-preserving way `O` (square) can -- remains wrong, and a half-corrected residual
+   path is not better than a uniformly wrong one;
+2. the static oracle, though well-controlled, is an imperfect proxy for functional correctness.
+
+Until those are separated, the transpose is recorded as a **statistically solid structural finding
+that has not been shown to improve the forward**, and the shipped default keeps the untransposed
+decode. It is not presented as a solve.
