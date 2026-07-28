@@ -1763,3 +1763,64 @@ constraint that could have falsified it, and it corrects the role order. But it 
 the LoRA file as ground truth for the `OutTrans` question, because no available test can confirm the
 correspondence. The §35 retraction therefore stands in substance -- LoRA-derived conclusions about
 coefficient layout remain unusable -- while the offsets themselves are now known.
+
+## 37. Channel layout read directly from Apple's L2 addresses -- directionally right, still short
+
+§33 established that the task descriptors carry the activation layout. Tracing a full layer's
+`L2_ResultBase` values yields the actual channel assignment, which had until now been assumed.
+
+### gate/up: the file order is REVERSED, and `s` is last
+
+The 13 tasks that build one FFN tensor write to descending addresses as the task index rises:
+
+```
+task 181  Cout=128  Res 0x0c4000      <- the 's' block
+task 182  Cout=256  Res 0x0bc000
+...                       (-0x8000 each, = 256 channels x 128 B)
+task 193  Cout=256  Res 0x064000
+```
+
+The tensor spans `0x064000 .. 0x0c8000` = 409,600 B = 3200 x 128 B exactly. Converting address to
+channel index (`(addr - 0x064000) / 0x80`):
+
+* task 193 (the **last** file block) -> channels **0..255**
+* task 182 -> channels 2816..3071
+* task 181, the `s` block (**first** in the file) -> channels **3072..3199**, i.e. **last**
+
+So the weight map's file order is **reversed** relative to logical channel order, and the `s`
+half-block sits at the **end**. Both facts are read from Apple's binary, not inferred.
+
+### Measured effect
+
+| | mean z |
+|---|---|
+| `gate -> down`, file order (current decoder) | +0.3 |
+| `gate -> down`, **L2-derived** gate map | **+2.3** |
+| `up -> down`, L2-derived | +2.0 |
+| *Qwen3 control* | +57 |
+
+Then, holding the L2-derived gate map fixed and sweeping `down`'s output map:
+
+| `down` output map | mean z |
+|---|---|
+| contiguous `t*256+j` (current) | +0.4 |
+| task-interleaved `t+4j` | −1.1 |
+| **L2-derived `(j//4)*16 + t*4 + (j%4)`** | **+3.0** |
+| reversed task `(3-t)*256+j` | +0.7 |
+| *Qwen3 control* | +328 |
+
+### Reading this honestly
+
+Every L2-derived map improves its baseline, consistently and across all layers tested
+(+0.3 -> +2.3 for gate, +0.4 -> +3.0 for down). That is a real signal and the direction is almost
+certainly right -- these maps come from Apple's own addressing rather than from a guess.
+
+But the magnitude is an order of magnitude short of a correct pairing. The likely reason is
+arithmetic that these traces do not pin down: the `OutTrans=1` stride is `0x810 = 16 x 0x80 + 0x10`,
+so channel slots inside a block are **not uniformly spaced**, and any clean formula like
+`(j//4)*16 + t*4 + (j%4)` is at best an approximation of the true tiling. Resolving the remaining
+padding arithmetic needs either the ANE tiling specification or a weight-bearing `OutTrans=1` compile
+to read it off -- and §34 showed no available compiler configuration produces one.
+
+The decoder default is left unchanged: a partial map that scores +3 against a +328 reference is not
+evidence enough to ship, and adopting it would silently bake in an unverified layout.
