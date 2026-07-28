@@ -1508,3 +1508,26 @@ different Xcode. Concretely, either:
   `.tbd`, loaded ahead of the system one via `DYLD_FRAMEWORK_PATH`.
 
 Neither is available here, and no amount of Xcode switching substitutes for it.
+
+### Simulator runtimes cannot supply an alternative ANECompiler
+
+§32 proposed loading a different `ANECompiler` from a simulator runtime via `DYLD_FRAMEWORK_PATH`,
+as the only route not needing second hardware. **That route is closed, for a structural reason.**
+
+Three iOS runtimes are installed (18.4 / 26.5 / 27.0, plus two watchOS). Checked directly:
+
+| | |
+|---|---|
+| PrivateFrameworks inside the iOS 18.4 runtime | **1,979** (so the image is fully populated) |
+| `ANE*.framework` in that runtime | **0** |
+| `ANECompiler` across all three iOS runtimes | **0 / 0 / 0** |
+| `Vision.framework` espresso weight files named `*_nonane` | **12** |
+
+The `_nonane` suffix is Apple's own marker for "no ANE". The iOS Simulator executes on the host
+Mac's CPU/GPU and has **no Neural Engine**, so no ANE compiler or ANE services ship in any runtime
+image. This is by design, not a missing download -- no simulator runtime of any version will ever
+provide one.
+
+**Consequence:** every on-machine route to a different ANE compiler is now eliminated. The system
+`ANECompiler.framework` (macOS 27.0, build 26A5388g) is the only one that exists here, and the
+requirement reduces to a Mac running a different macOS build.
