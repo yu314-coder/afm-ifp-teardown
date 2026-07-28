@@ -2357,3 +2357,79 @@ a fine-grained **intra-tile** scramble, where the ANE tile decode emits correct 
 positions below the granularity any coarse permutation can express. That is a considerably more
 specific statement of the defect than "V/O are wrong", and unlike the FFN's channel permutation it
 comes with a fast isolating test that needs no working forward.
+
+## 45. Exact permutation solving, and what the attention block actually contains
+
+Brute force over O's input axis is not available -- 1024! arrangements. But the copy objective
+factorizes, which allows the exact optimum to be computed instead of searched.
+
+### 45.1 The layout problem is a linear assignment problem
+
+With `H` the rms-normalized embedding sample, `En` the L2-normalized one, and `G = H^T En`:
+
+```
+sum_t (h_t A) . e_t  =  <A, G>_F
+A = B M[pi],  B = Wv.T R        =>   <A,G> = sum_a Y[a,:] . M[pi[a],:],   Y = B^T G
+                                =>   score(pi) = sum_a Cost[a, pi[a]],    Cost = Y M^T
+```
+
+so the best permutation over all `1024!` is the Hungarian solution of a 1024x1024 cost matrix --
+seconds, and globally optimal rather than sampled.
+
+**The solver was validated before being trusted.** On Qwen3-4B layer 0, a known permutation was
+planted and the pipeline asked to invert it:
+
+| | z |
+|---|---|
+| intact | 3.692 |
+| scrambled by `pi_true` | 0.010 |
+| **Hungarian solution** | **2.473** |
+
+It recovers two thirds of the signal (exact positional agreement is only 245/4096, because many
+coordinates are near-degenerate -- the score is what matters). The machinery works.
+
+Applied to pico it returns **nothing**: 0.279 on the very layers it was fit to, against 0.355 for the
+identity and a random band reaching 0.42. A validated global optimizer finding no improvement on its
+own training layers is strong evidence that **the V/O defect is not a permutation of O's input axis
+at all.**
+
+### 45.2 Tile-level rearrangements: also null
+
+The ANE stores these as 128x128 tiles, and two rearrangements lie outside the row-permutation group:
+per-tile transpose `(tr,r,tc,c)->(tr,c,tc,r)` and tile-grid transpose `(tr,r,tc,c)->(tc,r,tr,c)`,
+swept on V and O independently and jointly, times orientation. Best configuration: **0.388**, against
+a 0.39 noise floor. Null.
+
+### 45.3 What the attention block actually contains
+
+A null on the OV metric has two readings -- V/O is broken, or pico simply has no OV-copy structure
+and the metric does not apply to it. Sections 43-44 assumed the first. This control decides it, and
+simultaneously closes the open question of whether Q/K were ever verified (they were not; sharp
+attention had been taken as evidence, but random matrices can also produce sharp attention).
+
+Layer-0 attention computed directly from embeddings, so the degraded residual stream plays no part:
+
+| | sharp fraction | H/H_uniform |
+|---|---|---|
+| pico, **real** Q/K | **0.0468** | 0.796 |
+| pico, **random** Q/K (norm-matched Gaussian) | 0.0050 | 0.860 |
+| Qwen3-4B, real Q/K | **0.4149** | 0.518 |
+
+Two conclusions. First, pico's Q/K carry **genuine signal -- 9x above norm-matched random** -- so the
+decode is not noise, and pico does exhibit structure where structure exists. That is what makes the
+V/O null attributable: the metrics are applicable to this model. Second, Q/K are also **~9x below a
+correct model**, so they are *partially* decoded, not correct.
+
+### Standing, corrected
+
+The attention block as a whole is partially decoded, which is a broader statement than sec.43-44 made:
+
+* **Q/K** -- real but degraded signal (9x random, 9x below control). Previously described as
+  "confirmed" on the strength of sharp attention; that was never a controlled claim and is now
+  measured properly.
+* **V/O** -- at the noise floor under orientation, the exact optimum over all 1024! row permutations,
+  all head-layout conventions, and all tile transposes.
+
+Both are consistent with a fine-grained intra-tile scramble that leaves some positions correct --
+which is exactly what "9x above random, 9x below correct" looks like for Q/K, and what a total loss
+of the OV pairing looks like for V/O.
