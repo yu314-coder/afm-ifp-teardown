@@ -2189,3 +2189,101 @@ relative channel permutation is **one** unknown rather than two, that none of 67
 candidates for it survives contact with controls, and that the current decode's ordering is not
 measurably better than random. That is a sharper statement of the blocker than sec.41 could make,
 and it is still a blocker.
+
+## 43. The embedding is proven correct, the QK-norm was self-inflicted, and V/O are broken
+
+Section 42 established a controlled NLL oracle and found the FFN's relative permutation
+underdetermined. Pushing further with that oracle produced three results that change the picture,
+and one retraction.
+
+### 43.1 The embedding and token mapping are correct (first ironclad component proof)
+
+At depth 0 the model predicts the **current** token at 600/600 positions -- correct tied-embedding
+behaviour. That test is *invariant to any permutation of embedding rows*, so on its own it proves
+nothing about the token-id to row mapping; my own notes flag exactly this as vacuous. The semantic
+geometry settles it:
+
+```
+ Paris  ->  Paris, PARIS, Paris(fr), Bei-jing-glyph form, paris, Parisian, Parizh(ru)
+ dog    ->  dogs, Dog, DOG, Dogs
+ three  ->  Three, two, four, trois, drei, tres
+```
+
+Multilingual semantic neighbourhoods in every case. **The embedding and the token-id mapping are
+correct.** This is the first component of the reconstruction validated positively and
+unambiguously, and it makes the embedding usable as ground truth for testing other tensors.
+
+### 43.2 The QK-norm was self-inflicted, and it was destroying attention at evaluation time
+
+Attention entropy was measured against the uniform bound `ln(t)`:
+
+| config | mean sharp fraction | max over layers |
+|---|---|---|
+| RoPE half, **QK-norm on** | 0.0012 | 0.0038 |
+| RoPE half, **QK-norm off** | **0.1809** | **0.7073** |
+
+With the per-head QK-norm applied, attention is uniform at all 24 layers -- no head is sharp
+anywhere. Remove it and real structure appears, rising with depth to 0.71 at layer 19. All gammas
+are exactly 1.0, so this is not a bad gamma: applying a per-head RMS normalization over 64 dims is
+itself wrong for this model.
+
+This matters beyond attention. The `qwen3` architecture was adopted specifically to add QK-norm,
+which means **every FFN search ever run here -- the 67-hypothesis sweep of sec.42, and the ~15
+hypothesis classes before it -- was scored through a forward whose attention had been flattened to
+noise.** No FFN hypothesis could have shown a signal under those conditions.
+
+Related nulls, all measured: RoPE `half` (LLaMA/NeoX) beats interleaved (GPT-J) and no-RoPE on
+attention structure, so the convention is right. `head_dim = 64` (16Q/4KV) beats 32, 128 and 256 --
+so the `QKNorm[128]` note of task 11 does **not** imply 128-wide heads. Embedding scale helps at no
+value tested; `sqrt(D) = 32` makes NLL worse, and the residual trace explains why (RMSNorm makes
+every sublayer scale-invariant, so the scale only shifts the copy/predict balance).
+
+### 43.3 Re-running the FFN sweep with attention working
+
+With the QK-norm removed, five of 67 hypotheses beat all 20 random controls, where previously the
+best *random* permutation beat every hypothesis:
+
+| hypothesis | NLL | controls beating it |
+|---|---|---|
+| `T(4,800)+revblk` | 12.582 | 0/20 |
+| `transpose(40,80)` | 12.709 | 0/20 |
+| `revblk(64)` | 13.032 | 0/20 |
+| `identity` | 13.323 | 1/20 |
+| best random control | 13.320 | -- |
+
+Held to the same standard as before, this is **still not significant**: with 67 hypotheses against 20
+controls, ~3.2 are expected to beat all controls under the null, and 5 were observed.
+`T(4,800)+revblk` has now won three independent runs on different token sets and different attention
+settings, which is worth recording but is not proof. A joint sweep over embedding scale x
+permutation found no cell below chance, and `top1-next` is **0/299 in all 25 cells**.
+
+### 43.4 V and O are broken -- a second blocker, with an FFN-independent test for it
+
+Because the embedding is now trusted, the OV circuit can be tested on its own. If attention selects
+one token, a head contributes `rms(e_s) @ Wv.T @ R @ Wo.T` with `R` the GQA repetition map; this is
+independent of the attention pattern and of the entire FFN. Scored as
+`cos(rms(e) @ A_L, e)` against a shuffled-token control:
+
+| model | mean abs z | max abs z |
+|---|---|---|
+| Qwen3-4B (known good) | -- | **8.2** (2.0-4.5 in early layers) |
+| pico, as decoded | **0.04** | 0.10 |
+| pico, **O transposed** | **0.39** | 0.54 |
+
+The metric is real -- it registers strongly on a working model. pico registers essentially nothing.
+**V and/or O are mis-decoded**, which is a second blocker and was not previously known; it also means
+the "six of seven roles proven" claim -- which rested on the composition oracle retracted in sec.39 --
+does not survive. Transposing `O` improves the metric tenfold and consistently across all layers,
+which agrees with the independent statistical evidence of sec.22/30, but at 0.39 against a control of
+2-8 it is clearly not the whole story. GQA head order (blocked vs interleaved) makes no difference.
+
+### Standing
+
+The blocker is no longer "one tensor". Confirmed correct: the embedding, the token mapping, the
+tokenizer, the RoPE convention, the head configuration, and gamma=1. Confirmed broken: V/O, by a
+metric validated on a known-good model. Undetermined: the FFN's relative channel permutation, whose
+entire search history was conducted through a forward crippled by a QK-norm this work added itself.
+
+The useful development is methodological. The OV test needs no working forward and no FFN, so V/O
+can now be attacked directly instead of end-to-end -- which is the first time any single tensor role
+in this reconstruction has had an isolating test with a positive control.
