@@ -1605,3 +1605,56 @@ how the `0x810` stride with its `0x10` padding maps task-local channel `j` to a 
 channel. That is a question about ANE L2 tiling arithmetic, and it can be answered exactly by a
 weight-bearing `OutTrans=1` compile on any host that emits one -- which is precisely what the probe
 kit tests for.
+
+## 34. Cross-machine and cross-configuration result: the compiler is not the variable
+
+§32 concluded that a different macOS build was the remaining requirement, since `ANECompiler`
+ships with the OS. That has now been tested on real hardware, and the conclusion must be tightened.
+
+### Two macOS builds, a MAJOR ANECompiler version apart -- identical output
+
+| | reference host | second machine |
+|---|---|---|
+| macOS | 27.0 (26A5388g) | **26.5.2 (25F84)** |
+| `ANECompiler` | 10.24.3 | **9.509.0** |
+| Xcode | full 26.5 / 27.0b | CommandLineTools only |
+| compiled via | `xcrun` | `coremltools` fallback |
+
+| graph | tasks | `OutTrans=1` | weight-bearing |
+|---|---|---|---|
+| `bare_conv` | 1 | 0 | 0 |
+| `Lclass_bias` | 1 | 0 | 0 |
+| `transpose_conv_add` | 3 | 1 | **0** |
+| `real_MHA` | 12 | 2 | **0** |
+| `real_MHA_x2` | 24 | 4 | **0** |
+
+**Byte-identical on both machines.** A 10.x -> 9.x gap is a major-version difference, not a point
+release, and it changed nothing. (The first attempt on that machine produced a *false* negative: it
+had only CommandLineTools, so `xcrun coremlcompiler` was missing and nothing compiled. The kit now
+falls back to `coremltools` + the system CoreML framework and distinguishes an environment failure
+from a real result -- both runs above are real, with 5 of 5 graphs compiled.)
+
+### ANE architecture targets and optimisation flags -- also null
+
+| target | `OutTrans=1` | weight-bearing | with `-O` (no-optimize) |
+|---|---|---|---|
+| h13 | compile fails | -- | fails |
+| h14, h15 | **0** | 0 | fails (code 22) |
+| h16, h17, h18 | 2 | **0** | fails (code 22) |
+
+`OutTrans` is a newer-generation feature -- h14/h15 never emit it at all, h16+ emit it only on
+weightless shuffle tasks. pico's shipped hwx has the same CPU type/subtype (`0x0080` / `0x0007`) as
+the probe builds, so the target arch was already correct.
+
+### What this changes
+
+The search space is now: **2 macOS builds x 2 ANECompiler major versions x 2 Xcode versions x 6 ANE
+arch targets x 2 optimisation settings x 5 graph shapes** -- and every compilable combination gives
+the same answer. `OutTrans=1` never lands on a conv that carries coefficients.
+
+So the earlier framing ("find a Mac with a different ANECompiler") is **substantially weakened**. The
+compiler version is demonstrably not the variable. Apple's shipped model has 180 weight-bearing
+`OutTrans=1` tasks, so their build pipeline produces something none of these configurations does --
+most plausibly an internal toolchain or a graph construct that cannot be expressed through
+`coremltools`' MIL front end. Trying additional macOS versions is now low-value; the evidence says
+the difference is upstream of the compiler, in how the graph reaches it.
