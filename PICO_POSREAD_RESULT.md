@@ -591,3 +591,55 @@ this test fed `softmax` directly into `conv(O)` with no intervening transpose. I
 scheduler's `OutTrans=1` choice is keyed specifically off a transpose op sitting immediately upstream
 of the conv (cheap to fuse into a storage transpose) rather than off softmax/depth/residual-writes at
 all -- a hypothesis distinct from everything tested above, and not yet tried.
+
+## 18. Transpose adjacency DOES emit `OutTrans=1` -- but only on weightless tasks
+
+`outtrans_transpose.py` tests the #17 hypothesis. Adding a real head-merge transpose upstream of the
+conv produces the **first `OutTrans=1` ever obtained from a synthetic graph** in this project:
+
+| variant | `OutTrans` values | conv tasks |
+|---|---|---|
+| `transpose -> transpose -> conv` | `{0}` | 1 |
+| `reshape -> conv` | `{0}` | 2 |
+| `transpose -> reshape -> conv -> add` | **`{0,1}`** | 3 |
+| full real MHA (QKV convs, head reshape, `QK^T`, softmax, `V` matmul, head-merge transpose) `-> conv_O -> add` | **`{0,1}`** | 16 |
+| 4x stacked real MHA blocks | **`{0,1}`** | 61 (8 of them `OutTrans=1`) |
+
+So transposes are unambiguously *involved* in `OutTrans=1`. **However, this does not reproduce pico's
+condition.** Parsing which task carries the flag:
+
+* In the synthetic graphs, every `OutTrans=1` task is **weightless** -- `Pal=-`, `banks=0`, no
+  `CoeffSize` -- i.e. the compiler emits the head-merge transpose as its *own* standalone shuffle task
+  and leaves the consuming palettized conv at `OutTrans=0`.
+* In pico, `OutTrans=1` sits on **weight-bearing convs**: of 363 `OutTrans=1` tasks, **180 carry
+  coefficient banks** (`Pal=1(4bit)`, 15 `CoeffBase` entries, real `CoeffSize`).
+
+The transpose is therefore *fused into* the conv's coefficient read in the real model, and *not fused*
+in every graph the local compiler will build. Reproducing `OutTrans=1` on a **weight-bearing** conv --
+the only kind whose coefficient stream a positional read could decode -- remains unachieved.
+
+### A shape-independence result that supersedes the shape sweeps
+
+The census of pico's own weight-bearing convs settles a question the earlier shape sweeps could not:
+
+| Cin -> Cout | CoeffSize0 | `OutTrans=0` | `OutTrans=1` |
+|---|---|---|---|
+| 1024 -> 256 | `0x2080` | **546** | **72** |
+| 3200 -> 256 (down-proj) | `0x6480` | 0 | **72** |
+| 32 -> 1024 | `0x1000` | 19 | 36 |
+| 1024 -> 32 / 32 -> 3200 / 1024 -> 128 / ... | various | 808 total | -- |
+
+The identical configuration `1024 -> 256, CoeffSize 0x2080` occurs **both ways** (546 vs 72). This is
+direct proof from Apple's own binary that `OutTrans` is **not a function of conv shape or coefficient
+container** -- it is a scheduler decision made from surrounding graph context. Every shape-sweep
+approach was therefore searching a space that provably cannot contain the answer.
+
+It also *confirms* the residual-write rule stated in #13: the down-projection is `OutTrans=1` in
+**72 of 72** instances (never 0), and the `OutTrans=1` subset of the `1024 -> 256` population numbers
+exactly **72** as well -- matching down-proj's count, consistent with these being the O-projections.
+`Q`/`K`/`V`/`gate`/`up` make up the `OutTrans=0` remainder. So "the two projections that write into
+the residual stream are the `OutTrans=1` ones" survives this much sharper test.
+
+No readable config field separates the two populations (diffing every `key=value` in both groups
+returns only incidental address/`Tag` differences), consistent with the flag being assigned by the
+scheduler rather than derived from any property recorded in the task.
