@@ -973,3 +973,94 @@ decomposition". The search space is larger than the retracted argument implied, 
 `down` is now the single identified blocker, and it is a harder object than the ordering question it
 replaced: the failure of both axes simultaneously means the fix is a change to the slot decomposition,
 not a permutation of either axis.
+
+---
+
+## 24. A control-validated oracle, and what it establishes
+
+Every oracle used before this section was *assumed* to work, and §20's was later shown to be
+outright invalid. This section builds one that is **validated against a known-good model first**,
+then applies it. All pico numbers come from Apple's shipped asset decoded by our own code; the
+reference model is used only as a calibration standard, exactly like checking an instrument
+against a known weight. No third-party weights enter pico, the export, or any result.
+
+### The statistic
+
+Derived from the computation rather than from weight statistics. `O` writes residual position *j*
+and `gate` reads it, so the composed map contracts over the residual index:
+
+```
+residual_j = sum_i attn_i * O[j,i]        ffn_k = sum_j residual_j * gate[k,j]
+=> composed:  gate @ O          score = || A @ B ||_F  vs random permutation of the contracted axis
+```
+
+Trained networks align successive transformations, so the correct pairing should score higher than
+a random re-pairing. (This is the QAP objective with **raw** Gram matrices; earlier attempts used
+row-normalised *cosine* matrices, which discard exactly the magnitude information the objective
+depends on -- a likely reason they found nothing.)
+
+### Positive control (Qwen3-4B-Instruct, dequantized from Q4_K/Q6_K)
+
+| | identity | random mean | z |
+|---|---|---|---|
+| 8 layers, `gate @ O` | ~200 | ~160 | **+300 mean** |
+
+The control **passes decisively**: the statistic detects a correct residual pairing at z ≈ +300
+against a random one. Only after this was it applied to pico.
+
+### Result 1 -- `O` is stored transposed (now functionally confirmed)
+
+| orientation | z |
+|---|---|
+| `O` as decoded (`[attn, res]`) | **+2.9** (random) |
+| `O` transposed (`[res, attn]`) | **+96 … +105** (strongly aligned) |
+
+This independently reproduces §22's transpose finding with a validated functional statistic, and it
+does *not* rely on the retracted magnitude oracle. Together with the attention-head signature, the
+transpose is confirmed by three mutually independent methods.
+
+### Result 2 -- the defect is isolated to `down`
+
+Auditing every pairing where two pico tensors share an index (5 layers):
+
+| pairing | best orientation | mean z | |
+|---|---|---|---|
+| `O -> gate` [residual] | transposed | **+104.7** | aligned |
+| `Q -> O` [head] | transposed | **+70.7** | aligned |
+| `down -> Q(L+1)` [residual] | as-decoded | +1.4 | random |
+| `down -> gate(L+1)` [residual] | as-decoded | +1.3 | random |
+| `gate -> down` [ffn] | as-decoded | −2.6 | random |
+| `up -> down` [ffn] | as-decoded | −1.4 | random |
+
+**Every pairing involving `down` is at the random level; every pairing not involving it is aligned.**
+With O transposed, the rest of the network is correctly decoded. `down` is the sole remaining defect,
+and *both* of its axes fail -- the signature of a wrong slot -> (input, output) decomposition inside
+the bank rather than a permutation of either axis. (Unlike §20/§23, this isolation rests on a
+statistic with a passing positive control.)
+
+### Result 3 -- what `down` is NOT (all scored on the valid oracle)
+
+| hypothesis | best z |
+|---|---|
+| slot = `(i//G)*(16G) + o*G + (i%G)` for G = 1,2,4,8,16,32,64,3200 | **+2.4** (at G=64) |
+| scale applied per-output `sc[o]` (current) / omitted / reversed | +1.1 / +2.1 / +1.0 |
+| all 48 `(blk,bank,o)` digit orderings and reversals | previously rejected |
+| bit-reversal / z-order shuffles | previously rejected |
+
+Nothing approaches the +105 that the *correct* pairings reach. `down`'s L-class geometry is
+confirmed sound (16 outputs x 3200 inputs per bank; 4 blocks x 16 banks x 16 = 1024 outputs), so the
+defect is in how a bank's 51,200 nibbles map to `(input, output)` pairs -- and it is none of the
+natural candidates.
+
+### Standing state
+
+| component | status |
+|---|---|
+| embedding, tokenizer, gamma=1, QK-norm | correct |
+| `Q`, `K`, `V`, `gate`, `up` | correct |
+| `O` | **solved** -- stored transposed, three independent confirmations |
+| `down` | **unsolved** -- both axes scrambled; decomposition not recovered |
+
+Six of seven weight roles are now positively confirmed rather than merely assumed. One wrong
+residual writer is still enough to destroy the forward, so the model does not yet generate coherent
+text -- but the open problem is now a single tensor with a validated test to score candidates against.
