@@ -1064,3 +1064,67 @@ natural candidates.
 Six of seven weight roles are now positively confirmed rather than merely assumed. One wrong
 residual writer is still enough to destroy the forward, so the model does not yet generate coherent
 text -- but the open problem is now a single tensor with a validated test to score candidates against.
+
+## 25. L-class positional read: the decoder is CONFIRMED; the wall is the scale-bearing mode
+
+Rather than continue rejecting candidate decompositions for `down`, the positional read that
+originally cracked the N-class was executed at pico's **L-class** geometry
+(`Cin=3200 -> Cout=256`, 4-bit palettized, 16 banks). Five probes encode the position digits
+(`o0,o1` for `o` in [0,256); `i0,i1,i2` for `i` in [0,3200)), each weight already an integer in
+[0,16) so palettization is exact, and each bank decoded through its **own** codebook.
+
+Two practical corrections were needed, both real bugs in the first attempt:
+* the coefficient bytes must be located from the parsed `__KERN_0` **file offset** (`0x14000`) and
+  the emitted `CoeffSize` (`0x6440`), not by scanning for a "plausible codebook" -- that heuristic
+  landed in `__DEBUG` and produced garbage (26 distinct pairs instead of 819,200);
+* the header length is `CoeffSize - payload`, derived rather than assumed.
+
+### Result: perfect bijection
+
+```
+819,200 distinct (o,i) pairs over 256 x 3200   -- complete, no collisions
+o range [0..255]     i range [0..3199]
+bank 0 slots  0..15 -> o = 0..15,  i = 0
+bank 0 slots 16..31 -> o = 0..15,  i = 1
+bank 0 o in [0..15]   bank 1 o in [16..31]
+
+    =>   o = 16*bank + (slot % 16)        i = slot // 16
+```
+
+**This is exactly the current decoder.** So the L-class slot decomposition is not the defect: it is
+now positively confirmed against ANE ground truth, not merely assumed. That closes the hypothesis
+class §24 was searching (chunked slot decompositions), and explains why every candidate there failed
+-- the decoder was already right.
+
+### The remaining difference, and the wall
+
+The probe emits `CoeffSize 0x6440` = 64-byte header + 25,600-byte payload. pico's shipped `down`
+tiles are `0x6480` = **128-byte header**, the extra 64 bytes being 16 fp16 **scales** + 32 unknown.
+The payload size is identical; what is unverified is whether the scale-bearing mode lays that
+payload out the same way.
+
+That mode could not be produced with the available toolchain:
+
+| palettization config | emitted |
+|---|---|
+| `per_grouped_channel, group_size=16, channel_axis=0` | `0x6440` (no scale table) |
+| `per_grouped_channel, group_size=1, channel_axis=0` | `0x0680` (per-channel LUT, different layout) |
+| `per_tensor + enable_per_channel_scale` | **compile fails** -- `InvalidMILProgram` |
+| `per_grouped_channel gs=1 + enable_per_channel_scale` | **compile fails** -- `InvalidMILProgram` |
+
+Both scale-bearing configurations lower to `constexpr_blockwise_shift_scale`, which this machine's
+ANE compiler rejects outright, before any layout is emitted. This is the same wall recorded in §5
+(candidate 2), now confirmed against the modern `mlprogram -> coremlcompiler -> mil_to_hwx` path
+rather than the legacy one.
+
+### Where this leaves `down`
+
+Positively established: the L-class geometry, the codec, and the slot decomposition are all correct.
+Established by the control-validated oracle (§24): `down` nonetheless fails every pairing, on both
+axes, while every non-`down` pairing is aligned.
+
+Those two facts together mean the defect is **not** in the plain-mode layout the probe can reach. It
+is in what the scale-bearing mode does differently -- most likely how the 16 per-bank scales attach
+to the payload -- and that mode is currently **unreproducible on this toolchain**, so it cannot be
+read positionally. This is a tooling limit, stated as such: not "we could not find the permutation",
+but "the one mode that differs cannot be compiled here to be measured".
