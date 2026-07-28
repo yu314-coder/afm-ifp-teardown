@@ -2097,3 +2097,95 @@ text, and the corrections that hardware evidence most strongly supports do not c
 That is a narrower and better-evidenced failure than before, but it is a failure, and the honest
 reading is that at least one assumption still standing is wrong in a way none of the available
 instruments -- statistical or hardware-derived -- has isolated.
+
+## 42. An NLL oracle, an invariance that retracts sec.41, and a third RMSNorm
+
+Sections 39-41 left the composition oracle discredited and the hardware-derived corrections
+functionally useless. This section replaces the instrument and re-derives what is actually unknown.
+
+### 42.1 The forward harness is faithful
+
+A NumPy forward reading the GGUF directly reproduces llama.cpp's word-salad continuation for the same
+prompt. Hypotheses can therefore be tested without rebuilding a GGUF each time.
+
+### 42.2 Teacher-forced NLL, with a known-good control
+
+Generated text cannot discriminate anything while one tensor is wrong -- every variant is salad. NLL
+is continuous and has a hard reference scale: uniform over the vocabulary is `ln(262144) = 12.477`.
+The same ablations were run on Qwen3-4B, whose weights are known good:
+
+| | chance | intact | attn-only (`ffn_down=0`) | ffn-only (`attn_output=0`) |
+|---|---|---|---|---|
+| Qwen3-4B (control) | 11.93 | **1.47** | 18.14 | 11.44 |
+| pico (this work) | 12.48 | **13.33** | 14.66 | 13.31 |
+
+Two things follow, and the second corrects an inference I had been about to make.
+
+1. pico shows **no language-modelling signal at all** -- it is at or slightly above chance.
+2. Deleting the FFN from a *perfectly good* model costs 16.7 nats and lands **far worse than
+   chance**. So pico sitting at chance is entirely consistent with "every role correct except
+   `down`". Being at chance is **not** evidence of a second defect, and an earlier attempt to read
+   it that way -- via an attention-only/FFN-only text ablation -- was uninformative for the same
+   reason: the control, ablated identically, is also incoherent.
+
+### 42.3 Joint-permutation invariance: sec.41's gate/up remap could never have mattered
+
+Applying the L2-derived channel map to gate/up **and the same permutation to down's input axis**
+returns NLL `13.325` -- bit-for-bit the base value. This is not a coincidence but an identity: the
+FFN is invariant under any joint permutation of gate/up's output channels and down's input channels,
+because the two index the same 3200 neurons. Applying it to one end only (as the `hw` build did)
+scores `16.514`.
+
+**Consequences.** The L2-derived channel map is *functionally irrelevant*; sec.41's `hw`/`hw2` builds
+tested nothing about it, and its "read directly from Apple's task addressing, almost certainly right"
+framing was beside the point. The only meaningful unknown in the FFN is the **relative** permutation
+between down's input axis and gate/up's output axis -- one degree of freedom, not two.
+
+### 42.4 The relative permutation: swept, and null
+
+67 structured bijections of 3200 (every factorization transpose, block reversals, rotations, and
+transpose-then-reverse) were scored by NLL against random-permutation controls, then the top
+candidates re-tested with 6x the tokens and 24 controls:
+
+| hypothesis | NLL | controls beating it |
+|---|---|---|
+| `T(4,800)+revblk` | 12.545 | 1/24 |
+| `revblk(80)` | 13.048 | 2/24 |
+| `identity` (current decode) | 13.164 | 3/24 |
+| **best random control** | **12.476** | -- |
+
+The best of 24 *random* permutations beats every structured hypothesis, including the sweep's winner
+and including identity. **No candidate is distinguishable from noise.** In particular the exploratory
+round's apparent "identity beats shuffled" signal (13.33 vs 13.87) did not survive more tokens and
+more controls -- it was small-sample noise, and the claim that the current ordering is "partially
+right" is withdrawn.
+
+### 42.5 A third RMSNorm per layer
+
+The shipped graph contains **142 `ANE_RMSNorm` against 45 `ANE_ScaledDotProductAttention`** -- a ratio
+of 3.16 -- with `ANE_QKNorm` (46) a *separate* op family. Every GGUF built here uses `qwen3`
+architecture, which has exactly **two** norms per layer. So the graph carries one normalization per
+layer that the reconstruction does not.
+
+Since gamma=1 is already established for pico, the extra norm is parameter-free and costs nothing to
+test. All four placements were tried in the NumPy forward -- pre-norm only (baseline), post-attention,
+post-FFN, and both (Gemma2-style sandwich). **All four are incoherent**, and NLL separates none of
+them from chance.
+
+Two readings remain open, and the evidence here does not choose between them:
+
+* the third norm is real and sits somewhere not yet tried (on the residual stream, on the KV path, or
+  on the embedding), or
+* it belongs to the **LoRA/adapter path** rather than the base model. The graph is the *adapted*
+  model -- it ships `lora_32`/`lora_64` constant data -- and `ANE_MultiOutputLinear` shows the same
+  ~2.9-per-block ratio, which is what an extra adapter projection per block would look like. On this
+  reading the third norm is not part of the base model at all and correctly has no place in the GGUF.
+
+### Standing
+
+The instrument problem is now fixed: NLL with a known-good control model and random-permutation
+controls is a real oracle, unlike the composition z-score. Applied honestly it says the FFN's
+relative channel permutation is **one** unknown rather than two, that none of 67 structured
+candidates for it survives contact with controls, and that the current decode's ordering is not
+measurably better than random. That is a sharper statement of the blocker than sec.41 could make,
+and it is still a blocker.
