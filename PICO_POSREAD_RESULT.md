@@ -1709,3 +1709,57 @@ The LoRA file looked like ideal ground truth -- unpalettized fp16, DMA'd verbati
 `OutTrans` modes -- and that made it tempting to trust without checking it against something already
 known. The cheap validation (does its residual axis match a verified residual axis?) should have been
 run before any conclusion was drawn from it, not after three sections had relied on it.
+
+## 36. LoRA segmentation SOLVED exactly -- but it still cannot be validated
+
+§35 retracted the LoRA offsets as unvalidated. They have now been re-derived properly.
+
+### Method that worked
+
+The earlier attempt took boundaries from the largest log-RMS *jumps*, giving 15 segments including
+two of 16,384 elements -- a size matching no rank-32 role. The fix is to segment by RMS **level**
+rather than by jump: LoRA `A` and `B` are initialised differently (`B` starts at zero), so the
+profile is a clean two-level signal that run-length encodes directly. The recovered run lengths are
+then required to be a permutation of the architecturally-fixed multiset -- a hard check the old
+approach lacked.
+
+Required multiset (rank 32, D=1024, FFN=3200, KV=256): `32768 x9, 8192 x2, 102400 x3` = 618,496.
+
+**Layers 0 and 1 match it exactly, 14 runs each** (layer 2 shows +-256 jitter from the median
+filter, trivially snapped). Perfect `HIGH/low` alternation confirms `A`/`B` pairing.
+
+### The recovered layout
+
+| A offset | len | B offset | len | role, from the size signature |
+|---|---|---|---|---|
+| 0 | 32768 | 32768 | 32768 | Q or O |
+| 65536 | 32768 | 98304 | 32768 | Q or O |
+| 131072 | 32768 | 163840 | 8192 | K or V |
+| 172032 | 32768 | 204800 | 8192 | K or V |
+| 212992 | 32768 | 245760 | 102400 | gate or up |
+| 348160 | 32768 | 380928 | 102400 | gate or up |
+| **483328** | **102400** | **585728** | **32768** | **down** (unique signature) |
+
+**The role order is `Q/O, K/V, gate/up, down` -- not the `Q,K,V,O,gate,up,down` previously assumed.**
+Consequences for the earlier work: `down_A`/`down_B` (483328 / 585728) and `gate_A` (212992) were
+**already correct**; `O_A` (147456) was **wrong** -- no segment begins there, so it straddled two.
+
+### Why this still does not unlock anything
+
+With `gate_A`'s offset now *confirmed* correct, its residual axis still fails to align with `gate`'s
+verified residual axis, under every unpack convention tried (`ofast` −1.7…+4.3, `ifast` −0.9…+0.7,
+input-banked −1.3…+1.0, against +160…+523 for correct base-tensor contractions).
+
+The reason is a limitation of the test, not necessarily of the data: **there is no controllable check
+for whether a LoRA factor should align with its base weight at all.** `A` is randomly initialised and
+trained, so its per-channel directions need not track `W`'s, and the reference model ships no adapters
+to calibrate against. This is the same failure mode as the diagonal-dominance test in §28 -- an
+uncontrollable statistic whose null result carries no information.
+
+### Net
+
+The segmentation is a **real and reusable result**: exact, self-consistent, checked against a
+constraint that could have falsified it, and it corrects the role order. But it does not rehabilitate
+the LoRA file as ground truth for the `OutTrans` question, because no available test can confirm the
+correspondence. The §35 retraction therefore stands in substance -- LoRA-derived conclusions about
+coefficient layout remain unusable -- while the offsets themselves are now known.
