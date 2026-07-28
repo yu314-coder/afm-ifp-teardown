@@ -838,3 +838,72 @@ Two readings, not yet separated:
 Until those are separated, the transpose is recorded as a **statistically solid structural finding
 that has not been shown to improve the forward**, and the shipped default keeps the untransposed
 decode. It is not presented as a solve.
+
+### Independent confirmation via the attention-head signature
+
+The transpose conclusion above rests on the residual-basis oracle. A second test avoids that oracle
+entirely. One of O's axes is the attention head-concat (16 heads x 64), and head structure is
+detectable: dimensions inside the same 64-wide head block are more alike than dimensions in different
+heads. Calibrating on tensors whose orientation is *not* in doubt (`Q` = `[residual-in, head-out]`,
+`gate` = `[residual-in, ffn-out]`, unambiguous from its non-square shape):
+
+| axis | 64-block head score |
+|---|---|
+| `Q` axis1 -- known **head** axis | **+0.02171** |
+| `Q` axis0 -- known residual axis | −0.00052 |
+| `gate` axis0 -- known residual axis | −0.00012 |
+| **`O` axis1** | **+0.01950** -> head |
+| **`O` axis0** | −0.00152 -> residual |
+
+`O` axis1 reaches 90% of the calibrated head score while `O` axis0 matches the residual calibration.
+Two methods sharing no assumptions agree, so **O being stored transposed is established**, even though
+it does not by itself repair generation.
+
+## 23. `down` is misaligned on BOTH axes -- deeper than an ordering problem
+
+If O were the only fault, correcting it should have helped; it did not, so `down` was examined
+directly. Unlike O, `down` is `[3200, 1024]` and cannot be transposed dimension-preservingly -- the
+3200 axis must be the FFN input and the 1024 axis the residual output.
+
+Its two axes can be checked against *different* references:
+
+| `down` axis | reference it should match | measured | reference value |
+|---|---|---|---|
+| 3200 (FFN) | `gate`/`up` OUTPUT axis (same FFN neurons) | **−0.044** | +0.222 |
+| 1024 (residual) | `gate` INPUT axis (residual basis) | **+0.022** | +0.700 |
+
+**Both axes fail.** That is important: `colnorm(down)` is a norm *over* the input axis and is therefore
+invariant to any permutation of the 3200 inputs, so the residual-axis failure cannot be blamed on
+input scrambling -- and symmetrically the FFN-axis failure cannot be blamed on output scrambling. A
+single-axis permutation cannot produce both, which rules out the entire "wrong output order" family
+for `down` and points at the intra-bank slot -> (input, output) mapping itself.
+
+Hypotheses tested for `down`, all negative:
+
+| hypothesis | FFN axis | residual axis |
+|---|---|---|
+| `ofast` (current: `o = slot % 16`, `i = slot // 16`) | +0.005 | −0.010 |
+| `ifast` (transposed: `o = slot // 3200`, `i = slot % 3200`) | +0.011 | +0.010 |
+| all 48 `(blk,bank,o)` digit orderings + reversals | best +0.057 | -- |
+| bit-reversal / z-order shuffles (`bitrev10`, bank-only, o-only) | no better | -- |
+| *reference* | **+0.222** | **+0.700** |
+
+Everything sits at noise. `down`'s L-class geometry is confirmed sound (16 outputs x 3200 inputs per
+bank; 4 blocks x 16 banks x 16 = 1024 outputs), so the defect is in how a bank's 51,200 nibbles map to
+`(input, output)` pairs -- and it is **not** the obvious row-major/column-major pair, nor any digit
+permutation of the composite index.
+
+### Consolidated state of the reconstruction
+
+| component | status |
+|---|---|
+| embedding, tokenizer | correct (tokenizer verified: `The capital of France is` -> `<bos> The(673) capital(5283) of(533) France(7005) is(567)`) |
+| hidden RMSNorm gains | correct (gamma = 1, proven positively, `PICO_NORMS.md` addendum) |
+| per-head QK-norm | **was missing from the export**; fixed by moving to the `qwen3` architecture |
+| `Q`, `K`, `V`, `gate`, `up` | correct (round-trip validated, `OutTrans=0`) |
+| `O` | **orientation solved** (stored transposed, two independent confirmations); residual ordering may still be imperfect -- recovers ~48% of reference, not 100% |
+| `down` | **unsolved** -- both axes misaligned; intra-bank mapping not recovered |
+
+`down` is now the single identified blocker, and it is a harder object than the ordering question it
+replaced: the failure of both axes simultaneously means the fix is a change to the slot decomposition,
+not a permutation of either axis.
