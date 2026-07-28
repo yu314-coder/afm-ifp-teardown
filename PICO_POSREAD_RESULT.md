@@ -1943,3 +1943,21 @@ specifically for a reason not yet identified -- rather than that the hardware tr
 That is where this line of work stops: not at an untested hypothesis, but at a conflict between
 measurements that are each individually well-supported. Recording it as such is more useful than
 selecting whichever premise would let a story close.
+
+### Addendum: the unexamined header bytes are not a value modifier
+
+The L-class coefficient header is 128 B: codebook `[0:32]`, zeros `[32:64]`, per-output scales
+`[64:96]`, and `[96:128]` which earlier notes label "unknown". If that region held a second scale or
+a bias, the decoded *values* would be wrong independently of any ordering question, which would
+explain the contradiction above. It does not.
+
+Read across banks, `[96:128]` is high-entropy and structureless -- e.g.\ `0x98544b66 0x56787861
+0x4ca99783 ...`, whose fp16 interpretation gives wild mixed-magnitude values
+(`14.8, -0.002, 35872, 103.5, ...`, and `nan` in places). It shows none of the regularity of the
+scale region immediately before it (uniformly positive, tightly banded 0.08--0.44). It is far more
+consistent with a checksum or DMA descriptor than with numeric weight metadata, and the header/payload
+split is independently fixed by arithmetic: `CoeffSize 0x6480 = 25728 = 128 + 25600`, and the payload
+must be exactly 25600 B to hold `16 x 3200` nibbles.
+
+So the decoded values are not being modified by an overlooked header field, and the contradiction in
+§39 stands unexplained.
