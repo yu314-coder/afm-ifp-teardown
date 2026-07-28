@@ -1206,3 +1206,47 @@ rejected against a control that reaches +328. `down` remains broken, and the cau
 locatable within the decode model as currently understood -- which points at an assumption upstream
 of it (for example whether the four L-blocks the weight map assigns to `down` are in fact that
 tensor) rather than at any ordering within it.
+
+## 27. Block-to-role assignment audited; `s`-block position tested
+
+Dumping layer 0's 40 blocks in file order shows a clean, unambiguous role layout, so the weight
+map's assignment is not obviously wrong:
+
+```
+Q    4 x N        K  1 x N       V  1 x N       O  4 x N
+gate 1 x s + 12 x N              up 1 x s + 12 x N
+down 4 x L
+```
+
+with a uniform `+0x20800` stride between N blocks (`+0x10800` after each `s`, `+0x64800` between
+`L`s) -- i.e. the blocks are contiguous and correctly classed, and there is no spare or misfiled
+block inside the layer.
+
+One genuine discrepancy surfaced: the `s` block is stored **first** for `gate`/`up`, while
+`src/pico_forward.py` documents `s_position = "append_cols"` (the `s` half-block occupying the
+**last** 128 output columns). Since `gate`'s output axis is what `gate -> down` contracts, a wrong
+`s` position there would break that pairing without `down` being at fault. Tested both assemblies on
+the validated oracle:
+
+| `s` position | mean z (`gate -> down`, 4 layers) |
+|---|---|
+| first (current) | −0.8 … +1.6 |
+| last (`append_cols`) | +0.2 … +1.8 |
+| *Qwen3 control for this pairing type* | **+57** |
+
+Neither is right. So the `s` position is not the cause either, and the block-to-role assignment is
+sound as far as this audit can reach.
+
+### Standing conclusion
+
+Every component of the `down` decode that can be checked has now been checked and is correct --
+geometry, codec, slot decomposition (positional read, bijection, in pico's own `0x6480` mode), block
+classing, and block-to-role assignment. Every reordering hypothesis has been eliminated against a
+control that reaches +328. Yet `down` fails every functional pairing while the other six roles pass.
+
+That combination is not explained by anything currently in the decode model. The remaining
+possibilities are all *outside* it: the four L-blocks may be a tensor other than `down` despite the
+consistent layout, the `OutTrans=1` mode may alter the payload in a way the bias-forced probe does
+not reproduce (the probe reaches `0x6480` but still compiles at `OutTrans=0`), or the shipped tiles
+carry a transform with no counterpart in anything compilable here. Distinguishing these needs a
+weight-bearing `OutTrans=1` conv, which remains unreachable on this toolchain (§18).
