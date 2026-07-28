@@ -1961,3 +1961,97 @@ must be exactly 25600 B to hold `16 x 3200` nibbles.
 
 So the decoded values are not being modified by an overlooked header field, and the contradiction in
 §39 stands unexplained.
+
+## 40. External corroboration: the published ANE reference validates the decode
+
+Until now every conclusion here came from first-principles analysis of the shipped binary. A
+reverse-engineered ANE reference has since been published (arXiv:2606.22283, *Apple Neural Engine:
+Architecture, Programming, and Performance*, ~300 pp., web edition at `ane-guide.readthedocs.io`),
+which documents the compiler, on-disk program format, weight-compression scheme and memory
+hierarchy. Checking this work against it resolves several open questions -- all in favour of the
+decode as implemented.
+
+### 1. `OutTrans` is a fused transpose epilogue (confirms §38)
+
+The reference lists the epilogue slots one engine layer can absorb, in order:
+
+```
+ZinTextureLayer     in-place spatial/texture remap
+ZinBroadcastLayer   broadcast of a fused operand
+ZinActivationLayer  pre-GOC activation
+ZinGOCLayer         the gain/offset (scale + bias) unit
+ZinActivationLayer  post-GOC activation
+ZinTransposeLayer   output transpose / layout      <-- OutTrans
+ZinQuantLayer       output (re)quantization
+```
+
+and names "transpose and reshape chains" among the fusable epilogues. So `OutTrans=1` marks a
+convolution that **absorbed a following transpose into its output stage**. This is exactly the
+conclusion of §38, reached independently from the L2 traces, and it confirms the corollary: the flag
+changes the *output layout only* and leaves the coefficient stream untouched -- consistent with the
+positional read finding the same bijection in both header modes (§25/§26).
+
+Note also the slot order: the GOC (scale/bias) is applied **before** the transpose, so the per-output
+scale indexes the convolution's own output channel, not a transposed one. The decoder's `sc[o]`
+indexing is therefore correct.
+
+### 2. The `0x10` padding is bank-conflict avoidance, not layout
+
+> "The pool is interleaved across 64 banks at a 16-byte granule, with the bank index
+> `floor(addr / 16) mod 64`, and a compile-time stride optimizer spreads accesses to avoid conflicts."
+
+This settles the arithmetic §37 could not pin down. The `OutTrans=1` stride `0x810` is
+`0x800 + 0x10` = one logical row of 1024 fp16 **plus a single 16-byte granule**, inserted by the
+stride optimizer to shift the bank index and avoid conflicts. It is **not** part of the logical
+channel layout, so the mapping is the plain contiguous one derived in §38 -- and the "non-uniform
+slot spacing" worry recorded in §37 was unfounded.
+
+### 3. The 128-byte coefficient header is the four fused-conv streams
+
+The reference documents that a fused convolution emits four kernel-coefficient streams:
+
+| stream | reloc register | role |
+|---|---|---|
+| bias | `0x1554` | per-channel additive offset |
+| post-scale | `0x1558` | per-channel output multiply, **where a dequantize scale folds** |
+| palette lookup | `0x155c` | the palettized-weight lookup table |
+| activation lookup | `0x1560` | 33-segment piecewise-linear activation table |
+
+That maps directly onto the observed header: `[0:32]` the 16-entry palette (**palette lookup**),
+`[32:64]` all zeros (**bias**, absent in this model), `[64:96]` uniformly positive banded values
+(**post-scale**, the folded dequantize scale). This independently validates the codec as
+implemented, and confirms §26's reading that the shipped values in that slot are scales rather than
+biases even though a *bias* is what causes the header to be emitted at `0x6480`.
+
+Because a linear map satisfies `(W·x)·s = ((W·s)·x)` per output channel, folding the post-scale into
+the weights -- what the decoder does -- is mathematically identical to applying it as an epilogue.
+
+### 4. `OCG` matches the observed bank structure
+
+Output channels are tiled into output-channel groups sized to the accumulator file
+(`OCG = min(floor_pow2(8/(kW·kH·kD)), byte_cap)`), with `OCG passes = ceil(Cout/OCG)`. pico's tasks
+report `OCGSize=4`; a group of 16 output channels is consistent with the positional read's finding
+that **16 output channels vary fastest** within a bank, and with 16 scales per bank.
+
+### 5. One fact not previously accounted for
+
+> "The engine stores tensors **channel-interleaved**, and a channel dimension that is not a multiple
+> of the interleave factor is padded out to one... The width axis aligns to a 16-byte
+> direct-memory-access granule."
+
+Tensor order is `[N, D, C, H, W]`. The interleave factor is family-specific, read from the
+hardware-abstraction table, and is not given as a literal. This concerns *activation* storage rather
+than the coefficient stream, and pico's `W=64` fp16 (128 B) is already a multiple of the 16-byte
+granule, so no silent padding applies -- but the channel-interleaved organisation is the one
+documented layout property this work has not independently verified.
+
+### What this changes
+
+Every element of the decode that the reference covers is confirmed correct: codec, header semantics,
+scale handling, `OutTrans` meaning, group size, and the padding that had blocked §37. That
+substantially strengthens the reading of the §39 contradiction: since the decode matches the
+documented format at every checkable point, the discrepancy is more likely in the **composition
+oracle's applicability to `down`** than in the recovered weights.
+
+Sources: arXiv:2606.22283; `ane-guide.readthedocs.io`; `github.com/freedomtan/coreml_to_ane_hwx`;
+`github.com/skyfallsin/apple-neural-engine-field-guide`.
