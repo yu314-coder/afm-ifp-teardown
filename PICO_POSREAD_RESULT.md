@@ -1250,3 +1250,36 @@ consistent layout, the `OutTrans=1` mode may alter the payload in a way the bias
 not reproduce (the probe reaches `0x6480` but still compiles at `OutTrans=0`), or the shipped tiles
 carry a transform with no counterpart in anything compilable here. Distinguishing these needs a
 weight-bearing `OutTrans=1` conv, which remains unreachable on this toolchain (§18).
+
+## 28. LoRA cross-reference attempts: one weak signal, one invalid test (recorded, not relied on)
+
+Two further attempts used Apple's shipped `lora_32_constant_data.bin` as an independent handle on
+`down`, since those tensors are unpalettized fp16 in the confirmed `OutTrans=0` mode and are DMA'd
+verbatim (§19), so they carry no codec ambiguity.
+
+**Attempt 1 -- the LoRA delta as a stand-in for `down`.** `dW = A_down @ B_down` is `[3200, 1024]`,
+the same shape and index conventions as base `down`, so it can be scored on the validated oracle
+without touching the base tile decode:
+
+| | mean z |
+|---|---|
+| `gate -> dW` (LoRA) | +0.6 |
+| `gate -> base down` | −0.3 |
+| `dW -> gate(L+1)` | −0.0 |
+| `base down -> gate(L+1)` | +0.1 |
+| *Qwen3 controls* | **+57 / +328** |
+
+The LoRA delta fails too. Read narrowly this hints that `gate`'s **output** axis may be implicated
+rather than `down` alone -- but a rank-32 delta is a weak probe of a full-rank composition, so this
+is recorded as a hint, not a finding.
+
+**Attempt 2 -- diagonal dominance of `W^T dW`: INVALID, discarded.** The idea was that if a base
+tile and its adapter share index conventions, `W^T @ dW` should be diagonally dominant. Measured, it
+is at chance everywhere (argmax-on-diagonal 0.0000–0.0020 against a 1/n chance of ~0.0003–0.001;
+diag/off-diag ratio 0.99–1.03) for `gate`, `up` **and** `down` alike.
+
+That null is **uninformative and is not used as evidence**, because the premise is wrong: `dW = A @ B`
+is a low-rank update, and `W^T dW = W^T A B` has no reason to be diagonal -- diagonal dominance would
+require `dW ~ c*W`, which is not how LoRA trains. Unlike every other test in §24-§27 there is also no
+way to control it, since the reference model ships no adapters. Recorded here so the negative is not
+mistaken later for evidence that `gate`/`up`/`down` are all mis-ordered.
