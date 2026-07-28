@@ -2055,3 +2055,45 @@ oracle's applicability to `down`** than in the recovered weights.
 
 Sources: arXiv:2606.22283; `ane-guide.readthedocs.io`; `github.com/freedomtan/coreml_to_ane_hwx`;
 `github.com/skyfallsin/apple-neural-engine-field-guide`.
+
+## 41. Functional test of the hardware-derived corrections: negative
+
+§40 confirmed the decode against the published ANE reference and concluded the composition oracle was
+the likelier culprit. The correct response is to stop scoring with a suspect statistic and test
+**functionally** -- actual generation, which is ground truth. Four builds, differing only in the two
+corrections at issue:
+
+| build | `O` | `gate`/`up` channel map | output |
+|---|---|---|---|
+| `qwen3` (baseline) | as decoded | file order | word-salad |
+| `qwen3-Ot` | **transposed** | file order | **empty** |
+| `hw` | **transposed** | **L2-derived** | **empty** |
+| `hw2` | as decoded | **L2-derived** | word-salad |
+
+All four load cleanly, tokenize correctly (`<bos> The(673) capital(5283) of(533) France(7005)
+is(567)`), and hold sane tensors (finite, no zeros, `mean|w|` 0.022--0.031). These are genuine
+forward-pass results, not environment failures.
+
+**Neither hardware-derived correction produces coherent text.**
+
+* The **L2-derived `gate`/`up` map** (`s` block last, `N` blocks reversed) changes nothing visible.
+  It is read directly from Apple's task addressing and is almost certainly *right*, but it is
+  evidently not the operative defect.
+* The **`O` transpose** makes generation *degenerate* -- the model emits nothing even with
+  `--ignore-eos`, in both builds that apply it. This is evidence against it functionally, and §40
+  supplies a reason it may have been a misreading: the reference documents `OutTrans` as
+  `ZinTransposeLayer`, an epilogue that transposes the **output activation at runtime**. That does
+  not imply the stored coefficient matrix is in `[out, in]` order. The §22/§30 statistical evidence
+  for a transpose is real but was gathered with instruments that have misled before, and the
+  functional test does not support it.
+
+### Standing
+
+The reconstruction now has: a codec confirmed against the published format, a slot decomposition
+confirmed by positional read in the shipped header mode, channel maps read from Apple's own L2
+addressing, and correct tokenization, norms and architecture. It still does not generate coherent
+text, and the corrections that hardware evidence most strongly supports do not change that.
+
+That is a narrower and better-evidenced failure than before, but it is a failure, and the honest
+reading is that at least one assumption still standing is wrong in a way none of the available
+instruments -- statistical or hardware-derived -- has isolated.
