@@ -1824,3 +1824,62 @@ to read it off -- and §34 showed no available compiler configuration produces o
 
 The decoder default is left unchanged: a partial map that scores +3 against a +328 reference is not
 evidence enough to ship, and adopting it would silently bake in an unverified layout.
+
+## 38. What `OutTrans=1` really is: a sequence/channel transpose -- retracting the "interleave" reading
+
+§33 and §37 read the `OutTrans=1` result stride (`0x810`) as evidence that the four down-projection
+tasks *interleave their output channels*, and derived the map
+`physical = (j//4)*16 + t*4 + (j%4)` from it. **That reading is wrong and is retracted.** Tracing the
+consumer of that buffer settles the semantics exactly.
+
+### The decisive observation
+
+The down-projection tasks write the buffer at `0x14c000`; the task that consumes it reads the *same*
+memory with a different shape:
+
+```
+producer (tasks 202-205)   W=64    Cout=256   Res 0x14c000 + t*0x200   ResStrideC 0x810
+consumer (task 3217)       W=1024  Cin=64     Src 0x14c000             SrcStrideC 0x810
+```
+
+`W` and `C` are exchanged. The buffer spans `0x14c000`--`0x16c400` = 132,096 B = **64 rows x 2064 B**,
+and `2064 = 1024` fp16 `+ 16` B padding -- an exact fit for the consumer's view, and
+`4 x 256 x 64 = 64 x 1024 = 65,536` elements either way.
+
+### The address arithmetic closes
+
+Each task writes, in every one of the 64 rows, 256 consecutive fp16 at row-offset `t*256`
+(`t*0x200` bytes = `t*256` fp16). So producer element `(task t, channel j, sequence w)` lands at
+
+```
+0x14c000 + w*2064 + t*512 + j*2
+```
+
+which is consumer element `(row = w, position = t*256 + j)`.
+
+\begin{quote}
+**Therefore the residual channel is `p = t*256 + j` -- plainly contiguous -- and
+`ResultStrideC = 0x810` is the stride over the *transposed* channel axis (i.e. the original
+*sequence* axis), not over output channels.**
+\end{quote}
+
+### Consequences
+
+* `OutTrans=1` is a **sequence/channel transpose of the activation**. It does **not** permute output
+  channels. This is fully consistent with the positional read (§25/§26), which found the identical
+  coefficient bijection in both header modes, and with the flag being an activation-layout property
+  (§33's headline conclusion survives; only its channel-interleave corollary does not).
+* The §33/§37 interleave map, and the +3.0 score attributed to it, are **withdrawn**. That score was
+  an artefact of scrambling channels in a way that happened to score marginally above the identity,
+  not evidence of a recovered layout.
+* **`down`'s output channel ordering is contiguous `t*256 + j` -- exactly what the decoder already
+  does.** So the "wrong output ordering" hypothesis for `down` is now closed from the hardware side,
+  not merely unsupported.
+
+That is a real narrowing: of the two axes §23 implicated, the output axis is now positively accounted
+for. It also deepens the puzzle, because the composition oracle still reports
+`down -> gate(L+1)` at the random level while every non-`down` pairing is aligned. Since the output
+map is now known-correct and the input side reads the FFN buffer contiguously (§33), the residual
+discrepancy has to lie in how the FFN buffer's 3200 channels are assembled by `gate`/`up` -- the one
+axis §31 showed to be underdetermined, and for which §37's L2-derived reversal (`s` last, file order
+reversed) improved `gate -> down` from +0.3 to only +2.3 against a +57 control.
