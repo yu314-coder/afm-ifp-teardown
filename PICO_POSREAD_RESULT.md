@@ -1883,3 +1883,63 @@ map is now known-correct and the input side reads the FFN buffer contiguously (�
 discrepancy has to lie in how the FFN buffer's 3200 channels are assembled by `gate`/`up` -- the one
 axis §31 showed to be underdetermined, and for which §37's L2-derived reversal (`s` last, file order
 reversed) improved `gate -> down` from +0.3 to only +2.3 against a +57 control.
+
+## 39. The full FFN dataflow, and an unresolved contradiction
+
+Tracing every task that touches the down-projection's output completes the dataflow and confirms
+§38 independently -- while leaving a contradiction that this investigation has not resolved.
+
+### The dataflow
+
+```
+gate tasks 168-180   ->  0x000000..0x064000   (contiguous, strideC 0x80; s task FIRST -> channels 3072..3199)
+up   tasks 181-193   ->  0x064000..0x0c8000   (same pattern)
+SwiGLU (EW, in place)->  0x0e8000             (3200 channels, contiguous strideC 0x80)
+down tasks 202-205   ->  0x14c000             (OutTrans=1, transposed view, strideC 0x810)
+...
+task 213             ->  0x040000             (OutTrans=1: Src strideC 0x800, Res strideC 0x90)
+next layer 214-217   <-  0x040000             (Q/K/V/O read the residual, SrcStrideC 0x90)
+```
+
+Task 213 is the **transpose-back**: it reads the strided `[W=1024, C=64]` view and writes the
+contiguous residual layout (`0x90` = 64 fp16 + 16 B pad), which the next layer's projections then
+read. So the residual channel equals the position index `p` in the transposed buffer, and by §38
+`p = t*256 + j`.
+
+**`down`'s output ordering is contiguous, confirmed twice from independent address traces.** It is
+what the decoder already does.
+
+### Both `gate`/`up` channel maps are also now read from hardware
+
+Both FFN tensors follow the same pattern, and the `s` half-block behaves identically in each:
+
+| task | class | result base | channels |
+|---|---|---|---|
+| 168 / 181 | `s` (Cout=128) | `0x060000` / `0x0c4000` | **3072--3199** (last) |
+| 169 / 182 | `N` | `0x058000` / `0x0bc000` | 2816--3071 |
+| ... | | (−`0x8000` per task) | |
+| 180 / 193 | `N` | `0x000000` / `0x064000` | 0--255 |
+
+Each tensor spans exactly `0x64000` = 409,600 B = 3200 x 128 B. The `s` block is **first in task
+order and first in file order, but holds the last 128 channels**, and the `N` blocks run backwards.
+
+### The contradiction
+
+Applying that map lifts `gate -> down` only from +0.3 to +2.3 (control +57), and the residual-side
+pairing is worse:
+
+* `down`'s output map is **proven contiguous** (two independent traces).
+* `gate(L{+}1)`'s input axis is **independently verified** as the residual (§30: `up -> gate`
+  row-test +523.9).
+* `||\,\mathrm{down}\cdot\mathrm{gate}(L{+}1)\,||_F` is invariant to permuting `down`'s *rows*, so
+  only these two -- both verified -- determine it.
+* Yet it measures **+1.3**, at the random level, against a +328 control.
+
+Every premise in that chain has been checked, and they cannot all be true. The most likely
+explanation is that the composition oracle, though calibrated on a correctly-ordered reference model
+and sound for the pairings that *do* align (`O -> gate` +104.7, `Q -> O` +70.7), fails for `down`
+specifically for a reason not yet identified -- rather than that the hardware traces are wrong.
+
+That is where this line of work stops: not at an untested hypothesis, but at a conflict between
+measurements that are each individually well-supported. Recording it as such is more useful than
+selecting whichever premise would let a story close.
