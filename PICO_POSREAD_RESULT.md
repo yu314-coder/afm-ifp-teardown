@@ -872,11 +872,41 @@ Its two axes can be checked against *different* references:
 | 3200 (FFN) | `gate`/`up` OUTPUT axis (same FFN neurons) | **−0.044** | +0.222 |
 | 1024 (residual) | `gate` INPUT axis (residual basis) | **+0.022** | +0.700 |
 
-**Both axes fail.** That is important: `colnorm(down)` is a norm *over* the input axis and is therefore
-invariant to any permutation of the 3200 inputs, so the residual-axis failure cannot be blamed on
-input scrambling -- and symmetrically the FFN-axis failure cannot be blamed on output scrambling. A
-single-axis permutation cannot produce both, which rules out the entire "wrong output order" family
-for `down` and points at the intra-bank slot -> (input, output) mapping itself.
+Both axes appear to fail. The tempting inference -- `colnorm(down)` is a norm *over* the input axis so
+it is invariant to input permutation, and symmetrically for the other axis, therefore no single-axis
+permutation can produce both failures, therefore the whole "wrong output order" family is eliminated
+and the intra-bank slot decomposition is indicted -- **does not hold. It is retracted below.**
+
+> ### RETRACTION: the FFN-axis reference is not a ground truth
+>
+> That argument requires the FFN-axis comparison to be trustworthy. It is not. The reference itself
+> (`gate ~ up` on the 3200 axis) is only **+0.222**, against **+0.700** for the residual axis -- weak
+> enough to deserve an independent check, which it fails.
+>
+> `lora_down_probe.py` supplies that check. The LoRA `down` adapter's A-matrix is `[3200, 32]`, its
+> 3200 axis indexes the *same* FFN neurons, its ANE bytes are known **verbatim** (#19), it is
+> unpalettized fp16, and it is in the **known-good `OutTrans=0` mode** -- so it should align with
+> gate/up if that axis is meaningful at all. Measured over 6 layers:
+>
+> | | mean |
+> |---|---|
+> | `down_A` (ofast) ~ `gate` FFN axis | **+0.024** |
+> | `down_A` (ifast) ~ `gate` FFN axis | +0.006 |
+> | `down_A` (ofast) ~ `up` FFN axis | +0.007 |
+> | reference `gate ~ up` FFN axis | +0.222 |
+>
+> A tensor that is *not* in question fails the same test base `down` fails. Three tensors that all
+> index the same 3200 FFN neurons do not agree with one another. So the FFN axis does not carry the
+> strong shared structure the residual axis does -- most likely because per-neuron magnitudes of
+> `gate` and `up` have no reason to track each other under SwiGLU (`silu(gate_j) * up_j`), making
+> +0.222 an artefact of weak intrinsic structure rather than a basis.
+>
+> **Consequences:** (1) the claim that `down`'s *input* axis is misordered is **withdrawn** -- it was
+> measured against an unreliable reference; (2) the elimination of the "wrong output order" family for
+> `down` is **withdrawn**, and that family is back in play; (3) only the **residual-axis** oracle
+> (+0.700 reference) is sound, and on it `down`'s output axis genuinely does fail (+0.022). The
+> negative results for the 48 digit-orderings and the intra-bank `ofast`/`ifast` pair still stand,
+> since those were scored on the residual axis too.
 
 Hypotheses tested for `down`, all negative:
 
@@ -888,10 +918,15 @@ Hypotheses tested for `down`, all negative:
 | bit-reversal / z-order shuffles (`bitrev10`, bank-only, o-only) | no better | -- |
 | *reference* | **+0.222** | **+0.700** |
 
-Everything sits at noise. `down`'s L-class geometry is confirmed sound (16 outputs x 3200 inputs per
-bank; 4 blocks x 16 banks x 16 = 1024 outputs), so the defect is in how a bank's 51,200 nibbles map to
-`(input, output)` pairs -- and it is **not** the obvious row-major/column-major pair, nor any digit
-permutation of the composite index.
+Everything sits at noise on the sound (residual-axis) oracle. `down`'s L-class geometry is confirmed
+(16 outputs x 3200 inputs per bank; 4 blocks x 16 banks x 16 = 1024 outputs), so the defect lies in how
+a bank's 51,200 nibbles map to `(input, output)` pairs and/or how the composite output index is
+assembled -- it is **not** the obvious row-major/column-major pair, nor any digit permutation of the
+composite index, nor a bit-reversal shuffle.
+
+Note the retraction above: after it, the evidence supports "`down`'s **output** ordering is wrong,
+mechanism unidentified", not the stronger "both axes are wrong, therefore it must be the slot
+decomposition". The search space is larger than the retracted argument implied, not smaller.
 
 ### Consolidated state of the reconstruction
 
@@ -902,7 +937,7 @@ permutation of the composite index.
 | per-head QK-norm | **was missing from the export**; fixed by moving to the `qwen3` architecture |
 | `Q`, `K`, `V`, `gate`, `up` | correct (round-trip validated, `OutTrans=0`) |
 | `O` | **orientation solved** (stored transposed, two independent confirmations); residual ordering may still be imperfect -- recovers ~48% of reference, not 100% |
-| `down` | **unsolved** -- both axes misaligned; intra-bank mapping not recovered |
+| `down` | **unsolved** -- output ordering wrong on the sound oracle; mechanism unidentified (input-axis claim retracted) |
 
 `down` is now the single identified blocker, and it is a harder object than the ordering question it
 replaced: the failure of both axes simultaneously means the fix is a change to the slot decomposition,
