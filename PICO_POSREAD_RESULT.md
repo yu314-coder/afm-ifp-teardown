@@ -1346,3 +1346,54 @@ to be a **transpose**, not a permutation -- a class of transform no reordering s
 bias trick reaches pico's `0x6480` *header* but still compiles at `OutTrans=0`, so the payload effect
 of that flag has never been observed. Obtaining a weight-bearing `OutTrans=1` conv requires a
 toolchain that compiles it, which this host does not provide.
+
+## 30. Per-role residual-axis census, and a rejected linear-assignment method
+
+### Which axis of each role is the residual?
+
+Scoring every role against `gate` (whose residual axis is its `i` axis) on the validated oracle,
+testing both orientations:
+
+| role | col-test (composite is residual) | row-test (`i` axis is residual) | convention expects |
+|---|---|---|---|
+| `Q` | +2.0 | **+300.7** | row (input = res) |
+| `K` | n/a | **+184.9** | row |
+| `V` | n/a | **+174.5** | row |
+| `up` | n/a | **+523.9** | row |
+| **`O`** | +6.3 | **+160.1** | col (output = res) -- **violated** |
+| **`down`** | **+0.6** | n/a | col (output = res) |
+
+`Q`, `K`, `V`, `up` all behave exactly as the convention predicts, at very high z. `O` does **not**:
+its `i` axis is the residual, which is the storage transpose of §22 seen a third independent way.
+`down`'s composite -- which the convention says *is* its residual output -- fails at +0.6.
+
+So the canonical residual ordering is the `i`-axis ordering shared by `Q/K/V/up/O`, and `down`'s
+composite ordering does not match it. `down` cannot be "stored transposed" the way `O` is: its
+L-class block structure fixes `i` at 3200 and the composite at 1024, so the assignment is forced.
+
+### Rejected: linear assignment on FFN-space affinity
+
+`down[:,c]` and `gate[j,:]` both live in FFN space (R^3200), so a direct channel-to-channel affinity
+`A[j,c] = |gate[j,:] . down[:,c]|` exists and matching them is a **linear** assignment -- exactly
+solvable by Hungarian, unlike the NP-hard quadratic assignment every earlier attempt reduced to.
+That looked like a genuine methodological upgrade.
+
+**The control kills it.** Run on Qwen3-4B, where the true answer is the identity:
+
+| | recovered identity fraction | chance |
+|---|---|---|
+| L0 / L1 / L2 | 0.0008 / 0.0004 / 0.0016 | 0.00039 |
+
+The affinity carries **no ordering information even in a correct model**. pico's apparent gains under
+the same procedure (z +5.5, +0.8, **+31.7**, +2.0) are therefore overfitting, and the recovered
+permutations agree across layers **0.0%** of the time (chance 0.10%). Recorded so the +31.7 is not
+mistaken later for a partial solve.
+
+### Status
+
+The failure is now characterised as precisely as static analysis allows: `down`'s values are correct
+(trained spectrum), its geometry/codec/slot map are proven against ANE ground truth, its composite
+residual ordering demonstrably differs from the canonical `i`-axis ordering that all six other roles
+share, and no transformation between the two has survived a control. Every method that produced a
+positive-looking pico number has been controlled, and each one that could be controlled failed the
+control.
