@@ -1397,3 +1397,64 @@ residual ordering demonstrably differs from the canonical `i`-axis ordering that
 share, and no transformation between the two has survived a control. Every method that produced a
 positive-looking pico number has been controlled, and each one that could be controlled failed the
 control.
+
+## 31. The FFN axis has no external anchor -- which is why it cannot be pinned
+
+A structural observation that explains the shape of every failure in §23-§30.
+
+The 3200-wide FFN channel axis is referenced by **only four tensors**: `gate` (output), `up`
+(output), `down` (input), and the LoRA `A_down` (input). There is no fifth, independently-verified
+tensor touching it. The residual axis, by contrast, is touched by `Q`, `K`, `V`, `O`, `gate`, `up`
+and `down`, which is exactly why the residual ordering could be established (§30: `Q` +300.7,
+`up` +523.9, `O` +160.1 all agreeing).
+
+Every pairing available over the FFN axis fails:
+
+| pairing | pico | Qwen3 control |
+|---|---|---|
+| `gate -> down` | +0.2 | +57 |
+| `up -> down` | −0.6 | +407 |
+| `gate -> A_down` (LoRA factor, `ofast` / `ifast`) | +1.0 / +2.2 | -- |
+| `B_down -> gate` (LoRA factor, residual axis) | +0.4 | -- |
+
+The LoRA **factors** were tested separately from their product here for the first time, precisely
+because the product is a weak probe. They fail too. So no available tensor pair fixes the FFN
+ordering, and there is nothing outside this set to appeal to.
+
+### `gate`'s 13-block output assembly: also tested, also negative
+
+§27 tested `down`'s 4-block assembly but never `gate`'s 13-block one (1 x `s` + 12 x `N`), which
+defines the FFN axis. Sixteen assemblies (s-first, s-last, N reversed, and all 11 rotations of the
+12 `N` blocks), scored on the validated oracle:
+
+| best candidates | `gate -> down` | `up -> down` |
+|---|---|---|
+| `s` last | +2.1 | +1.9 |
+| `s` last, N reversed | +1.6 | +2.2 |
+| identity (current) | +0.2 | −0.6 |
+| *Qwen3 control* | **+57** | **+407** |
+
+Nothing approaches the control.
+
+### Decode sanity confirmed
+
+The decoded `down` tensors are genuine and distinct, ruling out a map or offset error:
+
+```
+L0..L3  mean|W| 0.0258-0.0263   std 0.0331-0.0363   zeros 0.0000   finite 1.0000
+corr(L0,L1) 0.0155   corr(L0,L2) 0.0167   corr(L1,L2) 0.0139     (distinct layers, as expected)
+block offsets distinct and evenly spaced across layers
+```
+
+### Where this leaves the static approach
+
+`down`'s values are correct, its geometry/codec/slot map are proven against ANE ground truth, its
+tensors are well-formed and distinct, and the residual axis is firmly established from six agreeing
+roles. What cannot be established from the shipped data alone is the **FFN channel ordering**, because
+every tensor that could anchor it is itself one of the tensors in question -- the constraint system is
+underdetermined, not merely unsolved. That is a structural reason for the failures, not a run of bad
+luck, and it means further enumeration of orderings is not expected to succeed.
+
+Breaking it needs an anchor from outside the weight data: a weight-bearing `OutTrans=1` compile (to
+read the layout directly), or a runtime capture of the FFN activation tensor. Neither is available on
+this host.
