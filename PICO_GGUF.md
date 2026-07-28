@@ -52,3 +52,29 @@ all correct — the layer weight *ordering* is not.
 So the export is best understood as a **correct container around partially-ordered weights**: useful
 as a harness (it makes the reconstruction runnable under a standard engine, and any future fix to
 the ordering drops straight in), not as a working language model.
+
+## Verified artifact (final)
+
+```
+file    afmplus-v11.0-pico-F16.gguf
+size    1,141,283,072 bytes (1.1 GB)
+sha256  fd9c04151b4c8bb125d0771390953a62046b12371a5291f68af81fc1cbf39c76
+format  GGUF v3, 218 tensors, 18 metadata keys, file_type 1 (F16)
+arch    llama | 24 blocks | D 1024 | FFN 3200 | 16 Q heads / 4 KV heads
+        RoPE theta 500000 | ctx 4096 | vocab 262144
+```
+
+Re-verified end-to-end under `llama.cpp` (`llama-completion`): loads clean, ~2.2 GB resident,
+**15.8 tok/s**, output still incoherent exactly as described above. Only 5 of 7 weight roles per
+layer (`Q`, `K`, `V`, `gate`, `up`) are correctly ordered; the two residual-writing roles (`O`,
+`down`) carry the unresolved `OutTrans=1` order.
+
+Scope of the remaining defect, quantified from Apple's own binary (`PICO_POSREAD_RESULT.md` §18):
+of pico's 988 weight-bearing conv tasks, **180 are `OutTrans=1`** and 808 are `OutTrans=0`. So
+roughly **82% of the weight-bearing tasks decode with a round-trip-validated order** and 18% do not.
+That fraction, not the file, is what stands between this artifact and coherent text.
+
+**Do not** substitute one of the speculative `O`/`down` orderings from §13 (`ifast`, `obank`,
+`ifast_obank`) to make the output look better -- all of them remain inside the measured noise band,
+so shipping one would present an unvalidated guess as a solve. The default export deliberately keeps
+the honest, round-trip-validated `OutTrans=0` order everywhere.
