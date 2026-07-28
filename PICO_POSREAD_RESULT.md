@@ -1658,3 +1658,54 @@ compiler version is demonstrably not the variable. Apple's shipped model has 180
 most plausibly an internal toolchain or a graph construct that cannot be expressed through
 `coremltools`' MIL front end. Trying additional macOS versions is now low-value; the evidence says
 the difference is upstream of the compiler, in how the graph reaches it.
+
+## 35. RETRACTION: the LoRA slicing is not validated, so LoRA-derived evidence is unreliable
+
+`lora_32_constant_data.bin` was used as ground truth in §19 (the "Rosetta stone"), §28, and again
+when sweeping output maps for the weight-bearing `OutTrans=1` LoRA up-projection. Those uses all
+assume the per-layer role offsets inside that file are correct. **That assumption fails validation.**
+
+### The validation
+
+If the adapter belongs to these base weights, then `gate_A` -- shape `[1024 residual, 32]` -- has a
+residual axis that must match `gate`'s own residual input axis, which is independently verified
+(§30: `up -> gate` row-test **+523.9**). Contracting them:
+
+| | mean z over 4 layers |
+|---|---|
+| `gate_A^T @ gate` | **−0.4** |
+| `up_A^T @ up` | **−1.1** |
+| `O_A^T @ gate` | **+1.2** |
+| *correct residual contraction, base tensors* | **+160 … +523** |
+
+All at noise. The adapter's residual axis does not correspond to the base weights' residual axis for
+any role tested.
+
+### What is and is not affected
+
+**Still solid:** the segment discovery itself. `__MKERN_0`/`__MKERN_9` have `File Size 0` and VM sizes
+of exactly 29,687,808 / 59,375,616 bytes, matching `lora_32/64_constant_data.bin` byte-for-byte, and
+the file is layer-major with period 618,496 (autocorrelation peak 0.893 at exactly that lag, and again
+at 2x). Those facts stand.
+
+**Now unreliable:** the interpretation of the file's *internal* layout. The role-offset assignment was
+inferred from log-RMS boundaries, and it never fully closed -- the K/V region produced two 16,384-element
+segments that match no rank-32 role (expected sizes are only 32768, 8192 and 102400). That unresolved
+discrepancy is now the likely explanation for every LoRA result being at noise.
+
+**Consequently withdrawn:**
+* §19's *evidence* that `OutTrans=1` leaves the intra-bank coefficient order unchanged. **The
+  conclusion survives** -- it is independently established by the positional read (§25/§26), which
+  used synthetic probes and no LoRA data, and found the identical bijection in both the `0x6440` and
+  the shipped `0x6480` header modes. Only the LoRA route to it is retracted.
+* §28's LoRA-delta comparison (already reported as a weak hint, now void).
+* This section's own sweep of output maps for the `32 -> 1024` `OutTrans=1` LoRA tensor: best z +1.1,
+  which cannot be read as a negative result about `OutTrans` layouts, because the input slicing is
+  unvalidated.
+
+### Lesson recorded
+
+The LoRA file looked like ideal ground truth -- unpalettized fp16, DMA'd verbatim, spanning both
+`OutTrans` modes -- and that made it tempting to trust without checking it against something already
+known. The cheap validation (does its residual axis match a verified residual axis?) should have been
+run before any conclusion was drawn from it, not after three sections had relied on it.
