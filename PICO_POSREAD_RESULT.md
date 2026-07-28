@@ -559,8 +559,35 @@ the scheduler stage that assigns `OutTrans`. This is unlikely to matter -- `OutT
 same null result -- but it means the palettization axis of the search space is blocked by tooling, not
 resolved.
 
-Net effect: the `OutTrans=1` trigger is not a local, few-op graph property at all. What is left
-untested is real **model-scale** context -- the full 24-layer graph, or whatever repetition depth /
-whole-program cost model the ANE scheduler actually keys off. That is a substantially larger build (a
-faithful MIL translation of `pico_forward.py`'s full attention + SwiGLU stack across many layers) with
-no guarantee of success, and is recorded here as the next concrete step rather than attempted blind.
+Net effect: the `OutTrans=1` trigger is not a local, few-op graph property at all. What was left
+untested was real **model-scale** context -- addressed next.
+
+## 17. Full 24-layer depth sweep: also ruled out
+
+Built `outtrans_depth.py`: N repeated blocks (`softmax -> conv_O -> add` then
+`silu(conv_gate) * conv_up -> conv_down -> add`) at pico's real widths (`D=1024`, `FFN=3200`),
+chained through **one continuous residual stream**, at `n_layers` = 1, 2, 4, 8, 16, 24 -- i.e. the
+full real depth, with every `O` and `down` conv sharing the same growing whole-program graph a real
+compile of pico would see. All six depths compiled cleanly through the same
+`mlprogram -> coremlcompiler -> mil_to_hwx` pipeline:
+
+| n_layers | conv tasks | `OutTrans` values seen |
+|---|---|---|
+| 1 | 14 | `{0}` |
+| 2 | 27 | `{0}` |
+| 4 | 53 | `{0}` |
+| 8 | 105 | `{0}` |
+| 16 | 209 | `{0}` |
+| 24 | 313 | `{0}` |
+
+`OutTrans=1` never appears, at any depth, for any of the 313 conv tasks in the full-depth graph. This
+rules out repetition depth / whole-program size as the trigger too -- the entire "reproduce it via a
+synthetic MIL graph, at any shape, any local context, or any depth" avenue is now exhausted.
+
+What is NOT reproduced in this test (and remains the one un-eliminated fidelity gap) is the real
+multi-head **reshape/transpose** pattern: pico's true attention path is
+`softmax(QK^T) -> matmul(V) -> reshape/transpose (merge heads back to channels) -> conv(O)`, whereas
+this test fed `softmax` directly into `conv(O)` with no intervening transpose. It is possible the
+scheduler's `OutTrans=1` choice is keyed specifically off a transpose op sitting immediately upstream
+of the conv (cheap to fuse into a storage transpose) rather than off softmax/depth/residual-writes at
+all -- a hypothesis distinct from everything tested above, and not yet tried.
