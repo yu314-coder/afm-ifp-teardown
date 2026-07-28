@@ -1458,3 +1458,53 @@ luck, and it means further enumeration of orderings is not expected to succeed.
 Breaking it needs an anchor from outside the weight data: a weight-bearing `OutTrans=1` compile (to
 read the layout directly), or a runtime capture of the FFN activation tensor. Neither is available on
 this host.
+
+## 32. Xcode A/B: the wall is the OS, not the toolchain (corrects earlier guidance)
+
+Earlier sections suggested that obtaining "a different Xcode" might emit the weight-bearing
+`OutTrans=1` conv that everything hinges on. **That guidance was wrong**, and this section corrects
+it with a direct test.
+
+Both toolchains present on this host were driven through the same graphs:
+
+```
+Xcode 26.5      (17F42)      /Volumes/D/Xcode.app
+Xcode 27.0 beta (27A5218g)   /Applications/Xcode-beta.app     (matches the OS)
+```
+
+| graph | Xcode 26.5 | Xcode 27.0 beta |
+|---|---|---|
+| full real MHA | 12 tasks, `OutTrans=1` on 2, **weight-bearing: 0** | identical |
+| L-class in the `0x6480` bias mode | 1 task, `OutTrans=1`: 0 | identical |
+| L-class + `enable_per_channel_scale` | **fails** -- `InvalidMILProgram` | **fails** -- identical |
+
+The two toolchains are **byte-for-byte equivalent in outcome**, including the same failure.
+
+### Why
+
+`mil_to_hwx` links against:
+
+```
+/System/Library/PrivateFrameworks/ANECompiler.framework      <- SYSTEM framework
+/System/Library/PrivateFrameworks/ANEServices.framework
+```
+
+`xcrun coremlcompiler` (which *is* Xcode-provided) only produces the `.mlmodelc`; the actual ANE
+compilation -- the stage that assigns `OutTrans` and rejects `constexpr_blockwise_shift_scale` -- is
+performed by **ANECompiler.framework, which ships with macOS, not Xcode**. Changing Xcode changes the
+MIL front end only, never the ANE backend. Hence the identical results.
+
+Every other `ANECompiler.framework` on disk (in both Xcodes' SDKs and both CommandLineTools SDKs) is
+a `.tbd` **text stub for linking**, not an implementation. No simulator runtimes are installed. So
+this host has exactly **one** ANE compiler, tied to macOS 27.0 build 26A5388g.
+
+### Corrected requirement
+
+The unlock is **a different macOS version** (hence a different `ANECompiler.framework`), not a
+different Xcode. Concretely, either:
+
+* another Mac running a different macOS build, where the same probes are re-run; or
+* an installed simulator runtime / older SDK that ships a real ANECompiler binary rather than a
+  `.tbd`, loaded ahead of the system one via `DYLD_FRAMEWORK_PATH`.
+
+Neither is available here, and no amount of Xcode switching substitutes for it.
