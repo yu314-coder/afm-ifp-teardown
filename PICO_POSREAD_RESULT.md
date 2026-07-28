@@ -2512,3 +2512,53 @@ One genuine, structurally proven decode bug is fixed -- the first defect in this
 by its cause rather than inferred from a metric. It substantially improves Q/K and removes an
 artifact that contaminated every tensor. It does not by itself make the model work, so at least one
 further defect remains, and V/O is still the outstanding one.
+
+## 47. After the +96 fix: what changed, what did not, and the first sub-chance result
+
+Section 46 proved the payload offset bug. Since that voids every earlier decode-variant result,
+the decisive experiments were repeated on the corrected weights.
+
+### 47.1 Still null after the fix
+
+* **V/O layout.** Orientation and head order: 0.027-0.042, unchanged at the noise floor. The
+  Hungarian solve now shows textbook overfitting -- train layers lift to 0.099-0.224 while held-out
+  layers stay at 0.011-0.060. No transfer, so no real permutation was found. V/O survives the fix
+  as the outstanding defect.
+* **Embedding scale.** Best value 16.0 at NLL 13.019, still above chance; `sqrt(D) = 32` gives
+  13.196. Null, as before but now on trustworthy weights.
+* **Norm placement.** pre 13.372, postattn 13.430, postffn 13.395, sandwich 13.515. The plain
+  pre-norm arrangement remains best, so the graph's third RMSNorm still has no working placement --
+  consistent with it belonging to the LoRA path.
+
+### 47.2 The first configuration to beat chance
+
+Per-layer teacher-forced NLL on the corrected decode:
+
+```
+L0    L1    L2    L3    L4    L5    L6    L7    L8    L9   L10   L11
+12.5  12.7  12.7  12.4  11.7  11.9  12.0  12.1  12.0  12.2  12.2  12.1
+L12   L13   L14   L15   L16   L17   L18   L19   L20   L21   L22   L23
+12.3  12.5  12.9  13.0  13.0  13.1  13.3  13.3  13.4  13.4  13.5  13.4
+```
+
+Chance is 12.477. **Layers 3-13 are below it, bottoming at 11.728 at layer 4.** This is the first
+time any configuration in this project has produced a genuine sub-chance result, and it is a
+structural statement rather than a lucky score: a *truncated* model works, and the error accumulates
+monotonically with depth. Early layers therefore carry real signal, and each layer injects damage
+that eventually swamps it -- exactly what a broken V/O in every block would do.
+
+### 47.3 The layer-0 magnitude anomaly
+
+The residual trace still shows layer 0's attention output at **33.65x** the residual norm
+(`||x||` 1.19 -> 64.16, copy fraction 1.000 -> 0.000). `||o||` is 33-40 at *every* layer, so the
+embedding at 1.19 is the outlier. `sqrt(1024) = 32` would match it exactly, which is why the Gemma
+scaling hypothesis is so tempting -- but it is measured as null (13.196 vs 13.372), because RMSNorm
+makes each sublayer scale-invariant and the scale only shifts the copy/predict balance.
+
+### Standing
+
+The +96 fix is real and proven, and it moved Q/K sharpness 0.0468 -> 0.6058 and produced the first
+sub-chance NLL. It did not fix V/O, and the model still does not generate coherent text. The
+remaining defect is now sharply characterised: something in every block that is *cumulative* --
+harmless for three or four layers, fatal by twenty-four -- with V/O the only role still measured at
+its noise floor.
