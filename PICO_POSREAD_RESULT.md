@@ -518,3 +518,49 @@ is unresolved everywhere. So this is recorded as a **structural** finding, not a
 it means both the from-weights forward and the GGUF export currently omit a layer-shaped unit that
 the shipped model contains, and the "24 dense layers" figure derived from the `odix` op census should
 be treated as provisional.
+
+## 16. `OutTrans=1` graph-context hypothesis: tested and ruled out
+
+Every prior `mil_to_hwx` sweep compiled a **bare, isolated** convolution (varying only `cin`/`cout`/`S`)
+and always got `OutTrans=0`. It remained an open question whether `OutTrans=1` is a graph-*context*
+effect -- i.e. whether the ANE scheduler only chooses it when the conv's output is consumed by a
+subsequent op (a residual add), or when preceded by the same op that precedes it in pico's real graph
+(a softmax for O, a SwiGLU gate for down), rather than by shape alone. Two things blocked testing this
+before: (1) `coreml2hwx`, the tool used to reach that graph-shape hypothesis via the legacy
+`NeuralNetworkBuilder` API, cannot load a modern ML Program `.mlpackage` at all (`espresso_plan_add_network
+ret -1`) -- so an earlier attempt at exactly this test never actually exercised the compiler; (2) the
+working `mlprogram -> xcrun coremlcompiler -> mil_to_hwx` pipeline was only ever driven with a bare conv.
+
+Combining the two -- real graph shapes through the pipeline that actually loads ML Programs -- gives a
+real test, run this session (`outtrans_residual.py`). Compiled and read via `mil_to_hwx`/`hwx_parsing`:
+
+| variant | preceding op(s) | following op | `OutTrans` |
+|---|---|---|---|
+| bare conv | none | none | `0` |
+| `mul -> conv` | generic elementwise mul | none | `0` |
+| `conv -> add` | none | residual add | `0` |
+| `mul -> conv -> add` | generic mul | residual add | `0` |
+| 2x stacked `mul -> conv -> add` | same, repeated, sharing one residual stream | residual add (both blocks) | `0` |
+| `softmax -> conv -> add` | **exact** O-proj predecessor (task order: softmax then conv) | residual add | `0` |
+| `silu(gate) * up -> conv -> add` | **exact** down-proj predecessor (real SwiGLU, not a generic mul) | residual add | `0` |
+
+Every one of these compiled cleanly and reports `OutTrans=0`, across every weight-palettization
+granularity the local ANE compiler will accept (`per_tensor`, `per_grouped_channel` with
+`channel_axis=0`). This **rules out** local graph context (residual writes, 2-layer repetition, and
+exact real predecessor op identity) as the trigger, closing a hypothesis that earlier writeups left
+open pending a working test.
+
+One config remains genuinely untestable, not merely unexplored: `enable_per_channel_scale=True` (or
+`per_grouped_channel` with `channel_axis=1`) is the palettization scheme that actually matches pico's
+real container (per-output-channel scale), but it lowers to `constexpr_blockwise_shift_scale`, an op
+this machine's `mil_to_hwx`/ANE compiler rejects outright (`InvalidMILProgram`) before it ever reaches
+the scheduler stage that assigns `OutTrans`. This is unlikely to matter -- `OutTrans` governs
+*activation* storage, not weight coefficient encoding, and every compilable weight scheme gave the
+same null result -- but it means the palettization axis of the search space is blocked by tooling, not
+resolved.
+
+Net effect: the `OutTrans=1` trigger is not a local, few-op graph property at all. What is left
+untested is real **model-scale** context -- the full 24-layer graph, or whatever repetition depth /
+whole-program cost model the ANE scheduler actually keys off. That is a substantially larger build (a
+faithful MIL translation of `pico_forward.py`'s full attention + SwiGLU stack across many layers) with
+no guarantee of success, and is recorded here as the next concrete step rather than attempted blind.
