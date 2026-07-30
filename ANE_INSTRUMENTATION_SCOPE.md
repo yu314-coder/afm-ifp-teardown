@@ -68,7 +68,7 @@ Inspection of `TGOnDeviceInferenceProviderService.appex` on this machine (macOS 
 **Definitive go/no-go (operator runs, needs sudo, during inference):**
 ```
 sudo DevToolsSecurity -enable                      # once
-echo hi | /Volumes/D/fix/afm >/dev/null &          # warm the model
+echo hi | /Volumes/D/github/afm-ifp-teardown/local/tools/afm >/dev/null &          # warm the model
 PID=$(pgrep -f TGOnDeviceInferenceProviderService | head -1)
 sudo lldb -o "process attach --pid $PID" -o detach -o quit
 #  GO : "Process <pid> stopped"       -> root+devmode suffices; proceed to Approach A

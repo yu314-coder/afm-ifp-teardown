@@ -55,7 +55,7 @@ def swiglu(h, Wgate, Wup, Wdown):
 
 if __name__=="__main__":
     import sys
-    sd=torch.load("/Volumes/D/fix/afmplus_v11_ifp_FULL_v2.pt",map_location='cpu',weights_only=False)["state_dict"]
+    sd=torch.load("/Volumes/D/github/afm-ifp-teardown/local/weights/afmplus_v11_ifp_FULL_v2.pt",map_location='cpu',weights_only=False)["state_dict"]
     import re
     L=sorted({int(re.search(r'layers\.(\d+)\.',k).group(1)) for k in sd if k.startswith("model.layers.")})
     print(f"loaded {len(L)} attention layers")

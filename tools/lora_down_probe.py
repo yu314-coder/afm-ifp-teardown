@@ -21,8 +21,8 @@ verdict on down's input axis has to be re-opened.
 """
 import sys, json
 import numpy as np
-sys.path.insert(0, '/Volumes/D/fix/afm-ifp-teardown/src')
-sys.path.insert(0, '/Volumes/D/fix/pico_shapes')
+sys.path.insert(0, '/Volumes/D/github/afm-ifp-teardown/src')
+sys.path.insert(0, '/Volumes/D/github/afm-ifp-teardown/local/pico_shapes')
 import pico_weights as pw
 
 P = ('/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/'

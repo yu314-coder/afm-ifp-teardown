@@ -32,8 +32,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-sys.path.insert(0, "/Volumes/D/fix/afm-ifp-teardown/src")
-sys.path.insert(0, "/Volumes/D/fix/pico_shapes")
+sys.path.insert(0, "/Volumes/D/github/afm-ifp-teardown/src")
+sys.path.insert(0, "/Volumes/D/github/afm-ifp-teardown/local/pico_shapes")
 import pico_weights as pw           # decode_tensor, decode_block, decode_down  (uses picolib)
 import picolib                       # raw byte access (_d), codebook helpers
 from embedding_dynamic_capture import find_identical_row_buffer
@@ -224,7 +224,7 @@ def load_embedding(core_path, D=1024, seq_len=1):
 
 
 def main():
-    core = sys.argv[1] if len(sys.argv) > 1 else "/Volumes/D/fix/tw_dog.core"
+    core = sys.argv[1] if len(sys.argv) > 1 else "/Volumes/D/github/afm-ifp-teardown/local/captures/tw_dog.core"
     seq_len = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     arr = Arrangement()
     print("=== afmplus-v11.0-pico  from-weights forward  (DEFAULT row-major arrangement) ===")

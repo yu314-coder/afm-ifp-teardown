@@ -39,7 +39,7 @@ class AFMTokenizer:
         return ''.join(self.vocab[i] if i < len(self.vocab) else '' for i in ids).replace(SP, ' ').strip()
 
 if __name__ == '__main__':
-    tk = AFMTokenizer('/Volumes/D/fix/afm_odix/tok_vocab.json')
+    tk = AFMTokenizer('/Volumes/D/github/afm-ifp-teardown/local/afm_odix/tok_vocab.json')
     for s in ["The capital of Japan is Tokyo", "Hello world", "Write a poem about the ocean"]:
         ids = tk.encode(s)
         print(f'{s!r}\n  ids={ids}\n  roundtrip={tk.decode(ids)!r}')

@@ -14,9 +14,9 @@ import numpy as np, torch, json, sys, time, os
 
 MP="/private/tmp/claude-501/-Volumes-D-fix/66097cec-1bae-4f07-91ce-baedd9d7dc1c/scratchpad/dmg.XwhTQD"
 RAW=f"{MP}/model.odixpackage/ifp/ifp_rasterized_weights.bin"
-OUT="/Volumes/D/fix/afmplus_v11_ifp_FULL_v2.pt"
+OUT="/Volumes/D/github/afm-ifp-teardown/local/weights/afmplus_v11_ifp_FULL_v2.pt"
 d=np.memmap(RAW,dtype=np.uint8,mode='r')
-cb=np.load("/Volumes/D/fix/afm_odix/afm_codebook_deswz.npy").ravel().astype(np.float32)
+cb=np.load("/Volumes/D/github/afm-ifp-teardown/local/afm_odix/afm_codebook_deswz.npy").ravel().astype(np.float32)
 SCALE0=0x60; INDEX0=0x1078000; BACK_END=0xc0c8000; FILE_END=d.size
 NSCALE=(INDEX0-SCALE0)//2
 SCALES=np.frombuffer(d[SCALE0:SCALE0+NSCALE*2],dtype=np.float16).astype(np.float32)  # global scale table

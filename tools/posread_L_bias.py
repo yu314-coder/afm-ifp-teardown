@@ -21,11 +21,11 @@ import coremltools as ct
 import coremltools.optimize.coreml as cto
 from coremltools.converters.mil import Builder as mb
 
-WORK = '/Volumes/D/fix/wf_scratch/posL2'
+WORK = '/Volumes/D/github/afm-ifp-teardown/local/wf_scratch/posL2'
 os.makedirs(WORK, exist_ok=True)
 os.chdir(WORK)
-HP = '/Volumes/D/fix/coreml_to_ane_hwx/hwx_dump/hwx_parsing'
-MIL2HWX = '/Volumes/D/fix/coreml_to_ane_hwx/mil_to_hwx'
+HP = '/Volumes/D/github/afm-ifp-teardown/local/coreml_to_ane_hwx/hwx_dump/hwx_parsing'
+MIL2HWX = '/Volumes/D/github/afm-ifp-teardown/local/coreml_to_ane_hwx/mil_to_hwx'
 
 CIN, COUT, S = 3200, 256, 64
 NBANK = 16
@@ -139,5 +139,5 @@ print('bank 0, first 24 slots:  o =', o[0][:24].tolist())
 print('bank 0, first 24 slots:  i =', i[0][:24].tolist())
 print('bank 0 o range: [%d..%d]   bank 1 o range: [%d..%d]'
       % (o[0].min(), o[0].max(), o[1].min(), o[1].max()))
-np.savez('/Volumes/D/fix/wf_scratch/posread_L_bias.npz', o=o, i=i)
+np.savez('/Volumes/D/github/afm-ifp-teardown/local/wf_scratch/posread_L_bias.npz', o=o, i=i)
 print('\nsaved posread_L_bias.npz')

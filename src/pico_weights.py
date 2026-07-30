@@ -20,11 +20,11 @@ WHAT IS ASSUMED (a fixed ANE conv-layout convention, provably SV-invisible, NOT 
 Requires the shared library `picolib.py` (validated symtab parser + tile/codebook decode).
 """
 import sys, json, numpy as np
-import os as _os; sys.path.insert(0, _os.path.dirname(__file__)); sys.path.insert(0, "/Volumes/D/fix/pico_shapes")
+import os as _os; sys.path.insert(0, _os.path.dirname(__file__)); sys.path.insert(0, "/Volumes/D/github/afm-ifp-teardown/local/pico_shapes")
 import picolib  # noqa: E402
 
 # logical tensor -> ordered block offsets comes from the committed map
-MAP_PATH = "/Volumes/D/fix/afm-ifp-teardown/pico_weight_map.json"
+MAP_PATH = "/Volumes/D/github/afm-ifp-teardown/pico_weight_map.json"
 
 
 def _va_ns_at(file_off):
@@ -121,7 +121,7 @@ def main():
     print("decoded %d/%d tensors as REAL weights (true-SVD R; scrambled ~1):" % (len(Rs), len(Rs)))
     print("  per-role mean R:", {k: round(np.mean(v), 2) for k, v in byrole.items()})
     print("  overall mean R=%.2f  min=%.2f" % (np.mean(Rs), min(Rs)))
-    json.dump(rep, open("/Volumes/D/fix/pico_shapes/pico_decode_report.json", "w"), indent=1)
+    json.dump(rep, open("/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_decode_report.json", "w"), indent=1)
 
 
 if __name__ == "__main__":

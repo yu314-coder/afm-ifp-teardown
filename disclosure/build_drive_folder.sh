@@ -2,7 +2,7 @@
 # Assemble the Drive-ready disclosure folder. Original work only -- no Apple content.
 set -e
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="/Volumes/D/fix/apple_disclosure"
+OUT="/Volumes/D/github/afm-ifp-teardown/local/apple_disclosure"
 rm -rf "$OUT"; mkdir -p "$OUT/source"
 
 cp "$SRC/paper/afm_teardown.pdf" "$OUT/afm_teardown.pdf"

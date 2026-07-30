@@ -66,7 +66,7 @@ def embed_table(ids=None):
 
 if __name__ == "__main__":
     import json, sys
-    vocab = json.load(open("/Volumes/D/fix/afm_odix/tok_vocab.json"))
+    vocab = json.load(open("/Volumes/D/github/afm-ifp-teardown/local/afm_odix/tok_vocab.json"))
     idx = {t: i for i, t in enumerate(vocab)}
     cos = lambda u, v: float(u @ v / (np.linalg.norm(u) * np.linalg.norm(v) + 1e-9))
     for a, b in [("▁dog", "▁dogs"), ("▁king", "▁kings"), ("▁book", "▁books")]:

@@ -45,7 +45,7 @@ def emb_deswz(ids):
     return torch.tensor(np.array(r),dtype=torch.float32)
 spec=importlib.util.spec_from_file_location("t","afm_tokenizer.py");t=importlib.util.module_from_spec(spec);spec.loader.exec_module(t)
 tk=t.AFMTokenizer("tok_vocab.json")
-sd=torch.load("/Volumes/D/fix/afmplus_v11_ifp_FULL_v2.pt",map_location='cpu',weights_only=False)["state_dict"]
+sd=torch.load("/Volumes/D/github/afm-ifp-teardown/local/weights/afmplus_v11_ifp_FULL_v2.pt",map_location='cpu',weights_only=False)["state_dict"]
 import re
 NL=len(sorted({int(re.search(r'layers\.(\d+)\.',k).group(1)) for k in sd if k.startswith("model.layers.")}))
 ids=tk.encode("The capital of France is",add_bos=True)

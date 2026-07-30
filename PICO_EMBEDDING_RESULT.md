@@ -7,7 +7,7 @@ Target:
 `/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/031c7be6f8fddbff0a6650fee75e345b1ee9613c.asset/.AssetData/model.odixpackage/program.odix`
 (136,052,680 bytes)
 
-Decoder: `/Volumes/D/fix/pico_shapes/pico_embedding_decode.py`
+Decoder: `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_embedding_decode.py`
 
 ---
 
@@ -141,7 +141,7 @@ formulations. It is only visible on the full table.
 **`captured_embeddings.npz` key `'5864'` is mislabelled.** That vector is bit-exactly
 the row of token **43534 = `▁london`** (lowercase), not 5864 = `▁London`.
 
-Verified against `/Volumes/D/fix/afm_odix/tok_vocab.json`, which aligns at offset 0
+Verified against `/Volumes/D/github/afm-ifp-teardown/local/afm_odix/tok_vocab.json`, which aligns at offset 0
 (`v[4803]='▁dog'`, `v[12418]='▁dogs'`, `v[9619]='▁king'`, `v[44862]='▁kings'`,
 `v[43534]='▁london'`, `v[5864]='▁London'`). Token 5864's actual row has cosine
 **0.646** to the stored vector. The other four keys are correct.
@@ -190,15 +190,15 @@ Notes on the adjudication:
 
 ### Artifacts safe to use
 
-- `/Volumes/D/fix/pico_shapes/pico_embedding_decode.py` (this adjudication's decoder)
-- `/Volumes/D/fix/pico_shapes/pico_embedding_table.npy` — `[262144,1024]` fp16, **direct token indexing**
-- `/Volumes/D/fix/pico_shapes/pico_embed_codes_int8.npy` — `[262144,1024]` int8 codes, direct indexing
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_embedding_decode.py` (this adjudication's decoder)
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_embedding_table.npy` — `[262144,1024]` fp16, **direct token indexing**
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_embed_codes_int8.npy` — `[262144,1024]` int8 codes, direct indexing
 - any of the five `*scale*.npy` files (all verified equal to the file's scale vector)
 
 ### Artifacts to delete or fix
 
-- `/Volumes/D/fix/pico_shapes/pico_embedding_fp16.npy` — **wrong for 65,502 tokens**
-- `/Volumes/D/fix/pico_shapes/pico_emb_codes_int4.npy` — correct but uses a `t-4` row
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_embedding_fp16.npy` — **wrong for 65,502 tokens**
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_emb_codes_int4.npy` — correct but uses a `t-4` row
   offset; only safe if that convention is honoured (and it cannot represent tokens 0–3)
 
 ---
@@ -211,7 +211,7 @@ The embedding is **tied** to the unembed, so
 logits = h @ table.T
 ```
 
-This makes the captured ground-truth logits in `/Volumes/D/fix/pico_oracle/` usable as
+This makes the captured ground-truth logits in `/Volumes/D/github/afm-ifp-teardown/local/pico_oracle/` usable as
 a functional oracle. That end-to-end loop was **not** exercised here — closing it still
 requires the final hidden state out of `pico_full.core`, which this adjudication did not
 touch. Treat the oracle as unblocked, not as demonstrated.

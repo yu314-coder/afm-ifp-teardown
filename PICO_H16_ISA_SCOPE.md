@@ -112,8 +112,8 @@ or the coreml2hwx fallback per shape. This is the true floor of the pico weight 
 
 ## ★ FINAL RESULT (2026-07-18): 168/168 located & decode-validated; composition unproven (MOSTLY)
 
-Full write-up: `/Volumes/D/fix/pico_shapes/PICO_WEIGHT_RESULT.md`. Map:
-`/Volumes/D/fix/pico_shapes/pico_weight_map.json` (169 entries = 168 tensors + 1 flagged partial unit).
+Full write-up: `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/PICO_WEIGHT_RESULT.md`. Map:
+`/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_weight_map.json` (169 entries = 168 tensors + 1 flagged partial unit).
 
 **Bottom line — MOSTLY.** All **168 logical tensors** (24 complete layers × 7) are **located** and every
 constituent block is **decode-validated as genuine affine-int4 weight data**, with an exact reproducible

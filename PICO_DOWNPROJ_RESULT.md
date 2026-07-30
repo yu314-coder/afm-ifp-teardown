@@ -6,7 +6,7 @@ R ≈ 1.0–1.2.** This clears the task bar (R > 3 real; scrambled ~1.4) decisiv
 standard* by which the 144 N-tensors (Q/K/V/O/gate/up, mean R = 4.0) and the 3B down-proj were
 accepted. Reproduced independently by this adjudication pass, not merely reported.
 
-Decoder: `/Volumes/D/fix/pico_shapes/pico_down_final_decode.py` → `decode_down(entry)` returns the
+Decoder: `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_down_final_decode.py` → `decode_down(entry)` returns the
 `[3200,1024]` float32 weight and prints the per-layer R table.
 
 ## Exact recipe
@@ -63,6 +63,6 @@ which the Q/K/V/O/gate/up tensors were already accepted. Byte-exact micro-permut
 forward oracle-rank fit (the 3B route), not the SV structure test.
 
 ## Artifacts
-- `/Volumes/D/fix/pico_shapes/pico_down_final_decode.py` — `decode_down(entry)` + all-24 R table
-- `/Volumes/D/fix/pico_shapes/adjudicate.py` — magnitude-artifact controls (true SVD)
-- `/Volumes/D/fix/pico_shapes/adjudicate2.py` — aspect-ratio / placement / separability characterization
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_down_final_decode.py` — `decode_down(entry)` + all-24 R table
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/adjudicate.py` — magnitude-artifact controls (true SVD)
+- `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/adjudicate2.py` — aspect-ratio / placement / separability characterization

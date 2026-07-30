@@ -1,6 +1,6 @@
 # Drive folder — what to upload
 
-Assembled by `disclosure/build_drive_folder.sh` into `/Volumes/D/fix/apple_disclosure/`.
+Assembled by `disclosure/build_drive_folder.sh` into `/Volumes/D/github/afm-ifp-teardown/local/apple_disclosure/`.
 
 ## Include
 

@@ -8,6 +8,12 @@
 *.mlmodelc
 *.asset
 *.npy
+*.npz
+*.core
+
+# local-only scratch, captures, and proprietary-derived weights --
+# never published, kept alongside the repo purely for continuity
+local/
 # latex build cruft
 *.aux
 *.log

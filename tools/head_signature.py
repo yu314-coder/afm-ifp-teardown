@@ -18,8 +18,8 @@ means "this axis is organised in 64-wide head groups".
 """
 import sys, json
 import numpy as np
-sys.path.insert(0, '/Volumes/D/fix/afm-ifp-teardown/src')
-sys.path.insert(0, '/Volumes/D/fix/pico_shapes')
+sys.path.insert(0, '/Volumes/D/github/afm-ifp-teardown/src')
+sys.path.insert(0, '/Volumes/D/github/afm-ifp-teardown/local/pico_shapes')
 import pico_weights as pw
 
 M = json.load(open(pw.MAP_PATH))

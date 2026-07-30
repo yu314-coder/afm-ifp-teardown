@@ -124,7 +124,7 @@ cross-codec seams + the RoPE runtime pairing** — items no static/non-privilege
 Capture pico's real output for a known short prompt and use it as a functional oracle that ranks the residual
 arrangement permutations by **argmax-match** (and by per-position activation match). Deliverable:
 
-- **`/Volumes/D/fix/capture_pico_logits.sh`** — attach-by-pid to the live inference service (proven method),
+- **`/Volumes/D/github/afm-ifp-teardown/local/captures/capture_pico_logits.sh`** — attach-by-pid to the live inference service (proven method),
   arm an auto-continue breakpoint on `_espresso_network_bind_buffer`, and dump the CPU-readable buffers for
   pico's graph I/O tensors **`in_embeddings`** (the exact `[T,1024]` input the forward consumes) and
   **`placeholder_out_opt_logits`** (the `[…,262144]` output) for a fixed `-t 0 -m 1` prompt; also record the

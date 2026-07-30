@@ -11,17 +11,17 @@ Uses the validated decode path:
 LOCAL ONLY. Contains Apple's weights + tokenizer -> never committed or published.
 """
 import numpy as np, json, struct, sys, os
-sys.path.insert(0, '/Volumes/D/fix/pico_shapes')
+sys.path.insert(0, '/Volumes/D/github/afm-ifp-teardown/local/pico_shapes')
 import importlib.util
-spec = importlib.util.spec_from_file_location('pe', '/Volumes/D/fix/afm-ifp-teardown/src/pico_embedding.py')
+spec = importlib.util.spec_from_file_location('pe', '/Volumes/D/github/afm-ifp-teardown/src/pico_embedding.py')
 PE = importlib.util.module_from_spec(spec); spec.loader.exec_module(PE)
 import picolib
 d = picolib._d
-M = json.load(open('/Volumes/D/fix/afm-ifp-teardown/pico_weight_map.json'))
+M = json.load(open('/Volumes/D/github/afm-ifp-teardown/pico_weight_map.json'))
 
 GEOM = {'N': (0x2080, 8192, 16), 's': (0x1080, 4096, 8), 'L': (0x6480, 25600, 16)}
 NL, D, NQ, NKV, HD, FF, V = 24, 1024, 16, 4, 64, 3200, 262144
-OUT = '/Volumes/D/fix/pico_gguf/afmplus-v11.0-pico-F16.gguf'
+OUT = '/Volumes/D/github/afm-ifp-teardown/local/pico_gguf/afmplus-v11.0-pico-F16.gguf'
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 def decode(L, role, cin, cout):
@@ -78,7 +78,7 @@ add_f32('llama.rope.freq_base', 500000.0)
 add_u32('llama.rope.dimension_count', HD)
 add_u32('general.file_type', 1)
 
-vocab = json.load(open('/Volumes/D/fix/afm_odix/tok_vocab.json'))[:V]
+vocab = json.load(open('/Volumes/D/github/afm-ifp-teardown/local/afm_odix/tok_vocab.json'))[:V]
 # llama.cpp requires unique token strings; ids 4-7 mirror <pad>/<eos>/<bos>/<unk>
 seen = {}
 for i, t in enumerate(vocab):

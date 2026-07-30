@@ -23,7 +23,7 @@ import struct
 import numpy as np
 
 QWEN = '/Volumes/D/github/image/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf'
-exec(open('/Volumes/D/fix/wf_scratch/validate_oracle.py').read().split("f, tens, ds = read_gguf_index")[0])
+exec(open('/Volumes/D/github/afm-ifp-teardown/local/wf_scratch/validate_oracle.py').read().split("f, tens, ds = read_gguf_index")[0])
 
 f, tens, ds = read_gguf_index(QWEN)
 byname = {t[0]: t for t in tens}

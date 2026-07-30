@@ -1,8 +1,8 @@
 # PICO (H16, on-device ~300M) weight recovery — FINAL RESULT
 
 Date: 2026-07-18
-Map file: `/Volumes/D/fix/pico_shapes/pico_weight_map.json` (169 entries: 168 logical tensors + 1 flagged partial unit)
-Decode library: `/Volumes/D/fix/pico_shapes/picolib.py`
+Map file: `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/pico_weight_map.json` (169 entries: 168 logical tensors + 1 flagged partial unit)
+Decode library: `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/picolib.py`
 Source asset: `binary_0.hwx` (H16 ISA v17 ANE program), symbol-table–driven; **no Apple weights committed**.
 
 ---

@@ -135,7 +135,7 @@ same theta-is-not-a-literal situation — so the family recipe transfers; only t
 ## Provenance
 All findings reproduced this pass from the on-disk asset via `numpy`/`struct` (MLIR-bytecode
 prefix-varint section walk; hwx LC_SYMTAB census; AttrType/host-section constant scans; manifest parse).
-Scratch scripts under `/Volumes/D/fix/pico_shapes/`.
+Scratch scripts under `/Volumes/D/github/afm-ifp-teardown/local/pico_shapes/`.
 
 ---
 

@@ -65,9 +65,9 @@ input.
   runtime-**patched** from the raster via a content-hash `dsid` (see `afm_odix/hwx_expert_dma.json`).
   `__KERN_0`+`__const`+`__KERN_1` = 205.7 MB of high-entropy on-disk data ≥ the 201.3 MB embedding —
   `__KERN_0` (133.73 MB, entropy 7.77) is the **prime target region**.
-- **Toolchain:** `coreml2hwx` at `/Volumes/D/fix/coreml_to_ane_hwx/coreml2hwx`; build harness
+- **Toolchain:** `coreml2hwx` at `/Volumes/D/github/afm-ifp-teardown/local/coreml_to_ane_hwx/coreml2hwx`; build harness
   `disasm/pbuild.py`, readback `disasm/posread_full.py` / `dense_posread.py`; env
-  `/Volumes/D/fix/anevenv/bin/python3` (coremltools 9.0) to compile, `/usr/local/bin/python3`
+  `/Volumes/D/github/afm-ifp-teardown/local/captures/anevenv/bin/python3` (coremltools 9.0) to compile, `/usr/local/bin/python3`
   (torch/numpy) to analyze.
 - **Validation oracle:** the semantic probe (`/tmp/control.py`, `/tmp/gguf.py`). Target ≥ **+0.30**
   (a correct decode); anything ≤ +0.10 is noise. Always pair with the **shift control** (offset the
