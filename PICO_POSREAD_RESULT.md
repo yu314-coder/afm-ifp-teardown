@@ -2621,3 +2621,83 @@ The +96 payload fix (sec.46) remains the session's one proven advance. Everythin
 null: residual-basis solve, scale indexing, norm placement, embedding scale, layer order. The defect
 remains cumulative and unlocated, and the most reliable handle on it is still the depth profile --
 sub-chance through layer 13, degrading monotonically thereafter.
+
+## 49. SIP re-enabled; the sub-chance result survives its control; layer composition is the fault
+
+### 49.0 Environment change: static re-decoding is now blocked
+
+Mid-session, `/System/Library/AssetsV2` became unreadable: `csrutil status` now reports **SIP
+enabled** (it had been disabled). The pico asset's `binary_0.hwx` is **not** in the local
+`FM_GenerativeModels_copy` mirror (that mirror holds the 3B adapters only), so no new *decode*
+hypothesis -- payload offset, nibble order, codec, scale indexing -- can be tested until SIP is
+disabled again. Everything in this section therefore runs on `pico_w96.npz`, the corrected +96
+decode of all 7 roles x 24 layers, which remains fully sufficient for rearrangement and
+architecture questions.
+
+### 49.1 More architecture nulls
+
+* **True post-norm.** Every prior norm test applied the extra RMSNorm to the sublayer *output*
+  (`x = x + N(f(N(x)))`), leaving the residual stream unbounded -- it grows 1.19 -> 319. The
+  untested alternative normalizes the *stream*: `x = N(x + f(N(x)))`. Measured: pre 13.372,
+  resid-post-attn 13.623, resid-post-ffn 14.059, resid-post-both 14.531. **Pre-norm is correct**;
+  the depth degradation is not a missing normalization.
+* **Head layout in the full forward.** Q/K/V head split (head-major vs dim-major), O concatenation
+  order, and GQA mapping (blocked vs interleaved) had only ever been checked against the OV metric.
+  All 8 combinations in the forward: 13.098-14.016, none below chance.
+* **Per-layer weight statistics.** Mean magnitude and stable rank are smooth across depth
+  (early/late ratios 0.70-1.33, no discontinuity), so the layers are decoded consistently and there
+  is no mis-mapping fingerprint.
+
+### 49.2 The sub-chance result is real -- it passes its control
+
+Section 47 reported layers 3-13 beating chance. That could have been an artifact: early in the
+stack the residual still largely *is* the input embedding. Control = identical forward with every
+weight replaced by a norm-matched Gaussian, embedding and tokenizer untouched:
+
+| depth | decoded | norm-matched random |
+|---|---|---|
+| L3-L12 | **11.73 - 12.29 (below chance)** | 12.92 - 13.38 (never below) |
+| L14-L23 | 12.93 - 13.48 | 12.82 - 13.19 |
+| minimum | **11.728 @ L4** | 12.775 @ L0 |
+
+**Random weights never beat chance at any depth.** The decoded weights do, from layer 3 through
+layer 12. This is the first controlled, positive evidence that the decode carries genuine
+language-modelling signal. Past layer 14 the decoded model becomes indistinguishable from random,
+and slightly worse.
+
+### 49.3 The fault is composition, not individual layers
+
+Scoring each layer on its own -- fixed prefix (layers 0-3), then one candidate layer, against that
+layer's own norm-matched random twin -- **12 of 20 layers beat their twin**, and layer 23 scores
+**11.741** applied at depth 4, as good as layer 4 itself (11.807). Individual layers largely carry
+signal; stacking them destroys it.
+
+A greedy search over orderings (hold the residual, commit the layer minimising NLL at each depth)
+was then **cross-validated on held-out text** of different content including non-Latin script,
+because greedy over 24! orderings on one text is exactly the overfitting that killed the 3B
+router-map candidates:
+
+| order | train | **held-out** |
+|---|---|---|
+| identity (0..23) | 13.544 | 12.985 |
+| greedy, full 24 | 11.738 | **12.437** |
+| **greedy, depth 5** | 10.856 | **11.345** |
+| identity, depth 5 | 11.929 | 12.084 |
+| random orders, best of 6 | 13.118 | 13.029 |
+
+**The greedy order transfers.** It beats identity and every random order on text it was not fitted
+to, so the improvement is real rather than selection noise.
+
+But the honest reading is *not* "the layer assignment is scrambled". The strongest configuration is
+a **five-layer subset** (`10, 23, 0, 22, 17`) at 11.345 held-out, beating every 24-layer
+arrangement. The reconstruction is at its best when nineteen of twenty-four layers are discarded.
+That is a symptom, not a fix: it says the per-layer decode is still substantially wrong in a way
+that compounds, and stacking more of it subtracts rather than adds.
+
+### Standing
+
+Established this session: the +96 payload fix (sec.46, proven structurally), and now a controlled
+demonstration that the decode carries real signal (layers 3-12 beat chance where random weights
+never do). Still open: pre-norm confirmed but the graph's third RMSNorm unplaced; V/O untested; the
+per-layer defect that makes depth subtract. Best held-out NLL anywhere is 11.345 against a chance of
+12.477 -- real, and still nowhere near the ~3-4 a working 300M model would give.
