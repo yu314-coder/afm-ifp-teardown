@@ -2911,3 +2911,64 @@ Reproducibility is now complete and independent of SIP: block pattern verified, 
 decode bit-exact against the other build. Confirmed this section: `C=1` intra-bank slot map.
 Eliminated: the input-chunk family, and the embedding-basis permutation family (no member survives
 controls). The defect remains an element->position permutation that no tested family contains.
+
+## 53. The FFN relative permutation, re-swept on corrected weights: a candidate that survives
+
+### 53.1 Why this needed redoing
+
+Section 42.3 proved the FFN has exactly one real degree of freedom -- the permutation of down's
+input axis *relative* to gate/up's output channels (any joint permutation is a no-op). It was swept
+in sec.42.4 and again in sec.43.3, but **both ran on the +128 decode that sec.46 proved wrong**, so
+both were void. This re-runs it on `pico_w96.npz` with held-out validation the earlier sweeps lacked.
+
+### 53.2 Identity is not the answer
+
+69 structured bijections of 3200, scored on train with 16 controls:
+
+| pi (down input axis) | train | ctl beating | held-out | ctl beating |
+|---|---|---|---|---|
+| `revblk(5)` | **12.255** | 0/16 | **12.526** | 0/16 |
+| `T(160,20)+rev` | 12.340 | 1/16 | 12.404 | 0/16 |
+| `revblk(10)` | 12.626 | 3/16 | 12.593 | 0/16 |
+| **`identity`** | 13.515 | 12/16 | 12.985 | 6/16 |
+
+**Identity ranks 52 of 69.** The current down input order is worse than most alternatives -- itself
+evidence that this axis is wrong.
+
+### 53.3 `revblk(5)` survives confirmation and its confound control
+
+Confirmatory test on a **third** text set never used in selection, with 40 controls each:
+
+| pi | set1 | ctl< | set2 | ctl< | set3 | ctl< |
+|---|---|---|---|---|---|---|
+| `identity` | 13.515 | 35 | 12.985 | 17 | 12.935 | 15 |
+| **`revblk(5)`** | **12.255** | **0** | **12.526** | **0** | **12.334** | **2** |
+
+Mapping the whole reversal family across all three sets gives a sharp spike rather than a smooth
+trend: rank-sum 2 for `g=5`, 13 for `g=10`, and >=22 for every other group size including the pure
+full reversal `g=1`, which is *bad*. So the 5-grouping is essential, not incidental.
+
+**The obvious confound is excluded.** A permutation that merely attenuates a harmful FFN would
+improve NLL on every text without being correct. Measured:
+
+* `||f||/||x||` is **unchanged**: 0.3538 (identity) vs 0.3606 (`revblk(5)`) -- no muting.
+* A pure scalar attenuation of down never helps at all: alpha=1.0 is optimal (12.985 / 12.935) and
+  every smaller alpha is monotonically worse, down to 14.14 / 14.16 at alpha=0.
+
+So the gain is not attenuation, and it is not selection noise on one text.
+
+### 53.4 Honest assessment
+
+This is the strongest surviving candidate the project has produced -- the only one to clear
+control bands on three independent text sets *and* its confound control. Two cautions stand:
+
+1. **It is structurally implausible.** 3200 = 5 x 640, but nothing in the tile geometry (128, 256,
+   16 banks, 13 blocks) has a factor-5 period, and no ANE layout would naturally reverse 640 groups
+   of 5. A real hardware permutation should have a power-of-two or block-geometry period.
+2. **It does not make the model work.** 12.33-12.53 against a chance of 12.477 is a fraction of a
+   nat, where a functioning 300M model would be ~3-4. Generation is still incoherent.
+
+The defensible conclusion is narrower than "the FFN permutation is `revblk(5)`": **down's input axis
+is demonstrably not in gate/up's channel order**, identity is measurably poor, and `revblk(5)` is
+whatever structured permutation happens to sit closest to the truth among those tested. It is a
+signpost toward the right axis, not the answer.
