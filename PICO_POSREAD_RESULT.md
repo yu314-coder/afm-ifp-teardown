@@ -2842,3 +2842,72 @@ The seven-role decomposition and all tensor shapes are now confirmed from Apple'
 than inferred. The remaining unknown is unchanged and now precisely quoted from the decoder's own
 documentation -- an element->position permutation inside the ANE layout convention -- with tile
 order, block order, head layout, orientation, and coarse permutations all eliminated against controls.
+
+## 52. The decode is fully reproducible from the local build; two more families eliminated
+
+### 52.1 The weight map re-derived, and the two builds proven identical
+
+The per-layer block pattern documented in `pico_weights.py` was verified directly against the local
+build's symbol table: 960 blocks resolve to file offsets, and their spacings classify themselves
+(`N`=0x20800, `s`=0x10800, `L`=0x64800) into exactly `[N x10][s][N x12][s][N x12][L x4]` repeating --
+**960 = 24 layers x 40 blocks**, with roles Q(4N) K(1N) V(1N) O(4N) gate(s+12N) up(s+12N) down(4L)
+matching the manifest's module order.
+
+Decoding layer 0 from this re-derived map and comparing against `pico_w96.npz` (decoded from the
+other build):
+
+| role | cos(flat) | max abs diff |
+|---|---|---|
+| Q, K, V, O, gate, up, down | **1.000000** | **0.00000** |
+
+Bit-exact on all seven. **The two builds contain identical weights**, and the entire decode is now
+reproducible from the permanently-local asset with no dependence on SIP or the protected copy.
+
+### 52.2 Input-chunk width: C=1 confirmed
+
+ANE convolution weights are stored in chunks along the input axis. The slot map
+
+```
+chunk = slot // (nout*C) ; rem = slot % (nout*C) ; o = rem // C ; i = chunk*C + rem % C
+```
+
+reduces to the current decode at `C=1` and to the already-refuted `imin` at `C=ncin`. Every
+intermediate value is a distinct plausible ANE layout, and the earlier sweep had only ever probed
+the two endpoints. Layer-0 attention sharpness across the family:
+
+| C | 1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256 | 512 | 1024 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| sharp | **0.6058** | 0.083 | 0.023 | 0.015 | 0.013 | 0.009 | 0.014 | 0.011 | 0.010 | 0.014 | 0.011 |
+
+`C=1` wins by 7x over the nearest competitor. **The intra-bank slot map is confirmed.**
+
+### 52.3 Embedding residual basis: a promising candidate that did not survive
+
+The embedding was recovered by **dynamic memory capture** with its own de-swizzle; the weights come
+from the hwx. Two independent extraction paths, never cross-checked for channel order -- and the
+semantic validation (Paris -> PARIS/Paris(fr)/Parizh) is blind to a permutation of the 1024
+*columns*. Only the relative permutation matters, so applying pi to E alone is the test.
+
+`revblk(64)` (reverse the order of 16 blocks of 64 = head_dim) initially looked strong: train 12.231
+/ held-out 12.386 against identity's 13.478 / 12.985, beating all 20 random controls held-out, and it
+appeared to **remove the depth degradation** entirely (identity decays 11.81@L4 -> 13.42@L23;
+revblk(64) holds 11.65-12.22 through L23).
+
+**Both signals failed their controls.**
+
+* The held-out advantage is seed-dependent. With one control sample the random minimum was 12.614
+  (revblk(64) beat all 20); with another it was 12.248, putting revblk(64) *inside* the random tail.
+* The depth-flattening is a **confound, not a property**. Random permutations produce equally flat or
+  flatter profiles -- drift `L23-L4` of -0.41, -0.22 and **-1.05** versus revblk(64)'s -0.08 -- because
+  a permutation with poor early NLL simply regresses toward the ~13 plateau and looks flat, while
+  identity's good early score has room to decay. **Depth drift is confounded by starting NLL and is
+  not a valid instrument.** It should not be used again without pairing it to absolute NLL.
+
+`revblk(64)` is therefore withdrawn, along with the claim that the depth degradation was fixed.
+
+### Standing
+
+Reproducibility is now complete and independent of SIP: block pattern verified, map re-derived,
+decode bit-exact against the other build. Confirmed this section: `C=1` intra-bank slot map.
+Eliminated: the input-chunk family, and the embedding-basis permutation family (no member survives
+controls). The defect remains an element->position permutation that no tested family contains.
