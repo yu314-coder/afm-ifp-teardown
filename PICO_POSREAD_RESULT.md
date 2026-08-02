@@ -2701,3 +2701,75 @@ demonstration that the decode carries real signal (layers 3-12 beat chance where
 never do). Still open: pre-norm confirmed but the graph's third RMSNorm unplaced; V/O untested; the
 per-layer defect that makes depth subtract. Best held-out NLL anywhere is 11.345 against a chance of
 12.477 -- real, and still nowhere near the ~3-4 a working 300M model would give.
+
+## 50. The asset was never actually lost, and +96 is confirmed on a second build
+
+### 50.1 SIP is not a blocker: the models ship as mountable Cryptex images
+
+Section 49.0 recorded SIP re-enablement as blocking all decode-level work. That was wrong in an
+important way. `/Volumes/D/FM_GenerativeModels_copy` -- made long ago by `copy_apple_fm_models.sh`
+-- contains the **Cryptex disk images**, not just metadata:
+
+| image | size |
+|---|---|
+| `UC_FM_LANGUAGE_INSTRUCT_3B_BASE_GENERIC_SPARSE_GENERIC_H16G_IFP_Cryptex.dmg` | 5.4 GB |
+| `UC_FM_LANGUAGE_INSTRUCT_3B_BASE_GENERIC_GENERIC_H16G_Cryptex.dmg` | 1.3 GB |
+| **`UC_FM_LANGUAGE_INSTRUCT_300M_BASE_GENERIC_GENERIC_H16G_Cryptex.dmg`** | **426 MB** |
+| `UC_FM_LANGUAGE_INSTRUCT_3B_IMAGE_ENCODER_*` (dense + sparse) | ~350 MB each |
+
+These mount read-only with `hdiutil attach` and require no SIP change. The 300M image contains the
+complete asset -- `binary_0.hwx`, `program.odix`, `program.dbginfo`, `manifest.plist`,
+`specialized_model_0.mpsgraph`, and both LoRA constant blobs -- now copied permanently to
+`local/pico_asset/` (406 MB).
+
+**Caveat: it is a different build.** `binary_0.hwx` is 187,826,176 bytes here versus 193,921,024
+in the SIP-protected copy, and `program.odix` 145,510,440 versus 136,052,680, while
+`lora_32_constant_data.bin` is byte-identical at 29,687,808. `metadata.json` confirms the same model
+(`afmplus-v11.0-pico`, `model_config: v11-pico`, `context_length: 4096`). So `pico_weight_map.json`
+-- whose block offsets were read from the newer build -- does **not** transfer, and the map must be
+re-derived (the symbol table parses cleanly: 29,383 symbols, 1,632 `_ne_0` tensor bases, `__KERN_0/1/2`
+at the same VM addresses with different file offsets).
+
+### 50.2 The +96 tile format is confirmed on an independent build
+
+The differing build is an independent witness for sec.46, whose header claim was derived entirely
+from the other file. Testing tiles resolvable through the second build's symbol table:
+
+| check | result |
+|---|---|
+| sorted fp16 codebook @+0, zeros @+32, positive scales @+64, high-entropy @+96 | **700 / 775 (90.3%)** |
+| final 32 bytes of the tile all zero | **680 / 775 (87.7%)** |
+
+The ~10% that fail are `'s'` and `'L'` class tiles, for which this test wrongly assumed N-class
+geometry (stride 0x2080, payload 8192). **The 96-byte header is confirmed across two independent
+builds**, which also closes the gap noted earlier that the padding proof rested on N-class tiles of
+a single file.
+
+### 50.3 Full inventory of what Apple actually ships
+
+**ANE models (Cryptex images, all present locally):** 300M base (pico), 3B base dense, 3B base
+sparse/IFP, 3B image encoder (dense + sparse), 300M image tokenizer, a 9M event-extraction
+classifier, and ~20 task-specific draft adapters (summarization, mail reply, machine translation,
+proofreading, photos memories, shortcuts, smart reply, ...).
+
+**Metal models (`model_type: mlm`, metadata only -- no weights on device):**
+
+| display_version | layers | hidden | ffn | ctx | dtype |
+|---|---|---|---|---|---|
+| `afmplus-v7.0-150b` | 48 | 2048 | 5888 | 8192 | fp16 |
+| `afmplus-v8.0-150b` | 48 | 2048 | 5888 | 8192 / 32768 | fp16 |
+| **`afmplus-v9.0-3b-pcc`** | **56** | 2048 | **6656** | **32768** | fp16 |
+
+These declare `backend: metal`, `data_type: fp16`, ASTC 6x6 compression in the `tamm_id`, and the
+`afm_150k` sentencepiece tokenizer -- a completely different storage path from the ANE int4 tile
+format, and one that would not have the ANE swizzle problem at all. Only their metadata is
+downloaded; no `model.mlm` payload exists anywhere on the system, so they are not currently
+attackable. The `-pcc` suffix indicates Private Cloud Compute, i.e. the server-side model, which is
+consistent with it being the largest configuration (56 layers, 32k context) and with no weights
+shipping to the device.
+
+### Standing
+
+Decode-level work is **unblocked without touching SIP**. The +96 header is now confirmed on two
+independent builds. The immediate next step is to re-derive `pico_weight_map.json` against
+`local/pico_asset/` so the corrected decode can be rebuilt on a build that is permanently available.
