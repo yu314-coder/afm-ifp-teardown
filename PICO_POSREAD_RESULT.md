@@ -2773,3 +2773,72 @@ shipping to the device.
 Decode-level work is **unblocked without touching SIP**. The +96 header is now confirmed on two
 independent builds. The immediate next step is to re-derive `pico_weight_map.json` against
 `local/pico_asset/` so the corrected decode can be rebuilt on a build that is permanently available.
+
+## 51. Apple's manifest confirms the architecture; block order is not the defect
+
+With the asset permanently local (sec.50), `manifest.plist` -- previously unreadable -- was parsed.
+
+### 51.1 The architecture, in Apple's own names
+
+`Callables` holds 998 entries whose keys are full module paths with tensor shapes embedded. Collapsing
+the layer index:
+
+| module | shape | role |
+|---|---|---|
+| `attention_qkv_transform_..._lora_0` | 1x1024 -> 1x1024 | **Q** |
+| `attention_qkv_transform_..._lora_1` | 1x1024 -> 1x256 | **K** |
+| `attention_qkv_transform_..._lora_2` | 1x1024 -> 1x256 | **V** |
+| `attention_output_transform` | 1x1024 -> 1x1024 | **O** |
+| `feed_forward_hidden_transform_linear_0` | 1x1024 -> 1x3200 | **gate** |
+| `feed_forward_hidden_transform_linear_1` | 1x1024 -> 1x3200 | **up** |
+| `feed_forward_output_transform` | 1x3200 -> 1x1024 | **down** |
+
+This is independent confirmation from the shipped asset of the seven-role decomposition and every
+shape used throughout this work. It also settles two hypotheses on the record: **Q, K and V are three
+separate transforms**, and **gate and up are two separate linears** -- so neither pair is fused or
+interleaved in storage, consistent with the null results in sec.42.4 and the split sweep.
+
+The names also carry per-shape specializations (`...x64f16` and `...x8f16`, i.e. sequence tiles of 64
+and 8), which is why each module appears ~142 times rather than 24.
+
+An attempt to bridge the manifest to the hwx by hashing failed: the Callable name suffixes decode as
+16-byte base64url values, but only 28 of 920 appear anywhere in the hwx symbol table, and those are
+2-4 hex-character coincidences. There is no direct name->symbol correspondence to exploit, so tensor
+identity still has to be inferred from the symbol table order rather than read off.
+
+### 51.2 The open assumption, stated by the decoder itself
+
+`src/pico_weights.py` documents precisely what remains unproven:
+
+> **ASSUMED** (a fixed ANE conv-layout convention, provably SV-invisible, NOT stated in the asset):
+> the 16 tiles fill the block in row-major order; **blocks fill a multi-block `[Cout,Cin]` tensor in
+> row-major order**; K/V are read `[1024,256]`. ... **Values are exact; only element->position may
+> permute.**
+
+That names the residual candidate exactly: block-to-output-range assignment.
+
+### 51.3 Block order tested -- null
+
+`O` and `down` are the two tensors whose *output* axis is the residual stream, each assembled from 4
+blocks of 256 channels. If their block order disagreed with the embedding's channel order, every
+layer would write into the wrong residual quarters -- exactly the cumulative signature. The space is
+only 4! per tensor, so it was swept exhaustively and cross-validated:
+
+| permutation | train | **held-out** |
+|---|---|---|
+| identity | 13.372 | 12.985 |
+| best on train `(2,1,3,0)` | **12.348** | 12.979 |
+| `(2,1,0,3)` | 12.586 | 12.813 |
+| best `O` alone `(3,1,2,0)` | 12.709 | 13.122 |
+| best `Q` blocks alone `(1,2,0,3)` | 12.710 | 12.880 |
+
+The train-best gains 1.02 nats and then **returns 12.979 held-out against identity's 12.985 -- no
+transfer at all**, and the train and held-out rankings disagree. With 24 candidates this is exactly
+the overfitting profile seen before. **Block order is not the defect.**
+
+### Standing
+
+The seven-role decomposition and all tensor shapes are now confirmed from Apple's own manifest rather
+than inferred. The remaining unknown is unchanged and now precisely quoted from the decoder's own
+documentation -- an element->position permutation inside the ANE layout convention -- with tile
+order, block order, head layout, orientation, and coarse permutations all eliminated against controls.
