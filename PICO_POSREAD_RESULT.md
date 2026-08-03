@@ -2972,3 +2972,65 @@ The defensible conclusion is narrower than "the FFN permutation is `revblk(5)`":
 is demonstrably not in gate/up's channel order**, identity is measurably poor, and `revblk(5)` is
 whatever structured permutation happens to sit closest to the truth among those tested. It is a
 signpost toward the right axis, not the answer.
+
+## 54. RETRACTION: revblk(5) is not a layout fact, and the NLL oracle has no power on this axis
+
+### 54.1 The test that killed it
+
+Section 53 presented `revblk(5)` as the strongest candidate the project had produced: it beat 40
+controls on three independent text sets and survived the attenuation confound. That was not enough,
+and the decisive test is one sec.53 did not run.
+
+**A real storage-order correction must hold for every layer** -- the ANE lays all 24 out identically.
+Applying `revblk(5)` to down's input axis in **one layer at a time**:
+
+| | layers improved (of 24) |
+|---|---|
+| `revblk(5)`, set2 | **14** |
+| `revblk(5)`, set3 | **14** |
+| a **random** permutation, set2 | **14** |
+
+Per layer, `revblk(5)` is **indistinguishable from a random permutation**. Individual deltas scatter
+from -0.38 to +0.39 with no consistency between the two text sets (layer 1: +0.06 vs +0.30; layer 3:
+-0.31 vs -0.12; layer 23: +0.25 vs +0.34). The all-layers gain (12.985 -> 12.526) is 24 scattered
+accidents composing favourably, not a systematic correction.
+
+**`revblk(5)` is withdrawn.** So is the framing of sec.53.4 that called it "a signpost toward the
+right axis" -- it points nowhere.
+
+### 54.2 The larger consequence: this oracle cannot decide this axis
+
+The random-permutation row is the important one. Perturbing a single layer's down input axis at
+random **improves the model half the time**. That is what it looks like when a tensor's contribution
+is already close to noise: there is no gradient of correctness to detect, so every permutation scores
+within the same band and rankings among them are meaningless.
+
+This retroactively explains the whole sequence of FFN sweeps -- sec.42.4, sec.43.3, sec.53 -- in
+which candidates kept clearing control bands and then failing to mean anything. **The NLL oracle has
+no power on the FFN axis**, and the correct response is to stop running permutation sweeps against it
+rather than to run better-controlled ones.
+
+The `identity is bad` observation from sec.53.2 also loses its force: if all permutations score
+within one noise band, identity's rank of 52/69 is not evidence about identity.
+
+### 54.3 What still stands
+
+Unaffected, because none of it rests on permutation search against NLL:
+
+* the +96 tile format, proven structurally and confirmed on two independent builds (sec.46, sec.50)
+* the C=1 slot map, which beats every chunk width by 7x on attention sharpness (sec.52)
+* the weight map, re-derived and **bit-exact** against the other build (sec.52)
+* the seven-role architecture and all shapes, confirmed from Apple's manifest (sec.51)
+* the embedding and tokenizer (sec.43.1)
+* layers 3-12 beating chance where norm-matched random weights never do (sec.49.2)
+
+### Standing
+
+The codec is solved and cross-validated. The ordering is not, and this section establishes that it
+**cannot be solved by the instrument in use**: statistical scoring of permutations against a forward
+whose FFN is already near-noise. Every candidate this method has produced -- the composition oracle's
+winners, `T(4,800)+revblk`, `revblk(64)`, `revblk(5)` -- has died on contact with a sharper control.
+
+That is the case for ground-truth activations. With real intermediate states captured from the live
+model, the permutation stops being a search scored by a powerless oracle and becomes a direct
+match between a measured tensor and a computed one.
