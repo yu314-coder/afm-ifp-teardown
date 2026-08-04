@@ -48,21 +48,45 @@ sum over experts), so no selection map is needed to run it.
 
 ---
 
-## pico (300M draft): six of seven weight roles proven, one tensor open
+## pico (300M draft): the format is solved, the arrangement is not
 
 The 300M draft model `afmplus-v11.0-pico` is the furthest-advanced reconstruction. Its status is
-tracked in detail in [PICO_POSREAD_RESULT.md](PICO_POSREAD_RESULT.md) §24–§37 and in the paper
-(§"What `OutTrans=1` Is").
+tracked in detail in [PICO_POSREAD_RESULT.md](PICO_POSREAD_RESULT.md) (§46 for the decode fix, §54
+for the retraction, §57–§58 for the closed capture routes) and in the paper
+(§"A Decode Bug, and the Limits of Statistical Ordering").
+
+> **⚠️ This section previously read "six of seven weight roles proven, one tensor open."**
+> That claim rested on a composition *z*-score which was later withdrawn, and it does **not**
+> survive. See §54 — the replacement likelihood oracle was then shown to have *no discriminating
+> power* on the axis it was applied to.
 
 | component | status |
 |---|---|
-| embedding, tokenizer | ✅ correct (tokenization verified against real prompts) |
+| embedding, tokenizer | ✅ correct — embedding decoded from `program.odix` and validated **bit-exactly** against independently captured rows; semantics confirmed (` Paris` → `PARIS/París/巴黎/Париж`) |
+| tile format | ✅ **solved** — header 96 B (codebook 32 / zeros 32 / scales 32), payload 8192 B, 32 B zero pad. Proven structurally, confirmed on **two independent builds** |
+| intra-bank slot map | ✅ `o = slot % nout, i = slot // nout` — beats every alternative chunk width by **7×** |
+| architecture, all 7 shapes | ✅ confirmed from Apple's shipped `manifest.plist`, not inferred |
 | hidden RMSNorm γ | ✅ **γ = 1 proven positively** (not merely "not found") |
-| per-head QK-norm | ✅ present — **was missing from the GGUF export**, fixed by moving to the `qwen3` architecture |
-| `Q`, `K`, `V`, `gate`, `up` | ✅ correct |
-| **`O` (attention output)** | ✅ **solved — stored transposed**, three independent confirmations |
-| **`down` (FFN down-proj)** | 🔴 **open** — values proven correct, channel ordering not recovered |
+| tensor **values** | ✅ trained matrices (stable rank 13–48 vs 257.6 for random) |
+| **element→position ordering** | 🔴 **open for every role** — not determinable by permutation search, and not observable at runtime |
 | GGUF export | ✅ compiles and runs (~15 tok/s); ❌ output incoherent |
+
+**The decode bug that was real.** The tile payload begins at `+96`, not `+128` — the decoder was
+treating 32 bytes of payload as header, displacing every weight by exactly four input channels. Found
+by its *cause* (a shared magnitude artefact in input channels 1020–1023) rather than inferred from a
+statistic, and proven structurally: all 64 examined tiles carry exactly zero in their final 32 bytes.
+Fixing it moved layer-0 attention sharpness from 0.0468 to **0.6058** (norm-matched random: 0.0050).
+
+**Why the ordering resists.** A storage-order correction must hold for *every* layer. Applying the
+best surviving candidate to one layer at a time improves 14 of 24 layers — and a **random**
+permutation improves 14 of 24. Perturbing the axis at random helps half the time, which is what a
+tensor already contributing noise looks like: no ranking among permutations carries information.
+
+**Both dynamic routes are closed on measurement.** Four privileged captures (five cores, ~40 GB)
+established that pico's activations never enter user-process memory — they live in ANE device memory
+`save-core` cannot reach. The runtime *does* log `shape=` and `strides=` on every tensor load, but
+unredaction now requires a signed logging profile, and those are graph-boundary strides in any case,
+not the compiled weight order.
 
 **What `OutTrans=1` actually is.** An *activation-layout* flag, not a coefficient encoding: it writes
 output channels 16× strided and interleaved. Determined perfectly by the L2 result stride across all
@@ -117,6 +141,11 @@ earlier "walls" collapsed on inspection:
 - **Intermediate activations are ANE-internal.** A search of an 8 GB IOSurface-targeted process
   core for the input embeddings scores 0.17 (noise): nothing crosses to host DRAM, so the forward
   is validated end-to-end (against Apple's emitted token), not per-layer.
+  **Independently re-confirmed and strengthened (§57):** four privileged captures — five cores,
+  ~40 GB, including the *correct* host process identified via `lsof` — put the best scale-invariant
+  cosine at **0.365**, indistinguishable from noise, while `program.odix` *is* present in the same
+  cores. The generations ran 100+ draft-model forward passes inside the capture window, so this is
+  not a sampling accident.
 
 **A full 44-layer forward ablation (against Apple's emitted token) confirmed two of these and
 re-located the remaining gap honestly.** Using a rank oracle (`"The capital of France is"` →

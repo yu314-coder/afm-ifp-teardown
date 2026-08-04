@@ -1,0 +1,121 @@
+\section{A Decode Bug, and the Limits of Statistical Ordering}\label{sec:latecycle}
+
+The preceding section reported six of seven weight roles positively confirmed and the remaining gap
+as one tensor wide. Continued work overturned both claims. This section records a real decode defect
+found by its cause rather than inferred from a statistic, establishes that the instrument used to
+rank orderings has no discriminating power on the axis it was applied to, and reports that both
+dynamic-observation routes are closed on measurement. The conclusion is a smaller claim than
+\S\ref{sec:outtrans} made, and a better-supported one.
+
+\subsection{The tile payload begins at \texorpdfstring{$+96$}{+96}, not \texorpdfstring{$+128$}{+128}}
+
+Every per-input-channel magnitude profile in the recovered weights correlated across unrelated
+tensors and layers at Pearson $0.907$ with Spearman $0.146$; a correctly-decoded reference model
+gives $-0.03$ to $0.20$. High Pearson with near-zero rank correlation means a few extreme channels
+shared by every decode---an artefact. They were input channels $1020$--$1023$, the last four, at
+$3.2\times$ the median norm. Four input channels is exactly $64$ nibbles, or $32$ bytes.
+
+The tile header is $96$ bytes, not $128$: a $16$-entry \textrm{fp16} codebook at $+0$ (cleanly
+sorted), $32$ reserved zero bytes at $+32$, $16$ \textrm{fp16} scales at $+64$, and payload from
+$+96$. The decoder had been treating $+96$--$+128$ as header, so every weight was displaced by four
+input channels and the last four read past the payload.
+
+\begin{finding}[the payload offset, proven structurally]\label{find:p96}
+All $64$ examined tiles carry exactly zero in their final $32$ bytes: the layout is
+$96 + 8192 + 32 = 8320 = \mathtt{0x2080}$, the $N$-class stride, with the trailing $32$ bytes being
+$64$-byte alignment padding. The same $96$-byte header reproduces the other two tile classes exactly,
+$96+4096\rightarrow\mathtt{0x1080}$ and $96+25600\rightarrow\mathtt{0x6480}$.
+\end{finding}
+
+\noindent The stride alone never disambiguated this, since $128 + \text{payload}$ also matches all
+three classes---which is why it survived so long. Correcting it raises layer-$0$ attention sharpness
+from $0.0468$ to $0.6058$ against a norm-matched random baseline of $0.0050$, and removes the outlier
+artefact entirely ($3.20\rightarrow1.02$).
+
+The finding was then confirmed on a \emph{second, independent build} of the same model, obtained by
+mounting the shipped Cryptex image rather than reading the protected asset path: $700/775$ tiles
+match the header layout and $680/775$ carry the zero tail, the remainder being the two other tile
+classes which the test wrongly assumed $N$-class geometry for. Its weight map was re-derived
+independently and reproduces the first build's tensors \emph{bit-exactly}.
+
+\subsection{The architecture, from Apple's own manifest}
+
+The \code{manifest.plist} inside the \code{mpsgraphpackage} names every module with tensor shapes
+embedded in the key. Collapsing the layer index gives the seven roles directly:
+\code{attention\_qkv\_transform} \code{lora\_0/1/2} at $1024\!\to\!1024$, $1024\!\to\!256$,
+$1024\!\to\!256$; \code{attention\_output\_transform} at $1024\!\to\!1024$;
+\code{feed\_forward\_hidden\_transform\_linear\_0/1} at $1024\!\to\!3200$; and
+\code{feed\_forward\_output\_transform} at $3200\!\to\!1024$. This confirms the decomposition and
+every shape from the shipped asset rather than by inference, and settles two hypotheses on the
+record: $Q$, $K$ and $V$ are three \emph{separate} transforms, and gate and up are two \emph{separate}
+linears---neither pair is fused or interleaved in storage.
+
+\subsection{The ordering statistic has no power}
+
+\S\ref{sec:outtrans} scored candidate orderings by a composition $z$-score; that instrument was
+withdrawn, and replaced by teacher-forced negative log-likelihood against a hard reference
+($\ln 262144 = 12.477$ nats) with random-permutation controls. The replacement produced a succession
+of candidates that cleared control bands on multiple independent texts and then failed.
+
+The decisive test is uniformity. A storage-order correction must hold for \emph{every} layer, since
+the hardware lays all $24$ out identically.
+
+\begin{finding}[the NLL oracle cannot decide the FFN axis]\label{find:nopower}
+Applying the best surviving candidate permutation to one layer at a time improves $14$ of $24$
+layers on one held-out text and $14$ of $24$ on another. A \emph{random} permutation applied the same
+way improves $14$ of $24$. Per layer the candidate is indistinguishable from noise, and its
+aggregate gain is $24$ scattered accidents composing favourably.
+\end{finding}
+
+\noindent The random row is the substantive result: perturbing a single layer's down-projection input
+axis at random improves the model half the time. That is the signature of a tensor whose contribution
+is already close to noise---no gradient of correctness exists, so all permutations score within one
+band and their rankings are meaningless. This retroactively explains every ordering sweep in this
+work, and the correct response is to stop running them rather than to run better-controlled ones.
+
+\subsection{Both dynamic routes are closed}
+
+\S\ref{sec:outtrans} proposed ground-truth activations as the remedy. They are not obtainable by the
+methods available.
+
+\emph{Core capture.} Four privileged captures produced five cores totalling ${\sim}40$\,GB. The first
+three targeted the wrong process: \code{lsof} on the asset paths shows the $3$B and the $300$M held by
+\emph{different instances} of the same service binary, and the $300$M host idles at $3.4$\,MB and
+never becomes CPU-hot because it is the speculative-decoding draft model. Dumping the correct host
+mid-generation, its resident size rose to $71$\,MB and its \code{program.odix} is present---but
+scale-invariant cosine against the token embeddings actually used in that run peaks at $0.365$ over
+both cores, indistinguishable from noise. Each captured generation emitted ${\sim}40$ tokens and
+speculative decoding invokes the draft model for every token, so the model executed over a hundred
+forward passes inside the window. The activations are not in user-process memory; they live in ANE
+device memory that \code{save-core} cannot reach.
+
+\emph{Logging.} The runtime logs \code{shape} and \code{strides} on every tensor load, redacted rather
+than withheld. Unredaction now requires a signed logging profile: enabling
+\code{private\_data:on} as root and forcing a model reload left $5{,}870$ lines redacted and zero
+readable strides. Independently of that gate, these are graph \emph{boundary} shapes---inputs, KV
+cache, logits---whereas the weight tile order is compiled into the \code{hwx} and never appears as a
+runtime stride.
+
+\subsection{Revised status}
+
+\begin{observation}[what is and is not established]\label{obs:revised}
+Established by structural proof or positive control: the tile format including the $+96$ payload
+offset, cross-validated on two independent builds; the intra-bank slot map, which beats every
+alternative chunk width by $7\times$; per-output scale indexing; the seven-role decomposition and all
+shapes, from Apple's manifest; the token embedding and tokenizer; and that all recovered tensor
+\emph{values} are trained matrices. Not established for any role: the element$\rightarrow$position
+ordering.
+\end{observation}
+
+\noindent The claim in \S\ref{sec:outtrans} that six of seven roles were positively confirmed does not
+survive; it rested on the composition oracle withdrawn there. The claim that the attention output
+projection is stored transposed is weakened to an orientation asymmetry: the reference model is only
+dimensionally valid one way while the recovered weights rise above floor the other way, but within an
+orientation the metric is insensitive to scrambling, so it does not constitute recovered structure.
+Under the same standard the recovered $V$ and $O$ move from ``broken'' to \emph{untested}---a totally
+broken pair could not yield the sub-chance behaviour measured through layer $12$, where norm-matched
+random weights never fall below chance at any depth.
+
+The file format is solved. The arrangement is not, and this section establishes that it is reachable
+neither by statistics on a non-functioning forward nor by observation of a runtime that keeps the
+quantity of interest inside the accelerator.

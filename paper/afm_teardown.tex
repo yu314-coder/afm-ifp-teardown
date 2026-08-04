@@ -107,27 +107,29 @@ router$\rightarrow$expert map is \emph{mathematically irrelevant} to the output
 (Finding~\ref{find:ungated}), and the ``missing constant table'' has a shipped runtime equivalent
 (Finding~\ref{find:metabin}).
 
-\textbf{What still does not work.} A coherent from-weights forward pass---though the gap is now one
-tensor wide. The $\mathrm{OutTrans}$ flag is identified as an activation-layout property, a strided
-interleaved output write, determined perfectly by the L2 result stride across all $988$ weight-bearing
-tasks (Finding~\ref{find:outtrans2}); the attention output projection is shown to be stored
-\emph{transposed} by three independent methods (Finding~\ref{find:otrans}); and the shipped
-coefficient layout is confirmed by positional read \emph{in the shipped header mode}, a perfect
-bijection over all $819{,}200$ positions (Finding~\ref{find:bias}). \textbf{Six of seven weight roles
-per layer are now positively confirmed.} The FFN down-projection alone resists: its values are
-provably correct (a trained singular-value spectrum against a random control), but its channel
-ordering is not recovered, and the constraint system for that axis is underdetermined from the
-shipped data (Observation~\ref{obs:underdet}). One mis-ordered residual writer is enough to destroy
-the forward pass.
+\textbf{What still does not work.} A coherent from-weights forward pass. The obstacle is the
+element$\rightarrow$position \emph{ordering} of the recovered tensors, and \S\ref{sec:latecycle}
+reports it as unresolved for every weight role rather than for one. The file format itself is
+settled: the tile payload begins at byte $+96$, not $+128$---a real decode defect found by its cause
+and proven structurally, since all examined tiles carry exactly zero in their final $32$ bytes, and
+confirmed on a second independent build whose weight map reproduces the first \emph{bit-exactly}
+(Finding~\ref{find:p96}). The seven-role decomposition and every tensor shape are confirmed from
+Apple's own shipped \code{manifest.plist}. All recovered tensor \emph{values} are trained matrices.
+Only their arrangement is unknown (Observation~\ref{obs:revised}).
 
-\textbf{On negative results.} Six instruments used during this work produced confident-looking
-conclusions that later proved unfounded---four because the null hypothesis destroyed more structure
-than the hypothesis under test, and two (\S\ref{sec:retract-basis}) because a null result was read as
-evidence from a statistic never shown to carry any. The remedy adopted here is a positive control:
-calibrate the instrument on a system whose answer is known before trusting it
-(Finding~\ref{find:oracle}). Those retractions are recorded in place rather than removed
-(Findings~\ref{find:picooracle}, \ref{find:vacuous}, and \S\ref{sec:embretract}), because the
-failure mode is the most transferable result here.
+\textbf{On negative results.} This is the most transferable part of the report. Instruments used
+during this work repeatedly produced confident conclusions that later failed---first weight
+statistics whose null hypothesis destroyed more structure than the hypothesis under test
+(Findings~\ref{find:picooracle}, \ref{find:vacuous}, \S\ref{sec:embretract}), then a composition
+$z$-score (\S\ref{sec:retract-basis}), then a likelihood-based replacement. The last of these is
+characterised rather than merely withdrawn: applying the best surviving candidate ordering to one
+layer at a time improves $14$ of $24$ layers, and a \emph{random} permutation improves $14$ of $24$
+(Finding~\ref{find:nopower}). Perturbing the axis at random helps half the time, which is the
+signature of a tensor already contributing noise---so no ranking among permutations carries
+information, and the earlier claim that six of seven roles were positively confirmed does not
+survive. Ground-truth activations would settle the question directly, and \S\ref{sec:latecycle}
+reports that route closed on measurement as well: the values never enter user-process memory, and the
+runtime logs that would expose the layout are redacted behind a signing gate.
 
 \subsection*{Findings at a glance}
 
@@ -1145,6 +1147,8 @@ instruction set no longer holds---the wiring is not ANE-locked behavior but a pe
 sum over recovered blocks, reducing the standalone to a component-assembly exercise.
 
 \input{outtrans}
+
+\input{latecycle}
 
 \input{modelspec}
 
