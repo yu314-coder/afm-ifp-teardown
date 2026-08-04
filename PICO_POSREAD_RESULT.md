@@ -3153,3 +3153,62 @@ SIP is not the obstacle and never was. The obstacle has been a chain of incorrec
 capture tooling -- wrong synchronisation, wrong hook, wrong process -- each of which had to be
 falsified by measurement. That work is not wasted: the capture path is now correct except for the
 target, and the target is one command away.
+
+## 57. The capture target found, and the dynamic route closed on evidence
+
+`lsof` on the asset paths resolved the confusion of sec.56 immediately:
+
+| pid | asset held |
+|---|---|
+| 1149 | **3B** -- `56659e51.../main-h16g.odix` + `ifp_rasterized_weights.bin` |
+| **2445** | **pico** -- `031c7be6.../program.odix` |
+
+All three earlier captures dumped 1149. pico lives in a *second* instance of the same service
+binary, which sits at 3.4 MB RSS and never goes hot because it is the **speculative-decoding draft
+model** -- so the CPU trigger could never select it. Selecting by open asset instead, and dumping
+2445 during a generation, its RSS rose 3.4 MB -> 71 MB, i.e. it demand-paged the model in.
+
+### 57.1 Right process, confirmed
+
+| component | present in pid 2445's core? |
+|---|---|
+| `program.odix` (CPU program, 145 MB) | **FOUND @0xfb4af60** (both cores) |
+| `binary_0.hwx` (ANE program) | absent |
+| `lora_32_constant_data.bin` (plain fp16) | absent |
+
+So the target is finally correct: pico's CPU program is mapped here. The ANE program's absence is
+expected -- the kernel driver stages it into ANE device memory.
+
+### 57.2 But the activations are not in user space
+
+Scale-invariant cosine against the 46 token embeddings actually used in this run, two alignments,
+both 7.5 GB cores: **best |cos| = 0.365**, identical to the wrong-process cores and to pure noise.
+`program.odix` is mapped **as a read-only file** -- the asset itself, which was already on disk --
+not as live state.
+
+This is not a sampling accident. Each captured generation emitted ~40 tokens, and speculative
+decoding invokes the draft model for *every* token, so pico executed well over a hundred forward
+passes inside the capture window. If its activations reached CPU memory they would be present.
+
+### 57.3 Verdict on the capture programme
+
+Four privileged captures, five cores, ~40 GB. What they produced:
+
+* **two real bugs** in `capture_pico_logits.sh` -- an lldb deadlock, and an Espresso hook on a model
+  driven through MPSGraph -- in code this project had documented and cited as a working oracle. It
+  had never run. (sec.55)
+* proof that the capture *target* was wrong, then identification of the right one (sec.56, above)
+* **the finding that matters**: pico's intermediate activations never enter user-process memory.
+  They live in ANE device memory, which `save-core` cannot reach.
+
+**The dynamic-capture route is closed for pico on structural grounds, not for want of privilege.**
+SIP can be re-enabled; it was never the obstacle, and disabling it did not and could not help.
+
+### Standing, corrected
+
+Section 54 argued that ground-truth activations were the way past the powerless NLL oracle. That
+remedy is now measured to be unavailable by this method. The honest position: the ordering cannot be
+determined by permutation search (sec.54), and cannot be measured by core capture (this section).
+What remains untried is intercepting at the ANE boundary itself -- the driver's IOSurface handoff --
+which is a materially harder instrument than anything attempted here, and should not be presented as
+a near-term fix.
