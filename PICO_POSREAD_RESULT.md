@@ -3212,3 +3212,56 @@ determined by permutation search (sec.54), and cannot be measured by core captur
 What remains untried is intercepting at the ANE boundary itself -- the driver's IOSurface handoff --
 which is a materially harder instrument than anything attempted here, and should not be presented as
 a near-term fix.
+
+## 58. The log route: real information, but not the layout
+
+Prompted by a suggestion to watch the logs during inference, the unified log was streamed across the
+ANE / MPSGraph / tokengeneration / modelmanager subsystems while driving a generation. This is far
+cheaper than core dumps (~2 MB of text vs 40 GB) and it targets a promising quantity: the runtime
+logs a line of exactly the form
+
+```
+V11E2E load '<private>' input '<private>': shape=<private> strides=<private>
+```
+
+Shape and stride are the layout. They are **redacted, not withheld**.
+
+### 58.1 Unredaction is gated
+
+`log config --mode private_data:on` no longer takes effect on this macOS: after running it as root
+and forcing a model reload, **5,870 lines remained `<private>`** and zero `strides=` values were
+readable. There is no `/Library/Preferences/Logging/com.apple.system.logging.plist` to fall back on.
+Unredaction now requires a signed logging configuration profile, which is not available here.
+
+Worth stating plainly even if it were available: these are **graph I/O** shapes and strides -- the
+runtime layout of inputs, KV cache and logits at the boundary. The weight tile z-order is compiled
+into the hwx and never appears as a runtime stride, so this route was unlikely to reach the actual
+blocker even unredacted.
+
+### 58.2 What the logs did establish, unredacted
+
+pico's ANE program, from `aned`:
+
+| quantity | value |
+|---|---|
+| `numInputs` / `numOutputs` / `numProcedures` | 36 / 9 / 9 |
+| `intermediateBufferSize` | 168,837,120 (161 MB) |
+| `wiredMemory` | 463,159,296 |
+| `Input[0]` / `Inter` / `output[0]` | 3,096,576 / 168,837,120 / 262,144 |
+
+`output[0] = 262144` equals the vocabulary size exactly, so output 0 is the logit vector.
+
+The 300M family is also larger than this project had recorded. Distinct assets seen loading:
+`com.apple.fm.language.instruct_300m.` **base**, **tokenizer**, **safety**, **mm_guard**,
+**image_tokenizer** -- i.e. the 300M line includes a separate safety classifier and a multimodal
+guard, not just the draft LM.
+
+### Standing
+
+The log route is closed for the layout question, for the same underlying reason as the core route:
+the quantity of interest lives inside the ANE, and the host only ever handles boundary tensors. It
+did yield genuine runtime confirmation and a more complete picture of the 300M asset family, at
+trivial cost.
+
+Both dynamic routes -- core capture (sec.57) and logging (here) -- are now closed on evidence. SIP
+provides no further leverage and can be re-enabled.
