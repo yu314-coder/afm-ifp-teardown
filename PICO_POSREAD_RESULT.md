@@ -3097,3 +3097,59 @@ let an offline scan separate per-token activations from static buffers.
 No ground-truth data yet. The obstacle turned out not to be SIP but two latent bugs in the capture
 tooling, one of which means a documented instrument never existed. That is worth knowing: several
 earlier sections treated "a functional oracle is available if needed" as a fallback, and it was not.
+
+## 56. Three cores, 28 GB, wrong process: TG never sees the model
+
+`capture_pico_core2.sh` fixed the timing problem -- it drove a long generation and dumped only once
+a service exceeded 15% CPU, twice, seconds apart. Both cores came from
+`TGOnDeviceInferenceProviderService` (pid 1149), the process the CPU trigger selected. Neither
+contains activations, and the reason is now established: **that process never sees the model at all.**
+
+### 56.1 Byte-level presence tests
+
+Exact byte search for high-entropy 2 KB/4 KB needles drawn from each shipped component, across both
+mid-inference cores (8.9 GB + 8.5 GB):
+
+| component | form | present in TG core? |
+|---|---|---|
+| `binary_0.hwx` (ANE program, 187 MB) | ANE-swizzled int4 | **absent** (3/3 needles) |
+| `program.odix` (CPU program, 145 MB) | int4 + fp16 tables | **absent** (3/3 needles) |
+| `lora_32_constant_data.bin` (29.7 MB) | **plain fp16** | **absent** (3/3 needles) |
+
+The LoRA row is the decisive one: it is plain fp16, not swizzled and not quantised, so it is the
+component most likely to be handled CPU-side. Its absence means **no model data of any kind** is
+mapped into this process.
+
+Activation scans agree. Cosine against the 42 token embeddings actually used in this run,
+scale-invariant and at two alignments, over both cores: best `|cos| = 0.365` with the per-chunk
+median already at 0.300 -- i.e. indistinguishable from noise.
+
+### 56.2 What TG actually is
+
+Process facts: `TGOnDeviceInferenceProviderService` runs as `_modelmanagerd` with 68 MB RSS;
+`IntelligencePlatformComputeService` runs as `euler` with 10 MB; `aned` runs as root with 3 MB. None
+is large enough to hold a 187 MB program, and the byte tests confirm TG does not map it. TG is an
+XPC broker: prompts in, tokens out. The earlier assumption -- inherited from the 3B work, where TG
+cores did yield fp16 rows -- does not transfer to pico.
+
+### 56.3 Status of the capture programme
+
+Three privileged captures have now been run. They produced:
+
+* the two tooling defects of sec.55 (deadlock; Espresso hook on an MPSGraph model), both real bugs
+  in code this project had documented as a working oracle
+* a fixed, timing-correct capture script
+* proof that the capture *target* was also wrong
+
+None produced ground-truth activations. The next step is not another blind dump but a five-second
+`lsof` on the asset path to identify which process actually opens it -- and if the answer is none,
+then the model is mapped straight into ANE device memory by the kernel driver and **no user-process
+core can ever contain it**, which would close the dynamic-capture route for pico on structural
+grounds rather than for want of privilege.
+
+### Standing
+
+SIP is not the obstacle and never was. The obstacle has been a chain of incorrect assumptions in the
+capture tooling -- wrong synchronisation, wrong hook, wrong process -- each of which had to be
+falsified by measurement. That work is not wasted: the capture path is now correct except for the
+target, and the target is one command away.
