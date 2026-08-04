@@ -3034,3 +3034,66 @@ winners, `T(4,800)+revblk`, `revblk(64)`, `revblk(5)` -- has died on contact wit
 That is the case for ground-truth activations. With real intermediate states captured from the live
 model, the permutation stops being a search scored by a powerless oracle and becomes a direct
 match between a measured tensor and a computed one.
+
+## 55. The privileged capture, attempted: two infrastructure defects found
+
+SIP was disabled and the capture run. It produced no activations, and diagnosing why invalidated
+a piece of tooling this project had been treating as available.
+
+### 55.1 `capture_pico_logits.sh` has never worked
+
+Two independent defects, both fatal:
+
+**(a) lldb deadlock.** The script sets `debugger.SetAsync(False)`, arms the breakpoint with
+`SetAutoContinue(True)`, then calls `proc.Continue()` *before* starting the thread that drives the
+oracle. In synchronous mode `Continue()` returns only when the process stops -- and auto-continue
+means it never stops. So `Continue()` blocks forever and the oracle is never launched. Observed
+directly: 27 minutes at 0% CPU with an empty `binds.jsonl`. Fixed by setting `SetAsync(True)` and
+starting the driver thread first.
+
+**(b) The wrong hook entirely.** The script breakpoints `_espresso_network_bind_buffer`. **pico is
+an `.mpsgraphpackage` driven through MetalPerformanceShadersGraph, not Espresso**, so that symbol
+is never called on this path and the breakpoint cannot fire regardless of which process is
+attached. After fixing (a), the run completed cleanly and `binds.jsonl` was still empty.
+
+The corroborating evidence was already in hand and had not been read: the existing
+`local/pico_oracle/` directory contains `binds.jsonl`, `greedy_token.txt` and a core -- **but zero
+`.f16` files**. The buffer capture never produced data on any previous run either. The "functional
+oracle" described in that script's header, and cited in earlier sections as an available
+instrument, has never actually run.
+
+### 55.2 The core fallback is mistimed
+
+The fallback launches the driver, sleeps 2 seconds, then dumps. `afm` spends those seconds loading
+the model, so the 9.72 GB core (118 segments, from the process with the real RSS) captures model
+*loading*, not inference. Measured on that core:
+
+* exact fp16 byte match for five known embedding rows: **0 hits**
+* best |cosine| against those rows over the entire file, at two alignments, scale-invariant so it
+  would catch a scaled or normalised copy: **0.18 - 0.22**, i.e. noise
+
+So the core contains no activations at all -- neither the input embeddings nor anything derived
+from them.
+
+### 55.3 What the run did establish
+
+* The model itself is healthy and its answer is known: `afm --temp 0 --max 12 "The capital of
+  France is"` returns `{"capital": "Paris"}`. Output is JSON-constrained because the asset ships a
+  `constraints_override` schema. The real flags are `--system/--temp/--max/--stream/--server`; the
+  `-t 0 -m 1` used by the old script was never parsed.
+* `E` is not implicated by the null result. The pico embedding is decoded from `program.odix` and
+  was already validated **bit-exactly** against independently captured rows; its absence from this
+  core is a property of the core, not of the decode.
+
+### 55.4 The fix
+
+`capture_pico_core2.sh` drops the breakpoint entirely -- no symbol assumptions -- and instead
+drives a **long** generation (`--max 400`), polls until a service process is genuinely hot
+(>=15% CPU), and only then dumps, twice, a few seconds apart. Two snapshots inside one generation
+let an offline scan separate per-token activations from static buffers.
+
+### Standing
+
+No ground-truth data yet. The obstacle turned out not to be SIP but two latent bugs in the capture
+tooling, one of which means a documented instrument never existed. That is worth knowing: several
+earlier sections treated "a functional oracle is available if needed" as a fallback, and it was not.
