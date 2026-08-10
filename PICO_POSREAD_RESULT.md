@@ -3265,3 +3265,63 @@ trivial cost.
 
 Both dynamic routes -- core capture (sec.57) and logging (here) -- are now closed on evidence. SIP
 provides no further leverage and can be re-enabled.
+
+## 59. A dense sibling of the 3B, and a 2-bit codec
+
+The sparse `instruct_3b` is blocked by a data-availability wall: the router-index to
+physical-expert map for its IFP pruning was consumed at export time and is not shipped. That wall
+is specific to the *pruned MoE*. The Cryptex mirror also contains a **dense** sibling at the same
+scale, and it has no experts, no pruning, and therefore no such map.
+
+### 59.1 What `nano` is
+
+`UC_FM_LANGUAGE_INSTRUCT_3B_BASE_GENERIC_GENERIC_H16G_Cryptex.dmg` (1.38 GB) mounts to
+`metadata.json` naming `model_config: v11-nano`, `display_version: afmplus-v11.0-nano`. Its
+`manifest.plist` gives the architecture directly, and it is **not** a small model:
+
+| | |
+|---|---|
+| layers | **56** -- `segment_0` x35 + `segment_1` x21 |
+| hidden / FFN / KV | 2048 / 6656 / 256 (4 heads x 64) |
+| parameters | 2.80 B in layers + 537 M tied embedding = **3.33 B** |
+| context | 4096 |
+
+The two segments differ structurally. `segment_0` layers carry
+`attention_qkv_transform` with `lora_0/1/2` -- Q at $2048\to2048$, K and V at $2048\to256$.
+`segment_1` layers carry only `attention_q_transform`, with **no K or V projection at all**, so the
+last 21 layers reuse keys and values computed earlier: cross-layer KV sharing. This is stated by
+Apple's own manifest, not inferred.
+
+The 56/2048/6656 configuration matches the `afmplus-v9.0-3b-pcc` Metal metadata recorded in
+sec.50.3 exactly. `nano` is the 3B, densely parameterised.
+
+### 59.2 The codec is 2-bit
+
+The tile container is the same family proven for pico in sec.46 -- codebook at $+0$, reserved zeros
+at $+32$, per-output fp16 scales at $+64$, payload at $+96$, trailing zero padding -- but the
+palette is not:
+
+**322 of 322 tiles sampled across the whole 812 MB program carry exactly four non-zero codebook
+entries, and in every case the same ones: $[-1.5,\,-0.5,\,+0.5,\,+1.5]$.**
+
+That is a **2-bit** symmetric uniform palette, against pico's 16-entry 4-bit table. It also resolves
+the size arithmetic: 2.80 B layer parameters at 2 bits is ${\sim}700$ MB, consistent with the 774 MB
+weight program, where 4 bits would have required 1.4 GB.
+
+Tile geometry follows from it and closes exactly:
+
+| stride | header | shape at 2 bits |
+|---|---|---|
+| `0x2080` | 96 | $16 \times 2048$ -- pico's tile with the width doubled and the depth halved |
+| `0xd080` | 128 | $32 \times 6656$ -- the FFN width |
+
+### 59.3 Why this matters
+
+The blocker on the sparse 3B is *absent data*, which no amount of effort recovers. The blocker on
+pico is *arrangement*, which sec.54 showed is not determinable by permutation search and sec.57--58
+showed is not observable at runtime. `nano` is subject to the second problem but **not** the first:
+every weight it needs is shipped, and there is no expert-selection metadata to be missing.
+
+Recorded as characterisation, not reconstruction. What is established here is the container, the
+palette, the architecture and the parameter budget. No `nano` weight has been decoded or validated
+yet, and the element-to-position ordering is expected to be exactly as hard as it is for pico.
