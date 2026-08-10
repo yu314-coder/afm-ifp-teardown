@@ -3393,3 +3393,62 @@ combination tried, so something about their tiling differs and is not yet unders
 
 The ordering problem is untouched and should be expected to be exactly as hard as pico's. What nano
 offers is not an easier arrangement but a target where no required data is missing.
+
+## 61. nano's block layout: the per-layer pattern, and what the 'e' class hides
+
+### 61.1 The repeating unit
+
+Labelling every block by its class in address order gives an unmistakable period-18 unit:
+
+```
+s e s s e s e e e a a e e e d d d d      (s=0x20800, a=0xa1000, d=0xd0800, e=0xe1400)
+```
+
+repeated across the program. Class totals then assign themselves against the 56-layer architecture:
+
+| class | blocks | expected | role |
+|---|---|---|---|
+| `e` `0xe1400` | **448** | $112 \times 4$ | **gate + up** (56 layers x 2 tensors x 4 blocks) |
+| `d` `0xd0800` | 223 | $56 \times 4 = 224$ | **down** |
+| `a` `0xa1000` | 111 | ${\sim}112$ | $Q$ / $O$ |
+| `s` `0x20800` | 176 | -- | $K$ / $V$ and remainder |
+
+The `e` count is *exact*. Within a layer the eight `e` blocks are not contiguous but split
+$1{+}1{+}3{+}3$, consistent with gate and up each taking one block plus a run of three.
+
+### 61.2 Geometry confirmed for gate/up, partially
+
+$6656 / (4\ \text{blocks} \times 16\ \text{tiles}) = 104$ outputs per tile, and
+$104 \times 16 = 1664$ with $6656/1664 = 4$ exactly. The competing reading $nout=112$ is excluded:
+$6656/1792$ is not integral. Decoding one `e` block at $104 \times 2048$ yields a
+$(2048, 1664)$ matrix with stable rank $74.3$ against $462.7$ for a matched Gaussian and
+$s_0/s_{\mathrm{med}}$ $6.57$ vs $2.24$ -- trained, by the sec.44.2 test.
+
+### 61.3 The unexplained 4288 bytes
+
+An `e` tile is $57664$ bytes. Header $96$ + weights $53248$ ($104 \times 2048$ at 2 bits) + $32$
+tail leaves **$4288$ bytes**, and they are **not padding**: $4258$ of $4320$ bytes are non-zero,
+with all $256$ byte values present, in every one of the $16$ tiles checked.
+
+Nor is the full payload a single dense array. $57536$ bytes at 2 bits is $230144$ weights, and
+$230144 = 2^8 \cdot 29 \cdot 31$ -- it is divisible by neither $2048$ nor $6656$ for any plausible
+output count. So an `e` tile is genuinely weights **plus** a second structure.
+
+Candidates not yet distinguished: per-input-channel scales ($2048$ fp16 would be $4096$ bytes, close
+to $4288$), group-wise scales at some granularity, or a second weight fragment. The leading values
+of the region are *not* small positives, so it does not begin with a scale run in the way the
+$+64$ header field does.
+
+Note the contrast with the `d` class, which has **no** such region: $53376 = 96 + 53248 + 32$
+exactly, which is why `down` decoded cleanly first.
+
+### Standing
+
+Resolved for nano: the container, the 2-bit codec, the period-18 per-layer block pattern, the class
+to role assignment (with `e` = gate/up exact at 448), tile geometry for `d` and `e`, and a decoded,
+spectrum-validated `down`.
+
+Open: the $4288$-byte second structure in every `e` tile, and the `a` and `s` classes. Byte
+accounting says `a` cannot hold $Q$ at 2 bits in one block -- $659456$ bytes for $4194304$ weights
+is $1.26$ bits each -- so either $Q$/$O$ span more blocks than the pattern suggests, or attention is
+stored differently from the FFN. That is the next thing to settle.
