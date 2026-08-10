@@ -3656,3 +3656,70 @@ identity, confirmed on every layer and by a null distribution. $O$ and $K$ are c
 decoded. The forward remains incoherent, so at least one further ordering error persists -- but the
 class of measurable constraints is larger than sec.54 allowed, and the same oracle is available for
 nano, where the layout is otherwise fully solved.
+
+## 65. Two retractions from one control: stable rank rewards a DC offset
+
+Sections 63--64 produced two exciting results in quick succession. A single control kills one
+outright and reduces the other. The control is trivial and should have been applied immediately:
+**a trained weight matrix is near zero-mean**, and stable rank
+$\lVert W\rVert_F^2/\lVert W\rVert_2^2$ falls when *any* rank-1 component dominates -- including a DC
+offset. So a transformation that breaks the palette's symmetry manufactures a mean, and is rewarded
+by the metric for being wrong.
+
+### 65.1 RETRACTED: sign-magnitude code decoding
+
+Reading the 4-bit codes as sign-magnitude appeared to improve every role by large factors -- `down`
+$50.7\to5.1$, gate $56.3\to6.1$, $Q$ $29.1\to7.5$ -- on 16/16 layer-role combinations. Measuring the
+mean alongside:
+
+| palette order | stable rank | mean / sd |
+|---|---|---|
+| sorted (as decoded) | 50.7 | **0.0004** |
+| **sign-magnitude** | 5.1 | **0.2872** |
+| a random permutation | 5.1 | $-0.1728$ |
+
+Every low-stable-rank winner carries a large DC offset; the sorted order is the one that is
+zero-mean. The same holds on nano, where the four best palette orders all sit at
+$|\mathrm{mean/sd}| \approx 0.17$ while the current sorted order is $-0.0003$ and ranks 21st of 24.
+**Sign-magnitude is withdrawn. The sorted palette, as originally decoded, is correct**, and its poor
+stable rank is a property of the metric rather than of the decode.
+
+### 65.2 RETRACTED: $T(2,8)$ as pico's down scale map
+
+Scale permutations do **not** suffer the DC confound -- scales are positive, so rescaling rows leaves
+a zero-mean matrix zero-mean, confirmed at $\mathrm{mean/sd} \approx 0.0004$ throughout. But with the
+codebook correct:
+
+| scale map for pico `down` | stable rank |
+|---|---|
+| identity | 50.7 |
+| $T(2,8)$ | 16.0 |
+| random A | 17.5 |
+| random B | 16.2 |
+
+$T(2,8)$ sits **inside the random band**. Section 64's "24 of 24 layers improved" was measuring only
+that *identity is bad*, not that $T(2,8)$ is right. **$T(2,8)$ is withdrawn as the answer.**
+
+What survives from it is weaker but real and reproducible: **pico's `down` scale-to-output
+assignment is wrong**, since identity scores $50.7$ where essentially any permutation scores ${\sim}16$.
+The correct permutation is not determined.
+
+### 65.3 What still stands
+
+Re-checked against the DC control, with zero-mean confirmed in every case:
+
+| claim | correct | null min | status |
+|---|---|---|---|
+| nano `down` scale pairing (sec.63) | **18.1** | 41.5 | **stands** |
+| pico $O$ scale pairing (sec.64) | **16.0** | 25.4 | **stands** |
+| pico $K$ scale pairing (sec.64) | **12.9** | 14.4 | **stands** |
+
+The scale oracle itself is sound. Only its application to pico's `down` overreached.
+
+### Standing
+
+Net after the corrections: nano's and pico's $O$/$K$ scale pairings are pinned; pico's `down` scale
+pairing is demonstrably wrong but unrecovered; the palette is sorted, not sign-magnitude; and the
+forward is unchanged. Two candidate advances did not survive their first real control, which is the
+same pattern as sec.39, sec.44 and sec.54 -- and the reason the control now runs before the claim,
+not after.
