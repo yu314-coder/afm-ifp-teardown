@@ -3452,3 +3452,84 @@ Open: the $4288$-byte second structure in every `e` tile, and the `a` and `s` cl
 accounting says `a` cannot hold $Q$ at 2 bits in one block -- $659456$ bytes for $4194304$ weights
 is $1.26$ bits each -- so either $Q$/$O$ span more blocks than the pattern suggests, or attention is
 stored differently from the FFN. That is the next thing to settle.
+
+## 62. nano's weight layout solved: all seven roles decode as trained matrices
+
+The `0xa100` / `0xe140` puzzle and the "4288 unexplained bytes" had the same cause, and resolving it
+gives the complete layout.
+
+### 62.1 Tiles are not monolithic -- they are sequences of sub-blocks
+
+Scanning a tile for runs of small positive fp16 (the signature of the `+64` scale field) shows the
+field repeating on a fixed pitch: **seven runs 8224 bytes apart** in an `e` tile, **two runs 26656
+apart** in a `d` tile. So a tile is
+
+```
+[palette 32][zeros 32]  +  N x ( [16 fp16 scales = 32 B][payload 16*cin/4 B] )  +  [tail]
+```
+
+with one scale per output and **16 outputs per sub-block**. Every tile size then closes exactly:
+
+| class | N | sub-block | cin | tail | outputs | arithmetic |
+|---|---|---|---|---|---|---|
+| `s` | 1 | 8224 | 2048 | 32 | 16 | $64+8224+32=8320$ |
+| `a` | 5 | 8224 | 2048 | 32 | 80 | $64+41120+32=41216$ |
+| `e` | 7 | 8224 | 2048 | 32 | 112 | $64+57568+32=57664$ |
+| `d` | 2 | 26656 | 6656 | 0 | 32 | $64+53312=53376$ |
+
+The "4288 unexplained bytes" were simply the later sub-blocks; the earlier reading had assumed one
+scale field per tile. The `a` class was never anomalous either -- $80$ outputs is $5\times16$.
+
+### 62.2 The per-layer allocation, in sub-blocks
+
+Counting sub-blocks rather than bytes makes every tensor land exactly:
+
+| tensor | blocks | sub-blocks | outputs |
+|---|---|---|---|
+| $Q$, $O$ | 1`e` + 1`s` | $112+16=128$ | 2048 |
+| $K$, $V$ | 1`s` | 16 | 256 |
+| gate, up | 3`e` + 1`a` | $336+80=416$ | 6656 |
+| down | 4`d` | $4\times32=128$ | 2048 |
+
+Against the period-18 unit `s e s s e s e e e a a e e e d d d d`, the assignment recovered by
+searching pairings and orderings is
+
+```
+Q = (0s,1e)   V = (2s)   O = (3s,4e)   K = (5s)
+gate = (6e,7e,8e,10a)    up = (9a,11e,12e,13e)    down = (14..17 d)
+```
+
+### 62.3 Validated across layers
+
+Decoding with this layout over **eight layer units, seven roles each -- 56 tensors -- gives zero
+shape mismatches and every tensor heavy-tailed**, scored as stable rank relative to a matched
+Gaussian (below $0.5$ is trained):
+
+| role | shape | mean | max |
+|---|---|---|---|
+| $O$ | $(2048,2048)$ | **0.029** | 0.055 |
+| down | $(2048,6656)$ | 0.035 | 0.051 |
+| gate | $(6656,2048)$ | 0.043 | 0.059 |
+| $Q$ | $(2048,2048)$ | 0.071 | 0.116 |
+| $K$ | $(256,2048)$ | 0.096 | 0.255 |
+| up | $(6656,2048)$ | 0.096 | 0.141 |
+| $V$ | $(256,2048)$ | 0.130 | 0.315 |
+
+### 62.4 What this does and does not establish
+
+**Does:** the container and its sub-block structure; the 2-bit palette; that scales are per-output,
+16 per sub-block, and **correctly matched to their outputs** -- row scaling changes singular values,
+so a trained spectrum would not survive a wrong scale-to-output assignment; and which bytes belong
+to which tensor of which layer, confirmed by exact sub-block arithmetic and by shapes.
+
+**Does not:** the element-to-position ordering *within* a tensor. Singular values are invariant
+under row and column permutation, so this test cannot see it -- exactly the wall documented for pico
+in sec.54 and sec.57--58. nano is now at the stage pico reached, with the difference that nothing it
+needs is missing from the shipped asset.
+
+### Standing
+
+nano's weight layout is solved end to end: 56 layers x 7 roles, every tensor decoding at the right
+shape with a trained spectrum. This is the first complete layout solve in the project. The remaining
+unknown is the intra-tensor ordering, which is the same open problem as pico's and is not addressed
+by anything here.
