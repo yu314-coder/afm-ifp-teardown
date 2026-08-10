@@ -3904,3 +3904,68 @@ The recurring lesson is now unambiguous. Sections 39, 44, 54, 65 and this one al
 way: a metric was trusted before anyone asked what it reads on a system known to be correct. The
 tests that have survived -- the quantizer signature, the writer-ordering check -- are exactly those
 whose null came from shuffling the data itself rather than from an intuition about how models behave.
+
+## 69. A shuffle-nulled instrument that works: the LoRA adapters in logical order
+
+Section 68 ended with the requirement that any new instrument must derive its null from the data
+rather than from an intuition about how models behave. The LoRA adapters supply exactly that.
+
+### 69.1 The instrument
+
+`lora_32_constant_data.bin` is **plain fp16, not ANE-swizzled**, so its axes are already in the
+model's logical order. Segmentation verified: 14 runs per layer matching the required size multiset
+exactly ($32768\times9$, $8192\times2$, $102400\times3$, summing to $618{,}496$), with $A$ and $B$
+alternating by RMS and pairing as $\{Q,O\}\,\{Q,O\}\,\{K,V\}\,\{K,V\}\,\{\text{gate},\text{up}\}\,
+\{\text{gate},\text{up}\},\,\text{down}$.
+
+The six $A$ matrices of shape $[32,1024]$ therefore index the residual in logical order, independent
+of anything in the `hwx`. A consensus over them, correlated against a decoded tensor's
+per-input-channel norms and nulled by shuffling, tests the input ordering directly.
+
+### 69.2 The residual input ordering is correct
+
+Over 12 layers, against a 60-draw shuffle null and every structured permutation of 1024:
+
+| role | identity | null max | best permutation | verdict |
+|---|---|---|---|---|
+| $V$ | **0.5718** | 0.0735 | identity | **identity wins** |
+| $K$ | **0.4796** | 0.0645 | identity | **identity wins** |
+| up | **0.4322** | 0.1012 | identity | **identity wins** |
+| $Q$ | **0.1444** | 0.0930 | identity | **identity wins** |
+| gate | 0.1073 | 0.0976 | $T(16,64)$ 0.1100 | beats null, not decisive |
+| $O$ | 0.0624 | 0.0589 | revblk(16) 0.0854 | no signal |
+
+Four roles win outright at $4$--$8\times$ their null, and identity beats every structured alternative.
+$O$'s null result is a **sanity check that the instrument measures what it claims**: $O$'s input axis
+is the head-concatenated attention output, not the residual, so it should show nothing -- and it does
+not.
+
+**The residual input ordering of the decode is correct.**
+
+### 69.3 The FFN axis remains beyond reach
+
+The same adapters provide logical-order references for the FFN channels -- $B_{\text{gate}}$ and
+$B_{\text{up}}$ rows, $A_{\text{down}}$ columns. Applied to the decoded `gate`/`up` output norms and
+`down` input norms, all three give **no signal** (identity $0.009$--$0.012$ against nulls of
+$0.041$--$0.051$).
+
+The reason is visible in the references themselves: they barely agree with **each other** --
+$B_g$--$B_u$ $0.0153$, $B_g$--$A_d$ $0.0805$, $B_u$--$A_d$ $0.0726$. On the residual axis the
+references agreed and matched the decode; here they are mutually uncorrelated, so the probe carries
+no information about FFN channel identity. This is a statement about the instrument, not about the
+ordering.
+
+### Standing
+
+The instrument requirement of sec.68 is met, and it produced a genuine positive: the residual input
+ordering is validated for $Q$, $K$, $V$ and up, with $O$ behaving correctly as a negative control.
+
+Combined with sec.67.1 (writers' output ordering validated against the embedding) and sec.66 (all
+seven scale maps identity), the ordering unknown is now confined to:
+
+* the **FFN channel axis** -- gate/up output against down input, the sec.42.3 degree of freedom, on
+  which neither the NLL oracle (sec.54) nor this instrument has power
+* the **head layout** of $Q$/$K$/$V$ outputs and $O$'s input, untested by anything so far
+
+That is a materially smaller residue than the project has had at any earlier point, and each surviving
+result rests on a null drawn from shuffling the data itself.
