@@ -4159,3 +4159,47 @@ These are indexed only by LoRA $B$ matrices, which are zero-initialised and ther
 information about base-weight magnitudes. Neither the NLL oracle (sec.54), the stable-rank metric
 (sec.65), nor this instrument can see them. Closing them needs a reference tied to the base weights
 on an output axis, and no shipped artefact provides one.
+
+## 73. The head layout is a GAUGE freedom -- one of the two remaining gaps was never real
+
+Sections 70 and 72 listed two open axes: the FFN channel permutation and the attention head layout.
+The second is not an unknown at all.
+
+### 73.1 The argument
+
+For head $h$ the attention output is $\mathrm{softmax}(Q_h K_h^\top/\sqrt{d})V_h$, concatenated and
+multiplied by $O$. Permuting heads **consistently** in $Q$, $K$, $V$ and $O$'s input blocks
+relabels the sum without changing it. If that holds, the head order never needs to be recovered.
+
+### 73.2 Measured
+
+| test | $\Delta$NLL vs baseline |
+|---|---|
+| permute $Q$ heads within their GQA groups, and $O$'s input blocks, together | $\mathbf{0.00\times10^{0}}$ -- bit-identical |
+| permute KV heads and their matching $Q$ groups together | $\sim1\times10^{-15}$ -- floating-point noise |
+| **control**: permute $Q$ heads but **not** $O$'s inputs | $-6.6\times10^{-2}$ -- output changes |
+
+Three trials each. The control establishes that the measurement is sensitive to exactly the thing
+being tested, so the null deltas are meaningful rather than a broken experiment.
+
+**The head layout is gauge.** Any consistent head permutation -- within GQA groups, or of whole KV
+groups with their $Q$ heads -- yields an identical forward. The sec.70/72 "head layout" gap is
+withdrawn as a gap.
+
+### 73.3 What this leaves
+
+Exactly **one** ordering unknown remains for both models: the **FFN channel permutation**, i.e. the
+order of gate/up's output channels *relative to* down's input channels. Section 42.3 established
+that the joint permutation of that axis is itself gauge, so this is a single relative degree of
+freedom, not two.
+
+Everything else is settled: codecs, scale maps, payload offsets, slot maps, nano's full block
+layout, the residual output ordering of the writers, the residual input ordering of the readers, and
+now the head axis by the gauge argument.
+
+### Standing
+
+The reconstruction is one relative permutation away from complete. That is a much sharper statement
+than this document has been able to make at any earlier point, and it is worth being precise about
+what it does *not* mean: the FFN permutation is still unrecovered, no instrument tried has power on
+it (sec.54, sec.65, sec.72), and until it is found the forward remains incoherent.
