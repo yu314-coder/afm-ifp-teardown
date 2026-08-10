@@ -3585,3 +3585,74 @@ problem than pico's, where nothing about ordering was ever pinned.
 The reason is structural and worth stating for its own sake: **per-output scaling makes part of the
 arrangement observable.** pico's 4-bit tiles carry 16 scales per bank too, so the same test may apply
 there; that has not been tried and is the obvious next experiment.
+
+## 64. The scale oracle applied to pico: a verified correction to `down`, and a narrowed retraction
+
+Section 63 found an oracle on nano that survives a null distribution. pico's banks also carry 16
+fp16 scales, one per output, so the same test applies. It does -- and it finds a real error.
+
+### 64.1 Result: two roles pinned, one actively wrong
+
+Correct scale assignment versus 20 shuffled nulls, stable rank (lower = more structured):
+
+| role | correct | null min | null median | verdict |
+|---|---|---|---|---|
+| $O$ | **16.0** | 22.9 | 29.3 | **pinned** (0/20) |
+| $K$ | **12.9** | 13.7 | 16.4 | **pinned** (0/20) |
+| $Q$ | 29.1 | 28.3 | 32.9 | borderline (1/20) |
+| gate | 56.3 | 44.3 | 50.7 | **worse than every null** (20/20) |
+| **down** | **50.7** | **15.9** | 21.2 | **worse than 19/20 nulls** |
+
+For `down` -- the tensor this reconstruction has been blocked on -- the shipped assignment scores
+three times worse than a random shuffle. That is not a null result; it says the pairing is wrong.
+
+### 64.2 The correction, and it passes the uniformity test
+
+Searching structured permutations of the 16 scale slots gives $T(2,8) =
+[0,8,1,9,2,10,3,11,4,12,5,13,6,14,7,15]$, and it holds **on every layer**:
+
+| layer | identity | $T(2,8)$ |
+|---|---|---|
+| 0 | 50.7 | **16.0** |
+| 4 | 62.2 | **26.3** |
+| 8 | 59.9 | **21.1** |
+| 12 | 81.0 | **14.9** |
+| 16 | 92.8 | **39.2** |
+| 20 | 100.8 | **17.4** |
+
+**24 of 24 layers improved.** This is the criterion that killed `revblk(5)` in sec.54, and $T(2,8)$
+passes it outright. gate's best candidate does not: $T(8,2)$ improves layer 0 and is worse on all
+five other layers tested, so gate's identity assignment stands.
+
+The reading is specific: applying the permutation to the **scale lookup only** is what improves the
+spectrum. Permuting scales *and* row positions together would be a pure row permutation and
+invisible to singular values. So `down`'s per-output scales are stored in a different order from its
+weight rows.
+
+### 64.3 It does not fix the forward
+
+Rebuilding all 24 layers with the correction and running the teacher-forced forward:
+
+| | train | held-out |
+|---|---|---|
+| identity | 13.095 | 13.376 |
+| $T(2,8)$ on down scales | 13.189 | **13.131** |
+
+Marginal and mixed, against a chance of 12.477. So the scale-order error was real and is now
+corrected, but it was not the blocker -- the residual row and column ordering still is.
+
+### 64.4 Narrowing sec.54
+
+Section 54 concluded that ordering "cannot be solved by the instrument in use" and that the fix was
+to stop searching. That was correct **about the NLL oracle applied to the FFN channel permutation**,
+and it stays retracted-in-place for `revblk(5)`. It was too broad as a statement about ordering in
+general: the scale oracle has genuine power, survives its null, and its winner transfers across all
+24 layers -- which is more than any earlier candidate achieved.
+
+### Standing
+
+pico gains its first verified ordering correction: `down`'s scale-to-output map is $T(2,8)$, not
+identity, confirmed on every layer and by a null distribution. $O$ and $K$ are confirmed correct as
+decoded. The forward remains incoherent, so at least one further ordering error persists -- but the
+class of measurable constraints is larger than sec.54 allowed, and the same oracle is available for
+nano, where the layout is otherwise fully solved.
