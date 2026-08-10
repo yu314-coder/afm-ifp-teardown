@@ -4102,3 +4102,60 @@ exists -- they exist and are reproducible. It is that the correlation between an
 and the base weights' channel norms is **weak and depth-dependent**, strong at layer 0 and vanishing
 below it. Any further progress on these axes needs a reference whose signal does not decay -- or many
 more layers of averaging than 24 provides.
+
+## 72. nano confirms it, and the instrument's reach is now explained
+
+nano provides the cleanest available test of the LoRA instrument: 56 layers (35 with full QKV) and
+two independent ranks. Its adapters segment **exactly** -- rank 32 gives $35\times1{,}245{,}184 +
+21\times1{,}097{,}728 = 66{,}633{,}728$ fp16 and rank 16 exactly half, both matching the file size to
+ratio $1.0000$. That is also an independent confirmation of the 35/21 segment split of sec.59.
+
+### 72.1 The result
+
+References validated by cross-rank agreement ($B_{\text{gate}}$ $0.573$, $B_{\text{up}}$ $0.598$,
+$A_{\text{down}}$ $0.458$), probed over 30 layers:
+
+| axis | identity | null | best | outcome |
+|---|---|---|---|---|
+| gate output | 0.0051 | 0.0265 | $T(416,16)$ 0.0219 | no signal |
+| up output | 0.0004 | 0.0321 | $T(13,512)$ 0.0222 | no signal |
+| down input | 0.0028 | 0.0382 | $T(26,256)$ 0.0237 | no signal |
+| $Q$ output | 0.0348 | 0.0562 | $T(4,512)$ 0.0478 | no signal |
+| $K$ output | 0.0201 | 0.1729 | revblk(16) 0.1544 | no signal |
+
+**Nothing beats its null anywhere.** This is stronger than pico's result, not weaker: with 30 layers
+of averaging the spurious candidates pico produced -- notably $K$'s $T(8,32)$ at $0.63$ -- do not
+appear at all, which is what noise does when averaged harder.
+
+### 72.2 Why the instrument reaches the residual and nothing else
+
+The pattern across both models is consistent and has a mechanical explanation:
+
+* **LoRA $A$ matrices index INPUTS.** $A$ is randomly initialised and multiplies the actual input
+  activations, so its column norms end up reflecting the real distribution of the input channels --
+  a property shared by every tensor reading that axis. This is why the residual probe works
+  (sec.69.2: $V$ $0.572$, $K$ $0.480$, up $0.432$ against nulls near $0.07$).
+* **LoRA $B$ matrices index OUTPUTS.** $B$ is **zero-initialised**, so its learned row norms encode
+  what the adapter needed to *change* for its task, not the magnitude of the base weights it is added
+  to. There is no reason for those to align, and measurement confirms they do not.
+
+So the instrument can probe any axis for which an $A$ matrix exists -- the residual -- and no axis
+that only a $B$ matrix indexes: the FFN channels and the attention heads. That is a property of how
+LoRA is initialised, not of the decode.
+
+### Standing -- final state of the gaps
+
+Settled, each against a null drawn from shuffling the data itself:
+
+* pico and nano codecs complete: palettes, scale maps (identity, all roles), payload offsets, slot maps
+* nano's full weight layout, 7 roles x 56 layers, all trained spectra (sec.62)
+* residual **output** ordering of the writers (sec.67.1) and **input** ordering of the readers (sec.69.2)
+
+Open, and now with a reason rather than a shrug:
+
+* the **FFN channel axis** and the **attention head layout**, for both models
+
+These are indexed only by LoRA $B$ matrices, which are zero-initialised and therefore carry no
+information about base-weight magnitudes. Neither the NLL oracle (sec.54), the stable-rank metric
+(sec.65), nor this instrument can see them. Closing them needs a reference tied to the base weights
+on an output axis, and no shipped artefact provides one.
