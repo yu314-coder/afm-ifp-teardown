@@ -89,7 +89,7 @@ Run in that order. Requires numpy and `gguf-py` from llama.cpp.
 
 ## Known incorrect
 
-Two components are known to be wrong, and both are why the output is incoherent:
+Three components are known to be wrong, and together they are why the output is incoherent:
 
 1. **FFN channel ordering.** gate/up's output channels are ordered relative to down's input channels
    by an unrecovered permutation. This is the single remaining ordering unknown in the whole
@@ -97,14 +97,13 @@ Two components are known to be wrong, and both are why the output is incoherent:
 2. **RMSNorm gammas are shipped as all-ones.** nano's program declares **280 distinct
    `p_..._norm_weight` parameters**, so unlike the 300M sibling its gammas are *not* parameter-free.
    They have not been extracted, and the export substitutes ones.
-
-4. **Sandwich post-norms are dropped.** nano applies **four** hidden RMSNorms per layer; the `qwen3`
-   architecture expresses only the two pre-norms, so two per layer are lost in the export. No GGUF
-   architecture currently represents this.
+3. **Sandwich post-norms are dropped.** nano applies **four** hidden RMSNorms per layer; the `qwen3`
+   architecture expresses only the two pre-norms, so two per layer are lost. No GGUF architecture
+   currently represents this.
 
 And one unproven choice:
 
-3. **`segment_1` K/V is duplicated.** Layers 35–55 have no K/V of their own and *which* layer they
+4. **`segment_1` K/V is duplicated.** Layers 35–55 have no K/V of their own and *which* layer they
    share from is not proven — a YOCO-style share from `segment_0` layer 34 is the best inference. The
    export byte-copies `blk.34`'s K/V into all of them (verified in the written file: `k34 == k55`
    exactly, while `q34 != q55`). This is **not a faithful export** of Apple's computation.
