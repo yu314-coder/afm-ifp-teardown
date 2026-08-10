@@ -46,7 +46,14 @@ def decode(L, role, cin, cout):
             p = base + b * stride
             cb = np.frombuffer(bytes(d[p:p + 32]), dtype=np.float16).astype(np.float32)
             sc = np.frombuffer(bytes(d[p + 64:p + 64 + nsc * 2]), dtype=np.float16).astype(np.float32)
-            r = np.asarray(d[p + 128:p + 128 + pay])
+            # CORRECTED 2026-08-10: the payload begins after [palette 32][zeros 32]
+            # [nout fp16 scales], i.e. at 64 + 2*nout -- +96 for the 16-output classes
+            # and +80 for the 8-output 's' class. The old fixed +128 skipped 32 bytes of
+            # real payload and read 32 bytes of the zero tail, which injected a constant
+            # block: |mean|/sd 0.0114 vs 0.0002 corrected. See TOKENIZER_CORRECTION.md
+            # and paper/latecycle.tex.
+            hdr = 64 + 2 * nout
+            r = np.asarray(d[p + hdr:p + hdr + pay])
             nb = np.empty(pay * 2, np.uint8); nb[0::2] = r & 0xF; nb[1::2] = r >> 4
             slot = np.arange(pay * 2); o = slot % nout; i = slot // nout
             W[i, ob + b * nout + o] = cb[nb] * sc[o]
@@ -109,9 +116,11 @@ scores = [float(x) for x in _tk.scores]
 add_str('tokenizer.ggml.model', 'llama')
 add_arr_str('tokenizer.ggml.tokens', vocab)
 add_arr_i32('tokenizer.ggml.token_type', ttype)
-add_arr_f32('tokenizer.ggml.scores', np.zeros(V, np.float32))
-add_u32('tokenizer.ggml.bos_token_id', 1)
-add_u32('tokenizer.ggml.eos_token_id', 110)   # <end_of_turn>
+add_arr_f32('tokenizer.ggml.scores', _tk.scores)  # real scores from the asset
+add_u32('tokenizer.ggml.bos_token_id', 2)      # <bos>; was 1, off by the +4 vocab shift
+add_u32('tokenizer.ggml.unknown_token_id', 3)  # <unk>
+add_u32('tokenizer.ggml.padding_token_id', 0)  # <pad>
+add_u32('tokenizer.ggml.eos_token_id', 106)   # <end_of_turn>; was 110 = 106+4
 
 # ---------- tensors ----------
 print('decoding tensors ...', flush=True)
