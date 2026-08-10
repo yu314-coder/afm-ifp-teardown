@@ -8,11 +8,22 @@ produce the GGUF locally.
 
 ## Result
 
-The exported file **loads and runs**: 8.5 s load, ~2 tok/s on an M-series Mac, correct Gemma-style
-chat template applied by the tokenizer metadata.
+The exported file **loads and runs** under `llama.cpp` b9430, exit 0.
 
-**It does not produce coherent text**, and two known-wrong components explain why — see *Known
-incorrect* below. This is published as a reproducible decode, not as a working model.
+| | |
+|---|---|
+| size | 6,718,421,888 B (6.257 GiB) |
+| sha256 | `10604b66c53fe6c1bbfc81b9b9d8f92c55a2348041117788dab4b292792f70e9` |
+| tensors | 618 (393 F16 2-D + 225 F32 norms) = `1 token_embd + 56x11 + 1 output_norm` |
+| params | 3,355,688,960 |
+| llama.cpp reads | `arch qwen3, n_layer 56, n_head 16, n_head_kv 2, n_embd_head_k/v 128, n_ff 6656, rope NEOX freq_base 500000, vocab SPM 262144, BOS 2, EOS 106` |
+| speed | 4.0 t/s prompt, 2.9 t/s eval — **x86_64 binary under Rosetta, CPU only**; a native arm64 build will be far faster |
+
+The chat template renders correctly and `<start_of_turn>` / `<end_of_turn>` tokenize as single
+tokens, so the tokenizer metadata is right.
+
+**It does not produce coherent text.** Four known-wrong components explain why — see *Known
+incorrect*. This is published as a reproducible decode, not as a working model.
 
 ```
 The capital of France is
@@ -87,12 +98,20 @@ Two components are known to be wrong, and both are why the output is incoherent:
    `p_..._norm_weight` parameters**, so unlike the 300M sibling its gammas are *not* parameter-free.
    They have not been extracted, and the export substitutes ones.
 
+4. **Sandwich post-norms are dropped.** nano applies **four** hidden RMSNorms per layer; the `qwen3`
+   architecture expresses only the two pre-norms, so two per layer are lost in the export. No GGUF
+   architecture currently represents this.
+
 And one unproven choice:
 
-3. **`segment_1` K/V is duplicated.** Those layers have no K/V of their own and *which* layer they
+3. **`segment_1` K/V is duplicated.** Layers 35–55 have no K/V of their own and *which* layer they
    share from is not proven — a YOCO-style share from `segment_0` layer 34 is the best inference. The
-   export duplicates K/V to produce a structurally valid 56-layer model. This is **not a faithful
-   export** of Apple's computation.
+   export byte-copies `blk.34`'s K/V into all of them (verified in the written file: `k34 == k55`
+   exactly, while `q34 != q55`). This is **not a faithful export** of Apple's computation.
+
+The file says so itself: `general.description` carries the full deviation notice, and custom
+`afm.faithful=false`, `afm.warning`, `afm.ordering`, `afm.kv_sharing.export_hack` keys record it in
+metadata. `llama.cpp` ignores them; `gguf-dump` shows them.
 
 What *is* established, each against a null drawn from shuffling the data itself: the container and
 2-bit palette, the scale maps (identity, every role), the block layout and role assignment, the
