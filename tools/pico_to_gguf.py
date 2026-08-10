@@ -78,18 +78,26 @@ add_f32('llama.rope.freq_base', 500000.0)
 add_u32('llama.rope.dimension_count', HD)
 add_u32('general.file_type', 1)
 
-vocab = json.load(open('/Volumes/D/github/afm-ifp-teardown/local/afm_odix/tok_vocab.json'))[:V]
-# llama.cpp requires unique token strings; ids 4-7 mirror <pad>/<eos>/<bos>/<unk>
-seen = {}
-for i, t in enumerate(vocab):
-    if t in seen:
-        vocab[i] = '<dup%d_%s' % (i, t[1:])
-    seen[vocab[i]] = i
-ttype = [3 if (t.startswith('<') and t.endswith('>')) else 1 for t in vocab]
+# CORRECTED 2026-08-10. This previously read local/afm_odix/tok_vocab.json, which is
+# OFF BY FOUR (it used string index +1 where the asset means +5). The "ids 4-7 mirror
+# <pad>/<eos>/<bos>/<unk>" duplicate-token hack that used to live here was a SYMPTOM of
+# that shift -- with the correct shift there are no duplicate specials at all.
+# See TOKENIZER_CORRECTION.md.
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from afm_tokenizer_asset import AFMTokenizerAsset
+TOKENIZER_ASSET = os.environ.get('AFM_TOKENIZER_ASSET')
+if not TOKENIZER_ASSET:
+    raise SystemExit('set AFM_TOKENIZER_ASSET to your device\'s AssetData/tokenizer path')
+_tk = AFMTokenizerAsset(TOKENIZER_ASSET)
+_tk.check()
+assert _tk.vocab_size == V, 'asset vocab %d != model vocab %d' % (_tk.vocab_size, V)
+vocab = _tk.tokens()
+ttype = [int(x) for x in _tk.gguf_token_type()]
 add_str('tokenizer.ggml.model', 'llama')
 add_arr_str('tokenizer.ggml.tokens', vocab)
 add_arr_i32('tokenizer.ggml.token_type', ttype)
-add_arr_f32('tokenizer.ggml.scores', np.zeros(V, np.float32))
+add_arr_f32('tokenizer.ggml.scores', _tk.scores)  # real scores, not zeros
 add_u32('tokenizer.ggml.bos_token_id', 1)
 add_u32('tokenizer.ggml.eos_token_id', 110)   # <end_of_turn>, recovered from in_embeddings
 

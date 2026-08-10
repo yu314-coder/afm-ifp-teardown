@@ -91,13 +91,21 @@ add_f32(ARCH + '.rope.freq_base', 500000.0)
 add_u32(ARCH + '.rope.dimension_count', HD)
 add_u32('general.file_type', 1)
 
-vocab = json.load(open('/Volumes/D/github/afm-ifp-teardown/local/afm_odix/tok_vocab.json'))[:V]
-seen = {}
-for i, t in enumerate(vocab):
-    if t in seen:
-        vocab[i] = '<dup%d_%s' % (i, t[1:])
-    seen[vocab[i]] = i
-ttype = [3 if (t.startswith('<') and t.endswith('>')) else 1 for t in vocab]
+# CORRECTED 2026-08-10. This previously read local/afm_odix/tok_vocab.json, which is
+# OFF BY FOUR (it used string index +1 where the asset means +5) and carried no real
+# scores and no BYTE class. See TOKENIZER_CORRECTION.md. Read the asset directly:
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from afm_tokenizer_asset import AFMTokenizerAsset
+TOKENIZER_ASSET = os.environ.get('AFM_TOKENIZER_ASSET')
+if not TOKENIZER_ASSET:
+    raise SystemExit('set AFM_TOKENIZER_ASSET to your device\'s AssetData/tokenizer path')
+_tk = AFMTokenizerAsset(TOKENIZER_ASSET)
+_tk.check()
+assert _tk.vocab_size == V, 'asset vocab %d != model vocab %d' % (_tk.vocab_size, V)
+vocab = _tk.tokens()
+ttype = [int(x) for x in _tk.gguf_token_type()]
+scores = [float(x) for x in _tk.scores]
 add_str('tokenizer.ggml.model', 'llama')
 add_arr_str('tokenizer.ggml.tokens', vocab)
 add_arr_i32('tokenizer.ggml.token_type', ttype)
