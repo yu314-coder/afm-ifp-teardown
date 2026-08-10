@@ -3723,3 +3723,65 @@ pairing is demonstrably wrong but unrecovered; the palette is sorted, not sign-m
 forward is unchanged. Two candidate advances did not survive their first real control, which is the
 same pattern as sec.39, sec.44 and sec.54 -- and the reason the control now runs before the claim,
 not after.
+
+## 66. A non-circular oracle closes the scale question: the map is identity
+
+Sections 64--65 went back and forth on pico's `down` scale assignment because every test used was
+circular. Decoding multiplies fixed codes by chosen scales and then measures the product, so *any*
+assignment yields a valid-looking matrix and the metric is free to prefer whichever one happens to
+suit it. Stable rank duly misled in **both** directions: it preferred identity for $O$ and $K$ and
+disfavoured it for `down`.
+
+### 66.1 The quantizer leaves a signature
+
+The export quantizer ties codes and scales together: $\mathrm{scale}[o]$ is chosen from column $o$'s
+dynamic range, so a column's **code statistics** and its scale are not independent. Both are fixed in
+the file. Correlating them therefore tests the pairing **without** ever forming the product.
+
+The expected sign is negative: a column with heavy tails gets a large scale but leaves most of its
+codes near the centre, hence a low palette RMS. Aggregated over 8 layers:
+
+| role | identity | scales shuffled within bank |
+|---|---|---|
+| `down` | $-0.664$ | $-0.079$ |
+| $O$ | $-0.610$ | $-0.073$ |
+| $K$ | $-0.549$ | $-0.128$ |
+| gate | $-0.528$ | $-0.039$ |
+
+Roughly an eightfold margin, in the predicted direction, on every role.
+
+### 66.2 Identity beats every alternative
+
+On `down`, over 768 banks across 12 layers:
+
+| scale map | $\lvert\mathrm{corr}\rvert$ |
+|---|---|
+| **identity** | **0.5950** |
+| bitrev | 0.1814 |
+| best of 40 random permutations | 0.1534 |
+| $T(4,4)$ | 0.1236 |
+| $T(2,8)$ | 0.0619 |
+| reverse | 0.0132 |
+
+**The scale-to-output map is identity, for every role.** $T(2,8)$ -- the sec.64 candidate -- ranks
+near the bottom.
+
+### 66.3 RETRACTED: "pico's down scale assignment is wrong"
+
+Section 65.2 withdrew $T(2,8)$ but kept a residual claim: that identity must still be wrong, since it
+scored $50.7$ where any permutation scored ${\sim}16$. **That residual claim is also wrong.** Identity
+is correct; the high stable rank reflects a *well-balanced* matrix, which is what a correct
+per-column scale assignment produces. Mis-assignment inflates a few column norms, one singular value
+grows, and stable rank falls -- the metric rewarded imbalance.
+
+So sec.64 is now fully retracted, including the part sec.65 preserved, and the scale question is
+**closed**: identity, all roles, confirmed non-circularly.
+
+### Standing
+
+Pico's codec is settled end to end: sorted palette (sec.65), identity scale map (here), $+96$ payload
+offset (sec.46), $\mathrm{omin}$ slot map (sec.52). No scale or palette error remains to be found.
+
+The forward is still incoherent, so the residual defect lies in what none of these tests can see --
+the row and column ordering *within* a tensor. That is unchanged, but the space around it is now
+much smaller, and there is a working non-circular instrument where before there was none.
