@@ -3785,3 +3785,61 @@ offset (sec.46), $\mathrm{omin}$ slot map (sec.52). No scale or palette error re
 The forward is still incoherent, so the residual defect lies in what none of these tests can see --
 the row and column ordering *within* a tensor. That is unchanged, but the space around it is now
 much smaller, and there is a working non-circular instrument where before there was none.
+
+## 67. Output ordering validated for the residual writers; $Q$ localised as an anomaly
+
+With the codec settled (sec.66), the residual defect is positional. The non-circular principle that
+closed the scale question applies here too: find a quantity fixed in the file and compare it against
+something independently known. The **validated embedding** provides that.
+
+### 67.1 The writers are correctly ordered
+
+$O$ and `down` write the residual stream -- their output $j$ *is* channel $j$ -- and the export
+quantizer set $\mathrm{scale}[j]$ from that channel's dynamic range. The embedding writes the same
+channels, so $\lVert E[:,j]\rVert$ is an independent measure of channel $j$'s magnitude. Correlating
+the two never forms a product of codes and scales, so it is not circular.
+
+| role | identity | shuffled | best of 8 random |
+|---|---|---|---|
+| $O$ | **0.1355** | 0.0405 | 0.0546 |
+| `down` | **0.2694** | 0.0152 | 0.0665 |
+
+Both clear their nulls, `down` by a factor of four, over all 24 layers. **The residual-channel
+assignment for the two writers is correct** -- which retires the hypothesis of sec.48.1, where a
+misordered residual writer was proposed as the cumulative defect and the Hungarian solve could
+neither confirm nor exclude it.
+
+### 67.2 The readers agree with each other, and with physics
+
+Per-residual-channel norms, layer 0:
+
+| quantity | vs embedding |
+|---|---|
+| writers $O$, `down` | $+0.407$, $+0.126$ |
+| readers $K$, $V$, gate, up | $-0.348$, $-0.519$, $-0.138$, $-0.357$ |
+| **$Q$** | $\mathbf{-0.0005}$ |
+
+The sign split is sensible trained structure: channels the embedding writes strongly are also
+written strongly by $O$ and `down`, and are read with *smaller* weights -- a normalisation effect.
+The writers agree with each other at $+0.650$, and the readers agree among themselves
+(gate--up $+0.434$, $V$--up $+0.505$).
+
+**Every reader fits the pattern except $Q$**, which sits at zero where its siblings are $-0.14$ to
+$-0.52$, and which correlates *positively* with the writers ($+0.267$, $+0.300$) where the other
+readers correlate negatively.
+
+### 67.3 How far that goes
+
+Profiling the ten $N$ blocks individually is suggestive but not conclusive: the four assumed to be
+$O$ are homogeneous ($+0.007$ to $+0.013$), while the four assumed to be $Q$ scatter ($+0.056$,
+$-0.026$, $-0.023$, $-0.090$). Effect sizes at block granularity are $0.01$--$0.25$ and noisy, so this
+is recorded as a lead rather than a result. $Q$'s role assignment comes from the manifest's module
+order, which need not match file order.
+
+### Standing
+
+Newly established: the residual writers' output ordering is correct, verified non-circularly against
+the embedding on all 24 layers. Newly localised: $Q$ is the one residual reader that does not behave
+like the others, on a metric where the other six roles all behave coherently. Not established: what
+$Q$'s correct ordering is, or whether the anomaly is in its input axis, its block assignment, or its
+head layout.
