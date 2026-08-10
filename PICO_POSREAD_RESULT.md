@@ -4038,3 +4038,67 @@ Both fail for the same measurable reason: no available reference carries usable 
 those axes. That is a sharper statement than "unknown" -- it says which further data would be needed,
 namely a logical-order reference for the head and FFN axes that agrees with itself, and none of the
 shipped artefacts provides one.
+
+## 71. CORRECTION to sec.70: the references are usable; cross-rank agreement is the right check
+
+Section 70 dismissed the head and FFN references as carrying no information, on the grounds that
+$B_K$ disagreed with $B_V$ ($-0.038$) and $B_{\text{gate}}$ with $B_{\text{up}}$ ($0.015$). **That
+reasoning was wrong.** $K$ and $V$ are different tensors, so their output axes are not the same axis
+and have no reason to agree; the same applies to gate and up as separate adapters.
+
+### 71.1 The correct reference-quality test
+
+`lora_64_constant_data.bin` is an **independent adapter at rank 64** -- a second opinion on the same
+logical axes. Its segmentation verifies exactly ($65536\times9$, $16384\times2$, $204800\times3$,
+$1{,}236{,}992$ per layer, twice rank 32's). Agreement between ranks:
+
+| reference | rank 32 vs rank 64 |
+|---|---|
+| $B_K$ rows | **0.990** |
+| $B_Q$ rows | **0.964** |
+| $B_{\text{gate}}$ rows | **0.861** |
+| $A_O$ columns | 0.797 |
+| $B_{\text{up}}$ rows | 0.713 |
+| $A_Q$ columns (residual) | 0.654 |
+| $A_{\text{down}}$ columns | 0.391 |
+
+**Every reference reproduces across an independent adapter.** They carry real logical-order
+information, and sec.70's "no usable reference" conclusion is withdrawn.
+
+### 71.2 What the corrected probes give
+
+Re-run with references combined across both ranks:
+
+| axis | identity | null | best | outcome |
+|---|---|---|---|---|
+| `down` input | **0.0636** | 0.0440 | identity | **identity wins** |
+| gate output | 0.0105 | 0.0397 | $T(20,160)$ 0.0484 | marginal, not pursued |
+| up output | 0.0011 | 0.0553 | -- | no signal |
+| $Q$ output | 0.0372 | 0.1215 | -- | no signal |
+| $O$ input | 0.0028 | 0.0846 | -- | no signal |
+| $K$ output | 0.0299 | 0.1587 | $T(8,32)$ 0.6337 | investigated below |
+
+$K$'s $T(8,32)$ survives neither test: **12 of 24** layers beat their own null (chance), and on $V$,
+which shares the identical KV head structure, **0 of 24**. It is not a layout fact, confirming
+sec.70.2 on this point.
+
+### 71.3 A weak positive for identity at layer 0
+
+The per-layer detail is informative. At layer 0, **identity** scores $0.6549$ for $K$ and $0.4562$
+for $V$ against nulls of $0.22$ and $0.20$ -- clearly above -- while no map achieves anything at
+depth. The reference's information content decays with depth, which is why aggregate probes wash out.
+
+This is evidence for identity on the KV head axis, but only at one layer, and identity beats its null
+on just $6/24$ ($K$) and $2/24$ ($V$) layers overall. Recorded as weak support, not a result.
+
+### Standing
+
+The instrument machinery is stronger than sec.70 concluded: every LoRA reference is validated by an
+independent adapter, and the FFN `down` input axis now shows identity beating its null. The head axis
+yields only a layer-0 signal favouring identity.
+
+Both gaps remain open, but for a different reason than sec.70 stated. It is not that no reference
+exists -- they exist and are reproducible. It is that the correlation between an adapter's row norms
+and the base weights' channel norms is **weak and depth-dependent**, strong at layer 0 and vanishing
+below it. Any further progress on these axes needs a reference whose signal does not decay -- or many
+more layers of averaging than 24 provides.
