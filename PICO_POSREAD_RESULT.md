@@ -3969,3 +3969,72 @@ seven scale maps identity), the ordering unknown is now confined to:
 
 That is a materially smaller residue than the project has had at any earlier point, and each surviving
 result rests on a null drawn from shuffling the data itself.
+
+## 70. The head axis and the FFN axis: probed, no signal, and the reason is reference quality
+
+Section 69 built a working shuffle-nulled instrument and used it to validate the residual input
+ordering. Applying the same instrument to the two remaining gaps gives nothing, and the diagnostic
+for *why* is the same in both cases.
+
+### 70.1 Reference quality predicts probe power
+
+The LoRA supplies logical-order references for every axis. Whether a reference is *usable* is
+testable before use: two references that index the same logical axis must agree with each other.
+
+| reference pair | axis | agreement |
+|---|---|---|
+| $A$ matrices (six, residual) | residual | strong, and matched the decode (sec.69) |
+| $B_Q$ rows vs $A_O$ columns | head-concat | $0.2554$ |
+| $B_K$ rows vs $B_V$ rows | KV heads | $-0.0384$ |
+| $B_g$, $B_u$ rows vs $A_d$ columns | FFN channels | $0.0153$--$0.0805$ |
+
+Only the residual references agree well, and only the residual probe produced a result. The head and
+FFN references are mutually uncorrelated, so they carry no information about channel identity on
+those axes.
+
+### 70.2 Head layout: no signal
+
+Decoded per-output norms against their LoRA references, 60-draw shuffle null, all structured
+permutations including head-reverse and dim-major:
+
+| axis | identity | null max | best | verdict |
+|---|---|---|---|---|
+| $Q$ output | 0.0374 | 0.1181 | $T(2,512)$ 0.0701 | no signal |
+| $O$ input | 0.0105 | 0.0782 | $T(2,512)$ 0.0821 | no signal |
+| $V$ output | 0.0675 | 0.1538 | dim-major 0.1283 | no signal |
+| $K$ output | 0.0209 | 0.1767 | $T(8,32)$ **0.6233** | investigated |
+
+$K$'s $T(8,32)$ looked like a hit at $3.5\times$ its null. It fails on inspection:
+
+* **uniformity**: beats its own per-layer null on **11 of 24** layers -- about chance
+* **transfer**: on $V$, which shares the identical 4-head KV structure and must behave the same way
+  if the map were real, it beats the null on **0 of 24**
+* at layer 0, identity scores $0.6015$ against $T(8,32)$'s $0.0611$
+
+The aggregate $0.6233$ was an artifact of averaging references across layers. **$T(8,32)$ is not a
+layout fact**, and the head axis remains unprobed by any working instrument.
+
+### 70.3 FFN channel axis: no signal
+
+As reported in sec.69.3: identity $0.009$--$0.012$ against nulls of $0.041$--$0.051$ for gate output,
+up output and down input. The references disagree with each other at $0.015$--$0.08$, so the probe is
+uninformative rather than the ordering being wrong.
+
+### Standing -- the gaps are not filled
+
+Established, each nulled by shuffling the data itself:
+
+* codec complete -- sorted palette, identity scale maps on all seven roles, $+96$ payload offset,
+  $\mathrm{omin}$ slot map
+* residual **output** ordering of the writers $O$ and `down` (sec.67.1)
+* residual **input** ordering of $Q$, $K$, $V$, up (sec.69.2), with $O$ as a working negative control
+
+Not established, and now known to be beyond every instrument tried:
+
+* the **FFN channel axis** -- the sec.42.3 degree of freedom
+* the **head layout** of $Q$/$K$/$V$ outputs and $O$'s input
+
+Both fail for the same measurable reason: no available reference carries usable information about
+those axes. That is a sharper statement than "unknown" -- it says which further data would be needed,
+namely a logical-order reference for the head and FFN axes that agrees with itself, and none of the
+shipped artefacts provides one.
