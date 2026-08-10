@@ -3533,3 +3533,55 @@ nano's weight layout is solved end to end: 56 layers x 7 roles, every tensor dec
 shape with a trained spectrum. This is the first complete layout solve in the project. The remaining
 unknown is the intra-tensor ordering, which is the same open problem as pico's and is not addressed
 by anything here.
+
+## 63. An ordering oracle that works -- because nano scales per output
+
+Section 62 noted that the spectrum test is blind to permutation and therefore cannot see ordering.
+That is true of row and column *permutation*. It is **not** true of row *scaling*, and nano stores
+one fp16 scale per output. That asymmetry gives a test pico never had.
+
+### 63.1 The test
+
+Decode a tensor normally, then re-decode with the 16 scales of every sub-block permuted. If the
+scale-to-output pairing is real, the correct assignment should sit outside the null distribution of
+shuffled ones. Stable rank (lower = more structured), 24 shuffles:
+
+| role | shape | correct | null min | null median | nulls beating it |
+|---|---|---|---|---|---|
+| down | $(2048,6656)$ | **18.1** | 41.6 | 44.3 | **0 / 24** |
+| $Q$ | $(2048,2048)$ | **25.7** | 29.2 | 30.3 | **0 / 24** |
+| gate | $(6656,2048)$ | **46.5** | 53.1 | 54.3 | **0 / 24** |
+
+Every role is pinned, on three tensors of three different shapes. Supporting gradient from the same
+experiment: replacing the scales by their mean degrades `down` from $0.021$ to $0.242$ relative to a
+matched Gaussian, confirming the scales carry real per-output information rather than being
+near-constant.
+
+This is the **first ordering constraint in this project to survive a null distribution.** Every
+previous candidate -- the composition oracle's winners, `T(4,800)+revblk`, `revblk(64)`, `revblk(5)`
+-- failed exactly here.
+
+### 63.2 What is now pinned, and what is not
+
+**Pinned.** The scale-to-output pairing inside every sub-block, hence the ordering of the 16 outputs
+within a sub-block. Also, from sec.62, the slot-to-$(o,i)$ mapping: reading $o = \mathrm{slot}//c_{in}$
+instead of $\mathrm{slot}\bmod16$ regroups elements *across* rows -- not a permutation of the matrix --
+and degrades the ratio from $0.021$ to $0.054$.
+
+**Not pinned.** Two things remain, and neither is reachable by this oracle:
+
+* **Sub-block order within a tensor.** Reordering sub-blocks permutes whole groups of 16 rows. Each
+  sub-block carries its own scales, so they travel with their rows and no mis-scaling occurs -- the
+  test is blind to it by construction.
+* **Input (column) order.** A pure column permutation, invisible to singular values, and in any case
+  a shared gauge across every tensor reading the residual (sec.42.3).
+
+### Standing
+
+nano's layout is solved and its intra-sub-block output ordering is now measurably correct. The
+residual unknowns are the sub-block permutation and the shared column gauge -- a strictly smaller
+problem than pico's, where nothing about ordering was ever pinned.
+
+The reason is structural and worth stating for its own sake: **per-output scaling makes part of the
+arrangement observable.** pico's 4-bit tiles carry 16 scales per bank too, so the same test may apply
+there; that has not been tried and is the obvious next experiment.
