@@ -3843,3 +3843,64 @@ the embedding on all 24 layers. Newly localised: $Q$ is the one residual reader 
 like the others, on a metric where the other six roles all behave coherently. Not established: what
 $Q$'s correct ordering is, or whether the anomaly is in its input axis, its block assignment, or its
 head layout.
+
+## 68. RETRACTED: the "reader disagreement" diagnostic, and with it the $Q$/$K$/$V$ anomaly
+
+Section 67.2 built a diagnostic on the premise that residual readers should agree with one another,
+and treated departures from that as evidence of misordering. The premise was never checked against a
+model whose ordering is known correct. Checking it now dissolves the whole line.
+
+### 68.1 The control
+
+Qwen3-4B, same op family (RMSNorm, GQA, SwiGLU), weights known good, per-input-channel norms:
+
+| pair | Qwen3-4B | pico |
+|---|---|---|
+| $K$ vs $V$ | $\mathbf{-0.492}$ | $-0.353$ |
+| gate vs up | $\mathbf{-0.319}$ | $+0.499$ |
+| $Q$ vs gate | $-0.034$ | $+0.459$ |
+| $Q$ vs $V$ | $-0.093$ | -- |
+| $V$ vs up | $+0.903$ | -- |
+
+**Residual readers do not agree with each other in a correct model.** $K$ vs $V$ is strongly negative
+there too, and gate vs up is negative where pico's is positive. The spread across pairs runs from
+$-0.49$ to $+0.90$. pico's values sit inside that range.
+
+### 68.2 What this retracts
+
+The following are withdrawn, all of them consequences of the same unchecked premise:
+
+* "$Q$ is the one residual reader that does not behave like the others" (sec.67.2)
+* the successor claims, reached while chasing it, that $K$ and $V$ were the anomaly, and then that
+  $V$ alone was
+* the associated per-block profiling of sec.67.3, whose $0.01$--$0.25$ effects were already flagged as
+  a lead rather than a result
+
+There is **no located anomaly** in $Q$, $K$ or $V$. The per-input-channel norm correlation is not a
+valid ordering diagnostic, because the quantity it measures varies widely between roles even when
+every role is correct.
+
+Separately confirmed while unwinding this: the quantizer-signature test gives a strong negative
+correlation for **all seven** roles ($Q$ $-0.41$, $K$ $-0.64$, $V$ $-0.69$, $O$ $-0.59$, gate
+$-0.48$, up $-0.81$, `down` $-0.60$), so every scale map is identity, extending sec.66 from four
+roles to seven.
+
+### 68.3 What survives
+
+Section 67.1 stands. It compared the correct assignment against a **shuffle null of itself** rather
+than against an assumption about other models: $O$ scores $0.1355$ against $0.0546$, `down` $0.2694$
+against $0.0665$, over all 24 layers. Beating an internal shuffle means a real relationship exists
+between $\mathrm{scale}[j]$ and $\lVert E[:,j]\rVert$, so the residual writers' output ordering is
+aligned with the embedding's channel basis. That conclusion needs no premise about other models and
+is unaffected.
+
+### Standing
+
+Net after the correction: the codec is settled for all seven roles; the residual writers' output
+ordering is validated; every scale map is identity. No ordering error is currently localised, and
+the diagnostic that appeared to localise one has been withdrawn.
+
+The recurring lesson is now unambiguous. Sections 39, 44, 54, 65 and this one all failed the same
+way: a metric was trusted before anyone asked what it reads on a system known to be correct. The
+tests that have survived -- the quantizer signature, the writer-ordering check -- are exactly those
+whose null came from shuffling the data itself rather than from an intuition about how models behave.
