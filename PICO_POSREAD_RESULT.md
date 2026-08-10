@@ -3325,3 +3325,71 @@ every weight it needs is shipped, and there is no expert-selection metadata to b
 Recorded as characterisation, not reconstruction. What is established here is the container, the
 palette, the architecture and the parameter budget. No `nano` weight has been decoded or validated
 yet, and the element-to-position ordering is expected to be exactly as hard as it is for pico.
+
+## 60. First nano weights decoded: the down-projection
+
+Section 59 characterised nano's container. This decodes from it.
+
+### 60.1 The codec is 2-bit, settled by the code histogram
+
+Two readings fit the `0xd080` byte budget: 4-bit with 16 outputs per tile, or 2-bit with 32 outputs
+and scales shared pairwise. Decoding both and inspecting the code distribution decides it outright:
+
+| | 2-bit | 4-bit |
+|---|---|---|
+| resulting shape | **$(6656, 2048)$ = `down` exactly** | $(6656,1024)$ -- wrong output dim |
+| codes observed | **0--3 only**, 4--15 never | codes $\geq4$ used **78\%** of the time |
+
+Under the 4-bit reading, 78\% of weights would decode through palette entries that are **zero**,
+which no trained model does. Under the 2-bit reading exactly the four populated palette entries
+appear. nano is 2-bit palettized with scales shared between output pairs.
+
+### 60.2 The container, confirmed across all four block classes
+
+```
++0    palette      4 fp16 : [-1.5, -0.5, +0.5, +1.5]   (remaining 12 entries zero)
++32   reserved     zeros
++64   scales       16 fp16, small positive
++96   payload
+      ...
+-32   zero padding (64-byte alignment)
+```
+
+Header is **96 bytes with 16 scales in every class**, verified by dumping each. Geometry then
+follows from the payload:
+
+| block | tile | count | resolves to |
+|---|---|---|---|
+| `0x20800` | `0x2080` | 176 | $16 \times 2048$, scales 1:1 |
+| `0xd0800` | `0xd080` | 223 | $32 \times 6656$, scales shared pairwise -- **`down`** |
+| `0xa1000` | `0xa100` | 111 | unresolved |
+| `0xe1400` | `0xe140` | 448 | unresolved |
+
+### 60.3 `down` decoded and validated
+
+The block-run structure confirms the assignment independently: the 223 `0xd080` blocks form **57
+contiguous runs, 54 of them exactly 4 blocks long**, and $4 \times (16\ \text{tiles} \times 32\
+\text{out}) = 2048$, matching `down`'s output width against 56 layers.
+
+Decoding run 0 gives a $(6656, 2048)$ matrix, all finite, `mean|w| = 0.0168`:
+
+| | decoded | matched Gaussian |
+|---|---|---|
+| stable rank $\lVert W\rVert_F^2/\lVert W\rVert_2^2$ | **53.1** | 843.3 |
+| $s_0/s_{\mathrm{med}}$ | **7.59** | 1.65 |
+
+Heavy-tailed and low stable rank: **a trained matrix**, by the same test used for pico in sec.44.2.
+This is the first nano weight recovered.
+
+### Standing
+
+Established for nano: the 2-bit codec and its palette, the 96-byte header with 16 scales across all
+classes, two of four block geometries, and a decoded, spectrum-validated `down` projection.
+
+Unresolved: the `0xa100` and `0xe140` classes, which together are $559$ of $966$ blocks and must
+therefore carry gate, up, $Q$ and $O$. Their headers are identical to the resolved classes but their
+payloads ($41088$ and $57536$ bytes) do not divide by $2048$ or $6656$ under any header and tail
+combination tried, so something about their tiling differs and is not yet understood.
+
+The ordering problem is untouched and should be expected to be exactly as hard as pico's. What nano
+offers is not an easier arrangement but a target where no required data is missing.
