@@ -258,9 +258,31 @@ Verified two independent ways:
   `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` — the SHA-256 of the **empty
   string**.
 
-So the shipped asset contains a 2-bit base model and an empty corrector. The earlier "data wall"
-intuition was right that something required is absent, and wrong about what: it is the
-accuracy-recovery adapter, not the router-to-expert map.
+So the shipped asset contains a 2-bit base model and an empty corrector — all four `lora_*` blobs
+show the same half-untrained pattern (48.8-51.0% of blocks still at initialization).
+
+### But this cannot be the whole explanation, and the objection is decisive
+
+**The device runs this exact asset and produces coherent text.** A live core dump caught
+`TGOnDeviceInferenceProviderService` mid-generation, writing a coherent essay, with this same
+`56659e51` file open. If these bytes are sufficient on-device, they are sufficient in principle, and
+an absent corrector cannot be what stops us.
+
+The likelier reading is that the model is **quantization-aware-trained**: 2-bit is the intended
+representation and needs no recovery adapter, the shipped `lora_*` slots are task-adapter mounts
+that are legitimately empty for the base model, and the "34% relative error" figure measures the
+distance to an fp16 original that never existed. Under that reading the untrained adapters are
+expected rather than damning, and **some defect remains in this reconstruction that we have not
+found.**
+
+What survives regardless: the layer sweep shows uniformly distributed error rather than one
+miswired family, so whatever remains is diffuse — a systematic per-layer discrepancy, not a
+permuted tensor. Candidates not yet excluded: the dequantization scale convention (per-row scale
+applied on the wrong axis, or a missing global factor), the RMSNorm epsilon and mean divisor as
+actually implemented in the ANE registers, and the fp16-vs-fp32 accumulation the hardware uses.
+
+This section states a hypothesis that its own strongest control contradicts. It is recorded that way
+deliberately.
 
 ### A retraction: normalized perplexity cannot diagnose ordering
 
@@ -293,8 +315,9 @@ is layer 34; the RMSNorm epsilon and axis; the 23 shared experts are stored expe
 **Open:** which 46 of 380 experts are resident per *instruction* (a runtime decision, re-made every
 32 tokens), and the sandwich-norm dataflow has no GGUF representation.
 
-**The blocker is not in the decode.** The shipped asset pairs a round-to-nearest 2-bit base model
-(~34% relative weight error) with an accuracy-recovery LoRA that was never trained. No reordering,
-no gamma, and no expert selection can substitute for it. The exported GGUF loads and runs and does
-not produce coherent text; it is published as a reproducible decode, not as a working model, and
-that is a property of the shipped data rather than of this reconstruction.
+**The remaining defect is unidentified, and is diffuse rather than structural.** The layer sweep
+shows uniformly distributed error, not one miswired family. All shipped `lora_*` adapters are
+untrained no-ops, but that cannot be the cause, because the device produces coherent text from this
+same asset (see §6) — so the 2-bit weights are sufficient in principle and something in this
+reconstruction is still wrong. The exported GGUF loads and runs and does not produce coherent text.
+It is published as a reproducible decode, not as a working model.
