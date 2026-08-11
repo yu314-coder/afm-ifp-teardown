@@ -40,9 +40,11 @@ Prior work decoded this file as **4-bit**. It is 2-bit. That single error is suf
 the exact symptom three earlier workflows chased for ~2.1M tokens: gate/up partially decoding while
 down read as pure noise at R≈1.0. The wall was a codec artifact, not a property of the asset.
 
-The one thing genuinely absent is `ifp_constant_table_ifp{1,2,3}_r48.json`, which selects *which* 46
-of the 380 are resident. Because the FFN is an **ungated, permutation-invariant sum**, the *order*
-within a chosen set is a non-issue — only the *choice of set* is open.
+`ifp_constant_table_ifp{1,2,3}_r48.json`, which selects *which* 46 of the 380 are resident, is not
+shipped — but that is a runtime decision re-made every 32 tokens, and because the FFN is an
+**ungated, permutation-invariant sum** the *order* within a chosen set is a non-issue. It is also
+not what blocks reconstruction: swapping to a disjoint 46 moves normalized perplexity only
+1.411 -> 1.481. **See §6 for what is actually missing.**
 
 ---
 
@@ -183,6 +185,101 @@ and a structural hypothesis predict opposite distributions, and the test costs o
 
 ---
 
+## 5. The dataflow, read off the graph
+
+Not guessed. The MLIR string section of `specialized_model_0.mpsgraph` interns strings in IR-walk
+order, so the sequence *is* the op order. Per layer, verbatim:
+
+```
+convolution(o_proj) -> [ANE_RMSNorm | NormalizedResidualConnection] mul mean add sqrt div mul
+                    -> add [ResidualAdd] -> mul mean add sqrt div mul -> next branch
+```
+
+so
+
+```
+h <- h + post_gamma * RMSNorm( branch( pre_gamma * RMSNorm(h) ) )
+```
+
+Attention internals, in graph order:
+
+```
+convolution(fused 4096) -> split_with_sizes(2048,1024,1024) -> [ANE_RoPETransform] -> [ANE_QKNorm]
+   -> KVQuantizer -> KVCacher -> ANE_ScaledDotProductAttention -> o_proj
+```
+
+**RoPE is applied BEFORE the per-head QK-norm**, against the usual convention. (It barely matters
+numerically here because gamma[d] ~ gamma[d+64] at r = +0.91; flipping the order moves NLL by
+< 0.01. But it is what the graph says.)
+
+Op counts corroborate the gamma extraction exactly: `mean`/`sqrt`/`div` each appear **315** times =
+224 residual norms + 1 output norm + 56 q-norms + 34 k-norms, and `neg` appears **91** times = 56
+Q-RoPE + 35 K-RoPE. Both match the 316 recovered tensors and the 35 KV-owning layers.
+
+Settled the same way: `linear_0` takes the SiLU and `linear_1` is the ungated branch; the 21
+`kv_reuse` layers all read one shared K/V pair produced by layer 34; the RMSNorm epsilon and mean
+divisor are explicit registers in the ANE task descriptors; the 23 shared experts are stored
+experts 0..22.
+
+---
+
+## 6. Why it does not work — and it is not the decode
+
+A standalone forward pass implementing the real dataflow (which no GGUF architecture can express)
+gives, on 219 next-token targets with V = 262144 (chance NLL 12.4766):
+
+| N layers | 0 | 1 | 2 | 8 | 24 | 56 |
+|---|---|---|---|---|---|---|
+| median true-token rank | 1307 | 2381 | 6149 | 10528 | 23192 | 74380 |
+
+With **no** layers at all — embedding, output norm, tied head — self-top-1 is 1.000 and the median
+next-token rank is already 1307, so the embedding and head are mutually consistent and the raw
+embedding carries real next-token signal. From layer 1 onward the rank degrades **monotonically**,
+and layer 1 alone is *not* at chance. There is no single broken component: every layer degrades a
+little. Meanwhile the residual stream's token-to-token cosine climbs 0.375 -> 0.980, collapsing onto
+one shared direction — which is precisely why the output becomes input-independent.
+
+That is the signature of **uniformly distributed weight error**, not of a miswired or permuted
+tensor family.
+
+### The cause: the accuracy-recovery adapter ships untrained
+
+The base weights are plain **round-to-nearest 2-bit** — the code histogram matches RTN-of-Gaussian
+at the MSE-optimal scale to within 0.003, i.e. roughly **34% relative weight error**. Apple's
+palettization scheme compensates for that with a **rank-48 accuracy-recovery LoRA**. That adapter is
+shipped as an untrained placeholder.
+
+Verified two independent ways:
+
+* At LoRA-factor granularity the rms distribution is sharply **bimodal and alternating** — 48.8% of
+  blocks sit at ~1.1e-5 (still at initialization) interleaved with blocks at ~2e-2. One factor of
+  every A/B pair was never trained, so the product is ~0 and the adapter is a no-op.
+* Apple's own `metadata.json` gives the adapter signature as
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` — the SHA-256 of the **empty
+  string**.
+
+So the shipped asset contains a 2-bit base model and an empty corrector. The earlier "data wall"
+intuition was right that something required is absent, and wrong about what: it is the
+accuracy-recovery adapter, not the router-to-expert map.
+
+### A retraction: normalized perplexity cannot diagnose ordering
+
+An earlier reading of this teardown placed the export "in the permutation band" (normalized
+`ln PPL / ln V` of 1.41, against 1.36-1.42 produced by deliberately permuting weight rows). **That
+inference was invalid.** A direct control refutes it:
+
+| condition, on a known-good Qwen3-4B | normalized |
+|---|---|
+| the AFM 2-bit codec alone | **1.773** |
+| a deliberate stripe permutation alone | 1.402 |
+| codec **and** permutation together | **1.375** |
+
+Damage is **non-monotone** in this range — adding a permutation on top of the codec *improves* the
+number. Normalized perplexity between roughly 1.3 and 1.8 therefore carries no information about
+ordering, and no conclusion about permutations may be drawn from it.
+
+---
+
 ## 5. Honest status
 
 **Solved:** the container and 2-bit codec (byte-exact); the complete 380-expert pool; the embedding
@@ -190,10 +287,14 @@ and a structural hypothesis predict opposite distributions, and the test costs o
 layers (identity, 94.3 sd); the striped OUT axis; `Q++K++V`; `n_kv_head` = 8; the 316 norm gammas
 and how to apply them.
 
-**Open:** which 46 of 380 experts are resident (the constant table is not shipped), so any export
-must fabricate the selection; the sandwich-norm dataflow has no GGUF representation; `norm.eps` is
-baked into the ANE kernel.
+Also solved since: the exact dataflow and op order; `linear_0` takes the SiLU; the `kv_reuse` source
+is layer 34; the RMSNorm epsilon and axis; the 23 shared experts are stored experts 0..22.
 
-**The exported GGUF loads and runs but does not produce coherent text**, and its perplexity sits in
-the structural band, not the missing-value band. It is published as a reproducible decode, not as a
-working model.
+**Open:** which 46 of 380 experts are resident per *instruction* (a runtime decision, re-made every
+32 tokens), and the sandwich-norm dataflow has no GGUF representation.
+
+**The blocker is not in the decode.** The shipped asset pairs a round-to-nearest 2-bit base model
+(~34% relative weight error) with an accuracy-recovery LoRA that was never trained. No reordering,
+no gamma, and no expert selection can substitute for it. The exported GGUF loads and runs and does
+not produce coherent text; it is published as a reproducible decode, not as a working model, and
+that is a property of the shipped data rather than of this reconstruction.
