@@ -132,15 +132,17 @@ tensors. Role names are confirmed against the declaration order in the less-stri
 
 ### Two families, applied differently
 
-| role | mean | %positive | application |
-|---|---|---|---|
-| attention pre-residual | 0.011 | 63% | **`1 + w`** — zero-centred, Gemma-style |
-| qk_norm query / key | 1.61 | 99% | direct |
-| attention post / ffn post | 0.67 / 0.056 | 100% | direct, and **small** |
+**Superseded by §5.** An earlier reading assigned these four slots as
+(attention pre-residual, attention post, ffn pre-residual, ffn post) with a mixed `1+w` / `w`
+convention. The ANE task stream settles it instead: the four `[1536]` gammas of a block are
+`hn0` = attention branch-output norm, `hn1` = the post-add norm that *replaces* the stream and feeds
+the FFN, `hn2` = FFN branch-output norm, `hn3` = the post-add norm feeding layer L+1. **All four are
+applied directly (`w`), never as `1+w`** — the V ruler independently rejects `1+w`, which clips
+29.1% of entries on 34/35 layers where `w` clips none.
 
-The post-norms rise with depth (attention post: 0.11 → 1.10 across the stack) — a learned branch
-damping, LayerScale-like, letting the residual stream dominate early. Applying `1+w` to those, or
-raw `w` to the pre-residual norms, is as wrong as omitting them.
+Addressing: the constants are one flat address-ordered stream `x[0..226]`; `x[0]` is a leading
+non-gamma vector, `x[1..224]` the 224 = 56x4 per-layer gammas, `x[225]` the output norm, `x[226]`
+zero pad. `gamma(role, L) = x[4L + a]`.
 
 ### The architecture GGUF cannot express
 
@@ -185,7 +187,79 @@ and a structural hypothesis predict opposite distributions, and the test costs o
 
 ---
 
-## 5. The dataflow, read off the graph
+## 5. The architecture is POST-NORM — the stream is replaced, not accumulated
+
+*Supersedes the dataflow given in the first version of this section.*
+
+```
+h[L+1] = RMSNorm( RMSNorm( h[L] + RMSNorm(attn(h[L]))*hn0[L] )*hn1[L]
+                  + RMSNorm(ffn(.))*hn2[L] )*hn3[L]
+```
+
+**There is no unnormalised running sum, and neither branch has a pre-norm.** The post-add norm
+*replaces* the stream: `hn1[L]`'s output is simultaneously the FFN's input and the FFN add's stream
+operand; `hn3[L]`'s output is both layer L+1's `q_proj` input and its attention add's operand. The
+branches read the stream directly.
+
+Every transformer reconstruction instinct says `h = h + f(norm(h))`. This model is `h = norm(h + f(h))`.
+
+### The evidence
+
+Read from L2 buffer **base** addresses in the ANE task stream (an earlier pass read the *Cfg* words
+instead of the *Base* words and wrongly concluded addresses "don't survive the add"). Task 3326
+(`ADD#2`) has `Src2Base = 0x2e000` — the buffer written by the `hn1` gamma-multiply and the `Src1`
+of all twelve FFN projections. Tally over six regions, with ambiguous readings counted as
+undetermined rather than as support:
+
+| | replaces-stream | accumulates |
+|---|---|---|
+| ADD#1 | **357** | 0 |
+| ADD#2 | **285** | 0 |
+
+Independently, the unnormalised sum is *destroyed* before ADD#2 runs (two tasks overwrite both
+copies and no DRAM write-out is armed), so the accumulating form is not merely unsupported but
+impossible.
+
+Branch order is **attention before FFN**, proven from matmul shapes in a middle layer:
+`attn -> o_proj 2048->1536 -> norm*hn0 -> ADD#1 -> norm*hn1 -> FFN (gate/up 1536->5888 x2 chunks,
+SwiGLU, down 5888->1536) -> norm*hn2 -> ADD#2 -> norm*hn3 -> q_proj of layer L+1`.
+
+Norm counts match exactly: 4x[1536] + 2x[128] for KV-owning layers, 4x[1536] + 1x[128] for the 21
+KV-reuse layers. At the head, `RMSNorm*hn3[55]` and `RMSNorm*output_norm` run back to back.
+
+### Why this matters more than the numbers suggest
+
+Implementing it makes the measured scores **worse** (dense layers 1246 -> 6724; 56 layers
+11283 -> 116074). That is the point. Under an accumulating residual a growing unnormalised stream
+dilutes every branch error, so a broken model degrades gracefully toward the identity — **the wrong
+architecture was masking defects**. Under the real one each half-layer fully rewrites the stream and
+errors propagate at full strength. It is a far sharper instrument, and it is what the silicon runs.
+
+Two self-consistency checks came out right without being tuned for: the embedding's absolute scale
+becomes **exactly irrelevant** (identical results at x1, x9, x32), which is required since the first
+stream-replacing norm wipes it; and **both branches become productive** (removing the FFN gives
+143312, removing attention 74878, against 9280 for the full model), where under the accumulating
+form the FFN had been neutral-to-harmful.
+
+### Two clean negatives
+
+`specialized_model_0.mpsgraph` contains **no arithmetic graph at all** — 7 op names, all 108 ANE ops
+external with empty regions, 99.9% of 2.4M attributes are location metadata. Strings like
+`ResidualAdd_743` are `NameLoc` labels, i.e. *order*, not edges; no SSA edge is recoverable from it.
+And `x[0]`, the leading vector of the gamma stream, is **not a norm gamma of any class**
+(767/1536 entries negative), so using it as layer 0's input norm is unsupported.
+
+### What GGUF can and cannot hold
+
+The best achievable mapping into the `gemma3` architecture is
+`attn_norm <- hn3[L-1]`, `post_attention_norm <- hn0[L]`, `ffn_norm <- hn1[L]`,
+`post_ffw_norm <- hn2[L]` — which the published build already carries. The irreducible gap is the
+residual operand: gemma3 accumulates onto the *unnormed* stream, AFM onto the normed,
+stream-replacing value. No GGUF architecture expresses that.
+
+---
+
+## 6. The op order, read off the graph
 
 Not guessed. The MLIR string section of `specialized_model_0.mpsgraph` interns strings in IR-walk
 order, so the sequence *is* the op order. Per layer, verbatim:
@@ -223,7 +297,7 @@ experts 0..22.
 
 ---
 
-## 6. Why it does not work — and it is not the decode
+## 7. Why it does not work
 
 A standalone forward pass implementing the real dataflow (which no GGUF architecture can express)
 gives, on 219 next-token targets with V = 262144 (chance NLL 12.4766):
@@ -302,7 +376,7 @@ ordering, and no conclusion about permutations may be drawn from it.
 
 ---
 
-## 5. Honest status
+## 8. Honest status
 
 **Solved:** the container and 2-bit codec (byte-exact); the complete 380-expert pool; the embedding
 (`[262144,1536]` int4, per-token scales) and tokenizer; the FFN triple alignment for the 44 IFP
