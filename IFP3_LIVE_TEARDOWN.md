@@ -259,6 +259,63 @@ stream-replacing value. No GGUF architecture expresses that.
 
 ---
 
+## 5b. The gamma slot alignment was off by one — and it was annihilating the stream
+
+The post-norm architecture (§5) made a second defect measurable that had been invisible under the
+accumulating form. Per-step cosine against the input embedding, layer 0:
+
+| | branch/h0 | cos after ADD#1 | cos after the stream-replacing norm |
+|---|---|---|---|
+| `amap=(0,1,2,3)` | 0.171 | +0.9857 | **+0.1303** |
+| **`amap=(1,2,3,4)`** | 0.396 | +0.9195 | **+0.9173** |
+
+The token survived the residual add almost intact and was then **destroyed by the gain applied to
+the stream** — because that vector is only **55% positive**. A multiplicative gain that flips the
+sign of 45% of channels is not a gain.
+
+### The correct alignment, and why
+
+The four `[1536]` gammas of a block are `x[4L+1..4L+4]`, and their *character* is fixed per slot
+across all 55 layers:
+
+| role | vector | %positive |
+|---|---|---|
+| attention branch-output norm | `x[4L+1]` | 55–67% |
+| **stream-replacing norm (after ADD#1)** | `x[4L+2]` | **100%** |
+| FFN branch-output norm | `x[4L+3]` | 70–99% |
+| **stream-replacing norm (after ADD#2)** | `x[4L+4]` | **100%** |
+
+The two norms that *replace* the stream are all-positive, as they must be to preserve a
+representation; the mixed-sign vectors sit on the **branch outputs**, where a sign flip shapes a
+contribution instead of destroying the residual.
+
+The stream then accounts exactly: `x[0]` is the leading non-gamma vector (independently proven —
+767/1536 entries negative), `x[1..224]` the 224 = 56x4 gammas, `x[225]` the output norm. The
+earlier `Src2`-derived `amap=(0,1,2,3)` consumed `x[0]` as a real gain and orphaned `x[224]`;
+**it was off by one**, and this file previously published it.
+
+### Effect
+
+Layer 1 median true-token rank **89069 -> 2147** (identity 1499, chance 131072). Attention alone
+then holds the signal at the identity through twenty layers (**1671 at N=20**) — the first time in
+this reconstruction that a deep stack preserves rather than destroys its input.
+
+**This does not change the GGUF.** gemma3's pre-attention slot and AFM's post-add stream norm are
+the same tensor viewed from opposite sides of the layer boundary, so the one-slot shift is absorbed:
+`attn_norm[L] = x[4L]`, `post_attention_norm[L] = x[4L+1]`, `ffn_norm[L] = x[4L+2]`,
+`post_ffw_norm[L] = x[4L+3]`. The published build already carries exactly this (verified 20/20).
+
+### What still fails
+
+Layer 34 costs ~7x on its own (N=34 7223 -> N=35 50866). Refuted for it: the `k34_unit` key-norm
+anomaly, moving the KV-owning boundary to 33, a K/V ownership split (34 `S_K` vs 35 `S_V`), and all
+six candidate reuse sources — layer 34's K/V is confirmed the correct source for the 21 reuse
+layers. The FFN degrades gradually from N=12, and expert count/selection is inert there
+(46/23/92/380 all equivalent) — now confirmed under the corrected alignment rather than the broken
+one.
+
+---
+
 ## 6. The op order, read off the graph
 
 Not guessed. The MLIR string section of `specialized_model_0.mpsgraph` interns strings in IR-walk
