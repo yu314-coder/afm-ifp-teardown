@@ -44,7 +44,7 @@ sum over experts), so no selection map is needed to run it.
 | **Embedding (3B, `instruct_3b`)** | 🔴 **ANE-locked** — not a `[V,D]` table in any shipped asset (~1.14 M offsets ≤ +0.047), **and** absent from an 8.2 GB full-memory core (0 `D=1536` buffers) because the 3B's gather/dequant is **ANE-delegated** (`main-h16g-delegates`) — the dequantized vector never reaches host DRAM. Reachable only by ANE-internal (IOSurface/H11ANE) instrumentation |
 | **Attention forward** (all 44 layers) | ✅ runs stably (bounded residual growth) |
 | **Coherent text generation** | 🔴 **blocked by an information limit** — assembled 44-layer forward carries real signal (3.6× chance) but the summed-FFN direction is mis-aligned, and per-layer activations are ANE-internal so it can't be validated/bisected — see below |
-| **Running the real model** | ✅ via `afm` (Apple's `FoundationModels` runtime) |
+| **Running the real model** | Apple's own `FoundationModels` framework (public API; not part of this repo) |
 
 ---
 
@@ -298,31 +298,12 @@ Full consolidated record: see the teardown paper §"From-Weights Reconstruction"
 | `FINDINGS.md` | Condensed technical findings (layout, codec, MLIR/odix parse) |
 | `ROUTER_EXTRACTION.md` | The `ExportableExpertSelector` extraction (now proven unnecessary to run) |
 | `ODIX_DECOMPILER.md` | `main-h16g.odix` structural map (38 configs, op format) |
-| `src/afm.swift` | **`afm`** — CLI + OpenAI-compatible server over Apple's real model |
 | `src/afm_tokenizer.py` | Byte-BPE tokenizer (validated) |
 | `src/deswizzle.py`, `crack_lut.py` | ANE de-swizzle + LUT codec + structure-ratio metric |
 | `src/odix.py` | Parser for Apple's `odix` container |
 | `src/rebuild_full_pt.py` | Decode → single-file weight export |
 | `src/afm_forward_working.py` | Reconstructed forward pass (attn + ungated MoE-SwiGLU) |
 | `src/afm_generate.py` | End-to-end generation harness (over Apple's runtime) |
-
----
-
-## Using the real model — `afm` (recommended)
-
-This runs Apple's actual model, correct ANE routing and all — the faithful way to *use* it.
-
-```bash
-swiftc -O -o afm src/afm.swift          # macOS 26+ with Apple Intelligence
-
-./afm "What is the capital of France?"   # → The capital of France is Paris.
-echo "prompt" | ./afm                     # piped
-./afm -s "You are a pirate." -t 0.9 "Hi" # system prompt + temperature
-./afm --stream "Write a haiku"            # token streaming
-./afm                                     # interactive REPL
-./afm --server 8080                       # OpenAI-compatible API on :8080
-#   -> POST /v1/chat/completions  (any OpenAI client works)
-```
 
 ## Reproducing the teardown (on your own device)
 
