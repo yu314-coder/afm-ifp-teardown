@@ -296,6 +296,7 @@ Full consolidated record: see the teardown paper §"From-Weights Reconstruction"
 |---|---|
 | `paper/afm_teardown.pdf` | Full teardown paper (AMS-style, 15 pp.) — compile from `.tex` |
 | `FINDINGS.md` | Condensed technical findings (layout, codec, MLIR/odix parse) |
+| `disclosure/CORRESPONDENCE.md` | Dated disclosure record — what Apple was told, when, and their responses |
 | `ROUTER_EXTRACTION.md` | The `ExportableExpertSelector` extraction (now proven unnecessary to run) |
 | `ODIX_DECOMPILER.md` | `main-h16g.odix` structural map (38 configs, op format) |
 | `src/afm_tokenizer.py` | Byte-BPE tokenizer (validated) |
