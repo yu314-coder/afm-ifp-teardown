@@ -118,6 +118,67 @@ correctly-ordered reference model first (it separates true from random pairings 
 
 ## The current boundary — component-complete, blocked by absent ground truth
 
+> **Update (2026-08-26) — the gap is now quantified and the search space is closed.**
+> The narrative below this box predates a systematic evaluation pass and several of its
+> specifics are superseded (in particular the rank-oracle numbers, the "FFN magnitude
+> dominates" reading, and the 219-expert framing). See
+> [`paper/reconstruction.tex`](paper/reconstruction.tex) — *The Reconstruction Gap: A
+> Controlled Negative Result* — for the full treatment. Summary:
+>
+> **The headline number.** Scoring mean log-rank of the true next token on real text, against
+> a *0-layer floor* (embedding read straight through the tied unembedding, all 56 blocks
+> bypassed):
+>
+> | model | layers | floor | final | value from depth |
+> |---|---:|---:|---:|---:|
+> | Qwen2.5-0.5B-Instruct | 24 | 9.4617 | 1.7718 | **−7.6900** |
+> | Qwen2.5-1.5B-Instruct | 28 | 9.2452 | 1.4673 | **−7.7779** |
+> | ifp3 reconstruction | 56 | 7.1193 | 7.5873 | **+0.4680** |
+>
+> A working transformer turns depth into ≈ −7.7 nats. The reconstruction turns it into +0.47:
+> the layers destroy information the embedding already carries. The floor itself is *sound*
+> (4.66 nats below chance, vs 1.78 for Qwen-0.5B), so the embedding decode is fine and it is
+> the layers that are inert.
+>
+> **Branch decomposition** (full depth; the both-off control reproduces the floor exactly):
+> attention removed → 7.0891 (**−0.0303, the only sub-floor configuration**); FFN removed →
+> 7.9718 (+0.8525); full → 7.5873. The reconstructed attention *destroys* 0.50 nats; the FFN
+> stack alone is worth 0.03 where healthy layers are worth 7.7.
+>
+> **The sharpest anomaly is the missing attention sink** — 0.054 of attention mass on position 0
+> versus 0.428/0.423 in both controls, while local (0.312 vs 0.353/0.366) and tail
+> (0.469 vs 0.483/0.467) mass are *normal*. It is not a wrong-BOS problem: placing every one of
+> the 262,144 vocabulary tokens at position 0 yields a maximum sink of 0.047 against an
+> ordinary-token band of 0.031 ± 0.007.
+>
+> **13 hypothesis classes eliminated with controls** — codec palette (all 24 code→value orders,
+> round-trip error exactly 0), weight scale (OV gain 0.488 vs 0.497/1.783), Q/K conditioning,
+> normalisation placement (16 × 4 conventions incl. Gemma3-exact), gamma slot→role (24) and
+> dimension order, head layout (64 combos at full depth, with nulls), RoPE (incl. disabled),
+> residual basis (ANE stripe + all 84 reshape-transposes of 1536), expert routing (7 schemes,
+> random null mid-pack), layer regions, prompt format, and the evaluation corpus itself.
+>
+> **What is missing is not a component** — all 218 tensors are present, decode with correct
+> statistics, and are consumed by the forward. What is missing is *mutual consistency on the
+> shared 1536-dim residual axis*. That single hypothesis explains every measurement, and it
+> explains why the tests came back clean: **every static statistic — row norms, singular
+> spectra, palette frequencies, OV gain, QK participation — is invariant to a permutation of
+> that axis.** The structured part of that hypothesis is now closed (84 reshape-transposes, none
+> beats identity); unstructured relabelings are not brute-forceable.
+>
+> **Methodological findings**, which generalise beyond this model: log-rank is maximised by a
+> reconstruction that *does nothing*; causal signal-growth is maximised by one that *injects
+> noise* (a 5.1× "win" on that metric scored 9.27 vs 7.59 on real text); and a truncated model
+> can be blind to the component under test — ablating attention entirely from a 12-layer prefix
+> moves log-rank by only −0.071, inside its own noise band, so five sweeps run there constrained
+> the instrument rather than the model. **Rule: ablate the component before varying it.**
+>
+> **Cross-model corroboration.** The same method applied to `afmplus-v11.0-nano` — a *dense* 3.33B
+> sibling with no MoE and no routing metadata — converges on identical behaviour (top-1 exactly
+> 0.00%, argmax = current token). Two independent decodes of two architectures do not share a
+> per-model mistake.
+
+
 The model is **component-complete**: weights, codec, de-swizzle, architecture, norms, tokenizer,
 and — critically — the fact that *no expert-selection map is needed* are all established. Several
 earlier "walls" collapsed on inspection:

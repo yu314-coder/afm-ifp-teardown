@@ -1,0 +1,313 @@
+\section{The Reconstruction Gap: A Controlled Negative Result}\label{sec:gap}
+
+Sections~\ref{sec:recover}--\ref{sec:reconstruct} established that every datum Apple ships for
+\code{afmplus-v11.x-ifp} can be recovered: all $218$ weight tensors, the $2$-bit codebook, the
+per-output-row scales, the per-layer normalisation stream, the tokenizer, and the embedding
+matrix. This section reports what happens when those recovered components are assembled into a
+forward pass, and it is a negative result: \emph{the reconstruction does not predict text.}
+
+We report it in full because the negative is unusually well constrained. Over $42$ controlled
+experiments we eliminate every hypothesis class constructible from the shipped artifacts, and in
+the process we characterise three evaluation instruments whose failure modes are, we believe, of
+independent interest to anyone attempting from-weights reconstruction of a quantised model.
+
+\subsection{The reconstruction gap, quantified}
+
+Let $\ell(\mathcal{M})$ denote mean log-rank of the true next token under model $\mathcal{M}$ on
+held-out natural text,
+\[
+  \ell(\mathcal{M}) \;=\; \frac{1}{T-1}\sum_{t=1}^{T-1}
+  \log\bigl(1 + \bigl|\{v : z_v^{(t)} > z_{x_{t+1}}^{(t)}\}\bigr|\bigr),
+\]
+with $z^{(t)}$ the logits at position $t$. Define the \emph{$0$-layer floor} $\ell_0$ as the same
+quantity computed on the embedding read out directly through the tied unembedding, with all $56$
+transformer blocks bypassed. The floor is the un-gameable reference: it is what the embedding
+alone knows, and any working reconstruction must beat it by a wide margin.
+
+\begin{table}[h]
+\centering\small
+\caption{Value delivered by depth, measured on identical source documents. Each model is scored
+against its own $0$-layer floor; the control models are re-tokenised with their own vocabularies.}
+\begin{tabular}{lrrrr}
+\toprule
+model & layers & floor $\ell_0$ & final $\ell$ & $\ell-\ell_0$ \\
+\midrule
+Qwen2.5-0.5B-Instruct & 24 & 9.4617 & 1.7718 & $-7.6900$ \\
+Qwen2.5-1.5B-Instruct & 28 & 9.2452 & 1.4673 & $-7.7779$ \\
+\textbf{ifp3 reconstruction} & \textbf{56} & \textbf{7.1193} & \textbf{7.5873} & $\mathbf{+0.4680}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{finding}
+A working transformer converts depth into roughly $-7.7$ nats of predictive value. The
+reconstruction converts depth into $+0.47$ nats: its layers do not merely fail to help, they
+destroy information the embedding already carries.
+\end{finding}
+
+The per-depth curve shows this is not a late-layer collapse. Scoring the residual at every depth,
+the reconstruction is at its floor through depth $\approx 8$, and degrades monotonically
+thereafter, peaking at $+0.73$ near depth $48$. Its best truncation is depth $2$ at $-0.018$, which
+is within noise. By contrast both controls are below their floors by mid-stack. Notably the
+reconstruction's floor is itself \emph{good}: relative to the uniform baseline $\log(V/2)$ it sits
+$4.66$ nats below chance where Qwen2.5-0.5B sits $1.78$ below, so the embedding decode is sound and
+it is the layers that are inert.
+
+\subsection{Instrument calibration, and three degeneracies}
+
+The central methodological lesson of this work is that the obvious evaluation statistics are each
+maximised by a different pathology, and that an uncalibrated instrument produces confident false
+negatives. We document three.
+
+\paragraph{Log-rank is gameable by inaction.} A reconstruction that writes nothing scores exactly
+$\ell_0$, which is better than any partially-broken forward pass. Ranking candidate conventions by
+log-rank therefore selects for \emph{silence}. In our case it selected a per-layer gamma
+convention that attenuated the dense feed-forward branch by a factor of $229$, and it endorsed
+branch-amplification sweeps that could only ever discover the do-nothing direction.
+
+\paragraph{Causal signal growth is gameable by noise.} To escape the inaction degeneracy we
+adopted a causal statistic: perturb the token at position $j$ and measure the growth of
+$\lVert\Delta h_j\rVert$ from layer $0$ to the final layer. Healthy models amplify the perturbation
+by $\times 59$ (Qwen-0.5B) and $\times 83$ (Qwen-1.5B); the reconstruction manages $\times 1.5$. An
+inert model scores $\times 1$, so this statistic cannot be won by doing less. It can, however, be
+won by \emph{doing more}: a sweep of $64$ normalisation-convention arms produced a candidate
+scoring $\times 7.76$, a $5.1\times$ improvement, which on re-scoring against real-text log-rank was
+\emph{worse} than the baseline ($9.27$ versus $7.59$). Amplifying every write propagates
+perturbations beautifully while destroying prediction.
+
+\begin{finding}
+Log-rank and causal signal growth fail in mirror-image ways. No candidate may be accepted on
+either alone; a valid claim requires log-rank below the $0$-layer floor \emph{and} healthy causal
+dynamics.
+\end{finding}
+
+\paragraph{A truncated model can be blind to the component under test.} Most of our sweeps were
+initially run on a $12$-layer prefix for cost. Ablating attention \emph{entirely} from that prefix
+moves log-rank by only $-0.071$. Independently, permuting the gamma vectors' dimension order at
+random scored $+0.039$ against the correct order's $+0.071$ --- a random permutation beating the
+truth. The $12$-layer readout therefore has a noise band of $0.03$--$0.08$ nats and cannot
+distinguish ``attention working'' from ``attention absent.'' Five sweeps had already been run on
+it. At full depth the same ablation registers $-0.498$, an order of magnitude outside the band.
+
+\begin{finding}
+Before varying a component, ablate it. If removing the component entirely does not move the
+metric by more than its noise band, the instrument cannot see that component and any negative
+result about it is a statement about the instrument.
+\end{finding}
+
+We adopt two rules for the remainder: every sweep embeds a random-permutation null to establish
+its own band, and every harness embeds an identity control that must reproduce a known value
+exactly. Both caught errors --- the null in the gamma sweep, and an identity control that revealed
+a mis-designed no-op arm in the basis experiment of \S\ref{sec:gap-basis}.
+
+\subsection{Branch decomposition}
+
+With a calibrated full-depth instrument, the gap decomposes cleanly. Ablations are scored on the
+documents used for the floor; the ``both off'' arm reproduces $\ell_0$ to $0.0\times10^{0}$,
+confirming the harness.
+
+\begin{table}[h]
+\centering\small
+\caption{Branch ablation at full depth. Positive $\ell-\ell_0$ means worse than the embedding alone.}
+\begin{tabular}{lrr}
+\toprule
+configuration & $\ell$ & $\ell-\ell_0$ \\
+\midrule
+full model & 7.5873 & $+0.4680$ \\
+attention removed & 7.0891 & $-0.0303$ \\
+feed-forward removed & 7.9718 & $+0.8525$ \\
+both removed (control) & 7.1193 & $+0.0000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{finding}
+The reconstructed attention destroys $0.50$ nats. Removing it is the only configuration that
+places the model below its $0$-layer floor. The feed-forward stack alone contributes $0.03$ nats,
+against $7.7$ for healthy layers; both branches are effectively inert, and one is actively
+harmful.
+\end{finding}
+
+Scaling the attention write by $s$ confirms the write carries no recoverable signal: $\ell$ is
+monotone in $s$ above $s=0.05$, and the best scale improves on $s=0$ by $0.006$ nats, which we
+regard as noise rather than a result. Removing the branch post-normalisation --- which inflates the
+raw attention output by $\approx 44\times$ (\S\ref{sec:gap-amp}) --- lands at $7.0894$, statistically
+identical to removing attention outright.
+
+\subsection{Why the writes do not compound}\label{sec:gap-amp}
+
+For a residual update $h \mapsto h + w$ we have
+$\lVert h+w\rVert^2 = \lVert h\rVert^2 + 2\cos\theta\,\lVert h\rVert\lVert w\rVert + \lVert w\rVert^2$,
+so growth is governed by the write's \emph{direction}. Measuring $\cos\theta$ and the relative
+amplitude $\rho = \lVert w\rVert/\lVert h\rVert$ per layer:
+
+\begin{table}[h]
+\centering\small
+\caption{Write geometry, mean over the stack.}
+\begin{tabular}{lrrr}
+\toprule
+ & ifp3 & Qwen-0.5B & Qwen-1.5B \\
+\midrule
+$\cos(w_{\mathrm{attn}}, h)$ & $0.0025$ & $0.1583$ & $0.2063$ \\
+$\rho_{\mathrm{attn}}$ (after post-norm) & $0.2044$ & $0.3133$ & $0.7349$ \\
+$\cos(w_{\mathrm{ffn}}, h)$ & $+0.0394$ & $-0.1399$ & $-0.1596$ \\
+$\rho_{\mathrm{ffn}}$ & $0.0356$ & $0.9982$ & $0.4312$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The reconstruction's attention writes are essentially orthogonal to the residual, $60$--$80\times$
+less aligned than healthy writes, and the predicted per-layer growth from its own
+$(\cos\theta,\rho)$ is $1.021$ against $1.035$ observed --- the failure to compound is
+\emph{fully} explained by direction, leaving no residual for another cause. Healthy feed-forward
+writes are consistently \emph{negatively} aligned; ours are weakly positive.
+
+Decomposing the attention write by stage isolates two amplitude faults. The raw attention output
+is $0.0046$ of $\lVert h\rVert$ where healthy is $0.31$--$0.73$ --- roughly $100\times$ too small
+\emph{before} any convention --- and the branch post-normalisation then inflates it $44\times$ to a
+superficially normal $0.2044$. Conversely the raw feed-forward output is $0.6350$, squarely in the
+healthy band, and the recovered out-gamma attenuates it $18\times$. The post-normalisation had been
+masking the attention deficit in every amplitude check.
+
+\subsection{The absent attention sink}
+
+The sharpest single anomaly is positional. Measuring attention mass by relative distance:
+
+\begin{table}[h]
+\centering\small
+\caption{Attention mass by position (every fourth head, all layers, query positions $\geq 8$).}
+\begin{tabular}{lrrr}
+\toprule
+ & ifp3 & Qwen-0.5B & Qwen-1.5B \\
+\midrule
+mass on position $0$ & $0.054$ & $0.428$ & $0.423$ \\
+mass within distance $8$ & $0.312$ & $0.353$ & $0.366$ \\
+mass beyond distance $16$ & $0.469$ & $0.483$ & $0.467$ \\
+$\mathrm{KL}(\text{attn}\,\Vert\,\text{uniform})$ & $0.636$ & $1.945$ & $1.862$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Local and tail mass are normal; the entire positional deficit is the missing attention sink.
+Four independent attempts to recover it all fail. (i) No choice of query/key normalisation
+restores it (all arms $0.036$--$0.046$). (ii) Placing \emph{every one} of the $262{,}144$
+vocabulary tokens at position $0$ yields a maximum sink of $0.047$, against an ordinary-token
+reference band of $0.031\pm0.007$: it is not a wrong-\code{BOS} problem. (iii) Sharpening the
+logits does not reveal a latent sink --- the ratio of sink mass to peak mass \emph{falls}
+monotonically from $0.545$ to $0.051$ as temperature rises, so as attention approaches
+$\arg\max$ it concentrates on positions other than $0$. (iv) Disabling RoPE entirely leaves the
+sink at $0.057$, though a sink is a content mechanism that should survive without positional
+encoding.
+
+Position $0$ also differs \emph{qualitatively}, not by magnitude: $\cos(h_0, \bar h_{>0})$ is
+$+0.150$ in the reconstruction and $-0.364$ / $-0.423$ in the controls, and the \code{BOS}
+embedding row sits at the $9.7$th norm percentile where healthy \code{BOS} rows sit at the
+$98.5$th and $85.6$th.
+
+\subsection{Systematic elimination}\label{sec:gap-basis}
+
+Every hypothesis class constructible from the shipped artifacts was tested with controls. We
+summarise; each row is a sweep, not an argument.
+
+\begin{table}[h]
+\centering\small
+\caption{Eliminated hypothesis classes. ``Null'' indicates a random-permutation or shuffle control
+was embedded in the sweep.}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.25\linewidth}>{\raggedright\arraybackslash}p{0.41\linewidth}>{\raggedright\arraybackslash}p{0.26\linewidth}}
+\toprule
+class & test & outcome \\
+\midrule
+codec palette order & all $24$ code$\to$value assignments, codes recovered from decoded weights
+& identity best; round-trip error $0.0\times10^{0}$ \\
+weight scale decode & $\sigma_1$ and OV-circuit gain vs.\ controls
+& OV gain $0.488$ vs.\ $0.497$/$1.783$ \\
+$W_q,W_k$ conditioning & QK-circuit participation ratio, shuffle nulls
+& $0.788$ vs.\ $0.857$ (matched head dim) \\
+normalisation placement & $16$ placements $\times$ $4$ gamma conventions incl.\ Gemma3-exact
+& none improve; Gemma3-exact $+3.69$ \\
+gamma slot$\to$role & all $24$ permutations
+& $\cos_{\mathrm{attn}}\in[-0.0007,+0.0038]$ throughout \\
+gamma dimension order & ANE stripe both directions, all-ones baseline, null
+& decoded order best; all-ones $+1.90$ \\
+head layout & $64$ combinations (q/k/v/o major-order $\times$ RoPE $\times$ GQA map), full depth, nulls
+& none clears floor; best $+0.520$ \\
+RoPE application & conventions, table rolls, disabled entirely
+& none restores sink or clears floor \\
+residual basis & ANE stripe (readers/writers, both directions) $+$ $84$ reshape-transposes
+& all at or above null band \\
+expert routing & $7$ selection schemes over $46$ experts
+& random-subset null mid-pack \\
+layer region & dense / sparse / kv-reuse block ablations
+& damage distributed; kv-reuse $-0.073$ \\
+prompt format & raw, lowercased, Gemma-templated, with system turn
+& raw is best; templated $+0.88$ \\
+evaluation corpus & token ids decoded against source text
+& exact match at documented $+4$ offset \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two entries deserve comment. The \emph{kv-reuse} region --- $21$ layers that carry no keys or
+values of their own and attend against layer $34$'s --- was the most speculative choice in the
+entire teardown and is exonerated: removing all $21$ moves log-rank by $-0.073$, and the region is
+not internally consistent (removing $L_{35\text{--}45}$ helps, removing $L_{46\text{--}55}$ hurts).
+Conversely, removing the sparse mixture-of-experts block \emph{costs} $+1.20$ nats, so those layers
+are load-bearing: they partially repair damage inflicted elsewhere, exactly as the feed-forward
+branch partially repairs attention damage.
+
+\subsection{What is missing}
+
+The evidence admits a single consistent reading. No component is absent: all $218$ tensors are
+present, decode with correct statistics, and are consumed by the forward pass. What is absent is
+\emph{mutual consistency on the shared residual axis} --- tensors that write the $1536$-dimensional
+residual and tensors that read it need not be in the same dimension order. Under such a mismatch
+every tensor remains internally perfect while their composition produces noise, which is precisely
+the measured signature: writes orthogonal to the residual, no attention sink for any token, and
+damage distributed uniformly across all $56$ layers.
+
+This also explains why so many tests returned clean: \emph{every static statistic we or prior work
+employed is invariant to a permutation of that axis} --- row norms, singular spectra, palette code
+frequencies, OV gain, QK participation. The tests were not wrong; they were structurally blind to
+this class of error, in the same way the $12$-layer readout was blind to attention.
+
+We can eliminate the enumerable part of the hypothesis. A layout mismatch produced by hardware
+convention is a reshape-transpose: an axis written as $(a,b)$ and read as $(b,a)$. Since
+$1536 = 2^9\cdot 3$ has $20$ divisors, the complete two-factor family is $18$ permutations, which
+with three-factor arrangements around the accelerator's $16$-unit granularity gives $42$ distinct
+candidates; applied to each of the two groups this is $84$ arms, and not one beats the identity
+decode (best: $+0.472$ worse). Combined with the refutation of the accelerator's own stripe
+permutation on validated plumbing, the structured portion of the basis hypothesis is closed. What
+remains --- unstructured relabelings --- is neither brute-forceable nor motivated by any hardware
+convention.
+
+\subsection{Cross-model corroboration}
+
+The same reconstruction methodology applied to \code{afmplus-v11.0-nano} --- a \emph{dense}
+$3.33$\,B sibling with no mixture-of-experts, no routing metadata, and none of \code{ifp3}'s
+architectural unknowns --- converges on identical behaviour: top-$1$ accuracy of exactly $0.00\%$
+and an $\arg\max$ that reproduces the current token. Two independent decodes of two different
+architectures, from different containers, do not share a per-model mistake. This is the strongest
+evidence that the defect lies in the shared method or in what the assets contain, rather than in
+any remaining ordering, constant, or scale in either model.
+
+\subsection{Threats to validity}
+
+We report the limits of the above candidly. The controls are two open-weight models of different
+scale and family; where they disagree with each other by more than the subject differs from
+either, we draw no conclusion. Several statistics reported here were initially over-read from
+automated thresholds and subsequently corrected against their own tables --- notably a QK spectrum
+normalised by ambient dimension rather than true rank, an attention-scale optimum of $0.006$ nats
+reported as signal, and a no-op control that permuted weights without the gammas, embedding, and
+tied readout. Each correction is retained in the record. Finally, the $12$-layer results predating
+the ablation calibration constrain the instrument rather than the model, and are reported here
+only where they were subsequently reproduced at full depth.
+
+\subsection{Outlook}
+
+The decisive instrument is not another static sweep. One layer of ground-truth intermediate
+activations from Apple's own runtime would pin the residual basis directly and resolve in a single
+comparison what $42$ controlled experiments could not. The execution route exists --- the shipped
+neural-engine program runs unprivileged through the public graph API, and the readout has been
+ground-truthed --- but the backbone remains gated behind a per-node kernel check. Absent that, or
+an independent un-pruned reference model to align against, we regard the from-weights
+reconstruction as blocked, and report the boundary rather than a result.
