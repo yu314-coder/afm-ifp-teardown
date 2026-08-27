@@ -5,7 +5,8 @@ against what Apple was told and when. Apple's replies are quoted only in the ope
 that state their determination; the full messages are retained privately and are not reproduced
 here.
 
-**Portal case:** `OE11069002425417` — *Weight recoverability in the shipped Apple Intelligence
+**Portal cases:** `OE11069002425417` (closed), `OE1107308765845` (open)
+**Original title:** `OE11069002425417` — *Weight recoverability in the shipped Apple Intelligence
 on-device model assets*
 **Email thread reference:** `OE01069008668316`
 
@@ -98,6 +99,25 @@ or `mpsgraph` file. The repository enforces this with a commit filter on those f
 
 The comment acknowledges this may not be Product Security's call, asks to be routed rather than
 treating silence as agreement, and offers to remove specific material if asked.
+
+## 6. Re-filed as an open report — 26 August 2026
+
+**New case:** `OE1107308765845` — *Follow-up to OE11069002425417 - severity correction and a
+publication question* (status: Received)
+
+The two comments in §4 and §5 were added to case `OE11069002425417`, which stayed **Closed**; the
+portal's own note says new information "may allow us to review your report further", but the case
+was not reopened. The same content was therefore re-filed as a new report so that it reaches a
+live queue.
+
+The submission states in its first line that it is **not a claim of a vulnerability**, records that
+it duplicates comments already made on the closed case, and asks Apple to close it if comments on
+closed reports are in fact routed. Affected area is set to *Not Listed*; the proof-of-concept
+field says there is no exploit and no issue to demonstrate, and that the report is **not eligible
+for and not submitted for the Apple Security Bounty**.
+
+Contents: (1) the severity correction from §4, (2) the publication question from §5, (3) the
+activation-capture question, flagged as not a security issue.
 
 ---
 
