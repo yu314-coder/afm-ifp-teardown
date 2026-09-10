@@ -306,8 +306,28 @@ only where they were subsequently reproduced at full depth.
 
 The decisive instrument is not another static sweep. One layer of ground-truth intermediate
 activations from Apple's own runtime would pin the residual basis directly and resolve in a single
-comparison what $42$ controlled experiments could not. The execution route exists --- the shipped
-neural-engine program runs unprivileged through the public graph API, and the readout has been
-ground-truthed --- but the backbone remains gated behind a per-node kernel check. Absent that, or
-an independent un-pruned reference model to align against, we regard the from-weights
-reconstruction as blocked, and report the boundary rather than a result.
+comparison what $42$ controlled experiments could not. The execution route partly exists: the
+shipped neural-engine program loads and runs from an unprivileged process through the public graph
+API, and the model's own readout stage has been ground-truthed this way. The backbone stage,
+however, is gated. A client request to run it is refused unless an \emph{inference request} for
+the base-model network already exists, and creating one requires a set of Apple-signed-only
+entitlements held by the system inference daemon.
+
+We tested the one route to that ground truth that does not require creating the instance
+ourselves: whether an inference request created by the entitled daemon --- driven legitimately
+through the public high-level API --- is shared with a separate unprivileged client of the same
+daemon. It is not. With a sanctioned session actively generating, our client's backbone request
+still fails identically to the control (the accelerator performs zero inferences), and each
+attempt is assigned its own distinct model instance. The request is scoped to the entitled client
+connection, not deduplicated by asset identity, so it cannot be borrowed. This closes the last
+route reachable without elevated privilege.
+
+The boundary is therefore sharp and worth stating exactly, because it is not a boundary of the
+recovered data. Every byte Apple ships is reversible and is reversed here; what is missing is a
+single external reference against which to fix the residual-axis correspondence, and the platform
+withholds that reference by policy rather than by any property of the assets. It becomes reachable
+along one of three paths, none of which is a further analysis of the shipped files: an
+Apple-granted research entitlement or debug build that surfaces per-node outputs; the same capture
+performed on hardware whose owner has removed the entitlement enforcement; or an independent
+un-pruned reference model to align the decoded weights against. Absent one of these we regard the
+from-weights reconstruction as blocked, and report the boundary rather than a result.
