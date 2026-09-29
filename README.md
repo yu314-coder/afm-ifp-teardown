@@ -13,6 +13,20 @@ component-validated PyTorch forward pass, plus a working CLI/server over Apple's
 
 ---
 
+> **Status (2026-09).** The reconstruction below targets **afmplus-v11.1-ifp**. Two developments since:
+>
+> 1. **Controlled negative result.** A systematic evaluation (42 controlled experiments) established
+>    that every shipped byte is recovered and individually correct, yet the assembled forward does not
+>    predict text — the defect localizes to a *residual-axis basis convention* that is invisible to every
+>    static statistic. Full treatment in `paper/` → *The Reconstruction Gap: A Controlled Negative Result*.
+> 2. **The on-device model has since been updated to `afmplus-v11.2-ifp`** by a macOS update (different
+>    weights; the ifp3 sparsity config changed to 23 active / 0 shared experts). The v11.1 build is no
+>    longer installed. Work now continues against v11.2, using owner-authorized on-device introspection —
+>    on hardware I own — to obtain the per-layer ground truth a static teardown cannot. The v11.1 decode
+>    artifacts are archived privately offline and, as always, never published (Apple's proprietary weights).
+
+---
+
 ## TL;DR — what was found
 
 The model is a **sparse MoE**: ~9.86 B stored params (12 dense + 32 sparse layers, d=1536, GQA,
