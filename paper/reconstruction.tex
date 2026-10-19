@@ -302,6 +302,47 @@ tied readout. Each correction is retained in the record. Finally, the $12$-layer
 the ablation calibration constrain the instrument rather than the model, and are reported here
 only where they were subsequently reproduced at full depth.
 
+\subsection{The execution boundary, probed directly}\label{sec:gap-exec}
+
+A previous version of this outlook named three paths to the one missing datum --- a layer of
+ground-truth activation --- the second being ``the same capture performed on hardware whose owner
+has removed the entitlement enforcement.'' We now report that experiment. On owner-controlled
+hardware with System Integrity Protection and the Apple Mobile File Integrity boot enforcement
+disabled, a self-signed process can carry the six restricted entitlements the system inference
+daemon holds, and can therefore drive the neural engine's low-level client interface
+(\code{\_ANEClient}) directly rather than through the high-level graph API that the backbone refuses.
+
+The result sharpens the boundary rather than crossing it. Every step up to execution now succeeds
+from the unprivileged process: the precompiled base program loads, a procedure-scoped instance is
+created, the input and output surfaces map without error, and an evaluate request dispatches to the
+kernel. Execution alone is refused. We established that this is not a malformed request by a
+\emph{byte-identical replay}: we reproduced the daemon's own successful call --- the same base model
+(its identifier matching the daemon's to the byte), the same procedure the daemon is observed to
+run, the same instance scoping, input/output surfaces, options, and quality-of-service --- and the
+kernel refuses it (status \code{0x2}, ``request cancelled'') exactly where the daemon succeeds. The
+sole variable that differs between the accepted call and the refused one is the identity of the
+calling process.
+
+\begin{finding}
+Execution of the backbone is gated by a kernel-level check on the calling process's code identity
+(platform-binary / trust-cache membership), separate from and beneath the entitlement layer.
+Disabling the integrity enforcement grants the entitlements --- sufficient to load, map, and
+dispatch --- but cannot confer platform-binary identity, which is what the kernel verifies before it
+will run the network. Removing entitlement enforcement is therefore necessary but not sufficient;
+the boundary sits one layer deeper than the entitlements.
+\end{finding}
+
+Independently, the shipped computation graph was decompiled to its operation sequence --- a
+root-mean-square normalisation sandwich around a fused query/key/value projection, rotary position
+embedding, query/key normalisation, scaled dot-product attention, and a residual add --- and it
+matches the composition used by the reconstruction. The wiring is thus confirmed from the vendor's
+own graph, which places the residual-basis gap of \S\ref{sec:gap-basis} in the weight \emph{values}
+and not in the order of operations. Interventions motivated by the graph (a one-plus-gamma
+normalisation convention on the pre-norms, and an attention sink) reduce the collapse --- mean
+pairwise cosine among residual positions falls from $0.87$ to $0.69$ --- but do not restore content
+prediction; the model still emits only generic function words. This is exactly the signature of
+\S\ref{sec:gap-basis}: a weight-value correspondence that no composition-level setting repairs.
+
 \subsection{Outlook}
 
 The decisive instrument is not another static sweep. One layer of ground-truth intermediate
@@ -329,5 +370,9 @@ withholds that reference by policy rather than by any property of the assets. It
 along one of three paths, none of which is a further analysis of the shipped files: an
 Apple-granted research entitlement or debug build that surfaces per-node outputs; the same capture
 performed on hardware whose owner has removed the entitlement enforcement; or an independent
-un-pruned reference model to align the decoded weights against. Absent one of these we regard the
+un-pruned reference model to align the decoded weights against. The second of these we have now
+attempted (\S\ref{sec:gap-exec}): removing the enforcement grants the entitlements and carries a
+request all the way to the kernel, but execution is refused by a deeper check on process identity,
+so that path does not by itself surface the reference. Two paths remain --- a sanctioned per-node
+debug surface, or an independent reference model --- and absent one of them we regard the
 from-weights reconstruction as blocked, and report the boundary rather than a result.

@@ -13,7 +13,7 @@ component-validated PyTorch forward pass, plus a working CLI/server over Apple's
 
 ---
 
-> **Status (2026-09).** The reconstruction below targets **afmplus-v11.1-ifp**. Two developments since:
+> **Status (2026-10).** The reconstruction below targets **afmplus-v11.1-ifp**. Three developments since:
 >
 > 1. **Controlled negative result.** A systematic evaluation (42 controlled experiments) established
 >    that every shipped byte is recovered and individually correct, yet the assembled forward does not
@@ -24,6 +24,16 @@ component-validated PyTorch forward pass, plus a working CLI/server over Apple's
 >    longer installed. Work now continues against v11.2, using owner-authorized on-device introspection —
 >    on hardware I own — to obtain the per-layer ground truth a static teardown cannot. The v11.1 decode
 >    artifacts are archived privately offline and, as always, never published (Apple's proprietary weights).
+> 3. **The execution boundary was probed directly.** With integrity enforcement removed on owned
+>    hardware, a self-signed process can hold the system inference daemon's restricted entitlements and
+>    drive the neural-engine client API directly: it loads the base program, scopes a procedure
+>    instance, maps the IO surfaces, and dispatches a request to the kernel — but *execution* is
+>    refused. A **byte-identical replay** of Apple's own successful call (same base model — identifier
+>    matched to the byte — same procedure, surfaces, options, QoS) is still refused where the daemon
+>    succeeds, proving a kernel-level **process-identity** gate (platform-binary / trust-cache) that sits
+>    *beneath* the entitlement layer. Separately, the shipped compute graph was decompiled and its op
+>    sequence **confirms the reconstruction's composition**, placing the residual-axis gap in the weight
+>    *values*, not the wiring. Full treatment in `paper/` → *The execution boundary, probed directly*.
 
 ---
 
