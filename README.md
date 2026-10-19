@@ -37,6 +37,13 @@ component-validated PyTorch forward pass, plus a working CLI/server over Apple's
 
 ---
 
+> **Reproduce it on your own device.** `reproduce/` publishes the *method* (not the weights): a guide
+> + runnable, sanitized scripts that regenerate the decode from the Foundation Models asset already
+> present on your own Apple hardware. See [`reproduce/REPRODUCE.md`](reproduce/REPRODUCE.md). Nothing
+> here redistributes Apple's weights — research / interoperability use only.
+
+---
+
 ## TL;DR — what was found
 
 The model is a **sparse MoE**: ~9.86 B stored params (12 dense + 32 sparse layers, d=1536, GQA,
