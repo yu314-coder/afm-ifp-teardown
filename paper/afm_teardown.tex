@@ -516,6 +516,28 @@ The prompt template and the expert schedule, the two open items of earlier draft
 \end{enumerate}
 Every weight, gain, bias, the router, the tokenizer, the template and the routing rule come from Apple's files and code; nothing was trained or fine-tuned.
 
+\paragraph{The noise floor.} How far can numerics alone move the score? Two mathematically identical fp32 implementations of the same computation---llama.cpp's RoPE kernel and our own RoPE built from elementwise operations, or one batch of 84 tokens versus a prompt batch followed by single-token steps---disagree on 1.1--2.4\% of next-token choices. The 2-bit weights and, above all, the int8 KV cache turn tiny rounding differences into different quantisation steps. A port that does not reproduce the ANE's arithmetic bit for bit should therefore expect to differ from Apple on a percent or two of tokens however exact its model is, and differences of half a point between configurations are within noise.
+
+\paragraph{What the remaining misses are.} With Apple's schedule, 74 of the 93 misses are also missed with per-token routing, so they do not depend on routing; 19 occur only with Apple's schedule and cluster in the first answer tokens, where a prompt-level pick that differs by a few experts has the most influence. At 89 of the 93 misses our choice is an ordinary text token (the other four are a newline or end of turn), so Apple's output masking is not involved. Table~\ref{tab:night} lists the numerical experiments.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+Variant of the default (teacher-forced, 1127 tokens) & top-1 \\
+\midrule
+default: Apple's schedule, int8 KV emulation, $k=10$ & 91.75\% \\
+int8 KV emulation off & 90.77\% \\
+no re-pick during generation & 90.95\% \\
+re-pick takes effect one token later & 91.39\% \\
+activations rounded to fp16 (residual / + router input / + every sublayer output) & 91.39\% \\
+RoPE angles computed in fp16 / + fp16 cos and sin & 91.75\% / 91.57\% \\
+attention scale $\times0.8$ / $\times0.9$ / $\times1.1$ / $\times1.25$ (of $1/\sqrt{128}$) & 87.8 / 90.1 / 89.9 / 89.9\% \\
+\bottomrule
+\end{tabular}
+\caption{Numerical and schedule experiments. Emulating Apple's int8 KV cache and re-picking every 32 tokens are both worth close to a point, and the attention scale peaks sharply at $1/\sqrt{128}$; storing activations or RoPE angles in fp16 changes nothing beyond the noise floor.}\label{tab:night}
+\end{table}
+
 %======================================================================
 \section{Responsible use}
 %======================================================================

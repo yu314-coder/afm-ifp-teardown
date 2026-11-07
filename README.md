@@ -69,8 +69,12 @@ On the 93 teacher-forced misses, Apple's token is our second choice 76% of the t
 separates the port from Apple now is arithmetic (Apple's Neural Engine runs in fp16), which also nudges a few expert
 picks — see the paper's "Toward 100%" section.
 
-Remaining differences are numerical: Apple runs the model on the Neural Engine in fp16 with a lookup-table SiLU and
-an int8 KV cache (the int8 cache is emulated; the rest is not).
+**What still differs, and why 100% is out of reach without Apple's hardware.** The weights, tokenizer, prompt format,
+attention scale and expert schedule all match Apple's (each was checked separately; see the paper). What remains is
+arithmetic: Apple runs the model on the Neural Engine in fp16 with its own lookup-table activations and summation
+order. With 2-bit weights and an int8 KV cache, the model is sensitive to rounding: two mathematically identical fp32
+implementations already disagree on 1–2.5% of next-token choices. Emulating Apple's int8 KV cache (+1.0 point) and its
+32-token expert re-pick (+0.8) are included; rounding activations or RoPE angles to fp16 changes nothing measurable.
 
 ## What is in this repository
 

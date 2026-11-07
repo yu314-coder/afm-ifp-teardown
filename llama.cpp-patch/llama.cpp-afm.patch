@@ -400,10 +400,10 @@ index d1de16e3f..b27f26510 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..8af8a0aae
+index 000000000..24a366f40
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,349 @@
+@@ -0,0 +1,354 @@
 +#include "models.h"
 +
 +#include <algorithm>
@@ -496,6 +496,7 @@ index 000000000..8af8a0aae
 +    const int   sched_lag = (int) afm_env_f("AFM_ROUTE_SCHED_LAG", 0);   // 1: a boundary pick takes effect one token later
 +    const bool  route_at_ffn = afm_env_f("AFM_ROUTE_AT_FFN", 0) != 0;      // research: router input = layer-12 FFN input
 +    const bool  prompt_own   = afm_env_f("AFM_ROUTE_PROMPT_OWN", 0) != 0;  // prompt tokens per-token; generation keeps Apple's pick
++    const float attn_scale   = hparams.f_attention_scale * afm_env_f("AFM_ATTN_SCALE_MUL", 1.0f);   // research multiplier
 +    const int   f16_act      = (int) afm_env_f("AFM_F16_ACT", 0);          // research: round activations to fp16 (1: residual, 2: +router input, 3: +attn/ffn outputs)
 +    auto f16r = [&](ggml_tensor * t) { return ggml_cast(ctx0, ggml_cast(ctx0, t, GGML_TYPE_F16), GGML_TYPE_F32); };
 +    // emulate the ANE int8 KV cache: x -> clamp(round(x*s), -127, 127) / s
@@ -531,6 +532,10 @@ index 000000000..8af8a0aae
 +        rope_c = ggml_cos(ctx0, th); rope_s = ggml_sin(ctx0, th);
 +        if (rope_f16 == 2) { rope_c = f16r(rope_c); rope_s = f16r(rope_s); }
 +        rope_c = ggml_reshape_3d(ctx0, rope_c, hd2, 1, T); rope_s = ggml_reshape_3d(ctx0, rope_s, hd2, 1, T);
++        // keep inp_pos in the graph (it is still set every ubatch even though this path does not read it)
++        ggml_build_forward_expand(gf, ggml_rope_ext(ctx0, ggml_fill(ctx0, ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, n_rot, 1, T), 0.0f),
++                                                    inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                                                    ext_factor, attn_factor, beta_fast, beta_slow));
 +    }
 +    auto rope = [&](ggml_tensor * t) -> ggml_tensor * {
 +        if (!rope_f16) {
@@ -673,10 +678,10 @@ index 000000000..8af8a0aae
 +                cb(Kcur, "Kcur", il);
 +                cb(Vcur, "Vcur", il);
 +                cur = build_attn(inp_attn, layer.wo, NULL, Qcur, Kcur, Vcur, nullptr, nullptr, nullptr,
-+                                 hparams.f_attention_scale, il);
++                                 attn_scale, il);
 +            } else {
 +                cur = build_attn(inp_attn, layer.wo, NULL, Qcur, nullptr, nullptr, nullptr, nullptr, nullptr,
-+                                 hparams.f_attention_scale, il);
++                                 attn_scale, il);
 +            }
 +        }
 +
