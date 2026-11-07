@@ -206,10 +206,10 @@ index 1501e392c..d87cb22a7 100644
      template<typename T>
      bool llama_model_loader::get_key(const std::string & key, T & result, bool required) {
 diff --git a/src/llama-model.cpp b/src/llama-model.cpp
-index 72490a89b..f25bbc965 100644
+index 72490a89b..8978a6772 100644
 --- a/src/llama-model.cpp
 +++ b/src/llama-model.cpp
-@@ -1097,6 +1097,22 @@ void llama_model::load_hparams(llama_model_loader & ml) {
+@@ -1097,6 +1097,25 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                  // Set non-causal attention for diffusion models
                  hparams.causal_attn = false;
              } break;
@@ -227,12 +227,15 @@ index 72490a89b..f25bbc965 100644
 +                ml.get_arr(LLM_KV_ATTENTION_K_QUANT_SCALE, hparams.k_quant_scale, false);
 +                ml.get_arr(LLM_KV_ATTENTION_V_QUANT_SCALE, hparams.v_quant_scale, false);
 +                hparams.f_attention_scale     = 1.0f / std::sqrt(float(hparams.n_embd_head_k));
++                if (const char * sc = getenv("AFM_ATTN_SOFTCAP")) {   // research: tanh soft-cap of attention scores
++                    hparams.attn_soft_cap = true; hparams.f_attn_logit_softcapping = (float) atof(sc);
++                }
 +                type = LLM_TYPE_3B;
 +            } break;
          case LLM_ARCH_QWEN2MOE:
              {
                  ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
-@@ -3601,6 +3617,55 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -3601,6 +3620,55 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                          layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff}, 0);
                      }
                  } break;
@@ -288,7 +291,7 @@ index 72490a89b..f25bbc965 100644
              case LLM_ARCH_QWEN2MOE:
                  {
                      tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
-@@ -7108,6 +7173,27 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -7108,6 +7176,27 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
          }
      }
  
@@ -316,7 +319,7 @@ index 72490a89b..f25bbc965 100644
      if (ml.no_alloc) {
          return true;
      }
-@@ -7569,6 +7655,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+@@ -7569,6 +7658,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
                  } else {
                      llama_memory_i::layer_reuse_cb reuse = nullptr;
  
@@ -333,7 +336,7 @@ index 72490a89b..f25bbc965 100644
                      if (arch == LLM_ARCH_GEMMA3N) {
                          reuse = [&](int32_t il) {
                              if (il >= (int32_t) hparams.n_layer_kv_from_start) {
-@@ -7612,7 +7708,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+@@ -7612,7 +7711,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
                                  hparams.n_swa,
                                  hparams.swa_type,
                                  nullptr,
@@ -342,7 +345,7 @@ index 72490a89b..f25bbc965 100644
                      }
                  }
              }
-@@ -7729,6 +7825,10 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
+@@ -7729,6 +7828,10 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
              {
                  llm = std::make_unique<llm_build_qwen2vl>(*this, params);
              } break;
@@ -353,7 +356,7 @@ index 72490a89b..f25bbc965 100644
          case LLM_ARCH_QWEN2MOE:
              {
                  llm = std::make_unique<llm_build_qwen2moe>(*this, params);
-@@ -8285,6 +8385,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+@@ -8285,6 +8388,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
          case LLM_ARCH_QWEN:
          case LLM_ARCH_QWEN2:
          case LLM_ARCH_DREAM:

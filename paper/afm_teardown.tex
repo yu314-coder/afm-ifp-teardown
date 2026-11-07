@@ -533,9 +533,11 @@ re-pick takes effect one token later & 91.39\% \\
 activations rounded to fp16 (residual / + router input / + every sublayer output) & 91.39\% \\
 RoPE angles computed in fp16 / + fp16 cos and sin & 91.75\% / 91.57\% \\
 attention scale $\times0.8$ / $\times0.9$ / $\times1.1$ / $\times1.25$ (of $1/\sqrt{128}$) & 87.8 / 90.1 / 89.9 / 89.9\% \\
+tanh soft-cap of attention scores at 50 / 30 / 20 (Gemma-style) & 91.4 / 90.4 / 89.5\% \\
+our own fp32 RoPE instead of llama.cpp's (same mathematics) & 91.84\% \\
 \bottomrule
 \end{tabular}
-\caption{Numerical and schedule experiments. Emulating Apple's int8 KV cache and re-picking every 32 tokens are both worth close to a point, and the attention scale peaks sharply at $1/\sqrt{128}$; storing activations or RoPE angles in fp16 changes nothing beyond the noise floor.}\label{tab:night}
+\caption{Numerical and schedule experiments. Emulating Apple's int8 KV cache and re-picking every 32 tokens are both worth close to a point, the attention scale peaks sharply at $1/\sqrt{128}$, and there is no attention soft-cap; storing activations or RoPE angles in fp16 changes nothing beyond the noise floor.}\label{tab:night}
 \end{table}
 
 %======================================================================
