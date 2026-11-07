@@ -1,0 +1,727 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal.metal b/ggml/src/ggml-metal/ggml-metal.metal
+index 17e358d1a..d98368780 100644
+--- a/ggml/src/ggml-metal/ggml-metal.metal
++++ b/ggml/src/ggml-metal/ggml-metal.metal
+@@ -9156,6 +9156,8 @@ template [[host_name("kernel_mul_mm_id_map0_ne20_6" )]] kernel kernel_mul_mm_id_
+ template [[host_name("kernel_mul_mm_id_map0_ne20_8" )]] kernel kernel_mul_mm_id_map0_t kernel_mul_mm_id_map0<8>;
+ template [[host_name("kernel_mul_mm_id_map0_ne20_10")]] kernel kernel_mul_mm_id_map0_t kernel_mul_mm_id_map0<10>;
+ template [[host_name("kernel_mul_mm_id_map0_ne20_16")]] kernel kernel_mul_mm_id_map0_t kernel_mul_mm_id_map0<16>;
++template [[host_name("kernel_mul_mm_id_map0_ne20_14")]] kernel kernel_mul_mm_id_map0_t kernel_mul_mm_id_map0<14>; // afm ifp2
++template [[host_name("kernel_mul_mm_id_map0_ne20_23")]] kernel kernel_mul_mm_id_map0_t kernel_mul_mm_id_map0<23>; // afm ifp3
+ 
+ template<typename S0, typename S0_4x4, typename S0_8x8, typename S1, typename S1_2x4, typename S1_8x8, typename block_q, short nl, void (*dequantize_func)(device const block_q *, short, thread S0_4x4 &), typename T0, typename T0_4x4, typename T1, typename T1_2x4>
+ kernel void kernel_mul_mm_id(
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index f337afd6b..9637248ef 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -36,6 +36,7 @@ add_library(llama
+             unicode-data.cpp
+             unicode.cpp
+             unicode.h
++            models/afm.cpp
+             models/afmoe.cpp
+             models/apertus.cpp
+             models/arcee.cpp
+diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
+index a54bc1956..c69d1688a 100644
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -120,6 +120,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+     { LLM_ARCH_MIMO2,            "mimo2"           },
+     { LLM_ARCH_LLAMA_EMBED,      "llama-embed"      },
+     { LLM_ARCH_MAINCODER,        "maincoder"        },
++    { LLM_ARCH_AFM,              "afm"              },
+     { LLM_ARCH_UNKNOWN,          "(unknown)"        },
+ };
+ 
+@@ -189,6 +190,9 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
+     { LLM_KV_TIME_DECAY_EXTRA_DIM,              "%s.time_decay_extra_dim"              },
+     { LLM_KV_RESIDUAL_SCALE,                    "%s.residual_scale"                    },
+     { LLM_KV_EMBEDDING_SCALE,                   "%s.embedding_scale"                   },
++    { LLM_KV_KV_REUSE_FIRST_LAYER,              "%s.kv_reuse_first_layer"              },
++    { LLM_KV_ATTENTION_K_QUANT_SCALE,           "%s.attention.k_quant_scale"           },
++    { LLM_KV_ATTENTION_V_QUANT_SCALE,           "%s.attention.v_quant_scale"           },
+     { LLM_KV_TOKEN_SHIFT_COUNT,                 "%s.token_shift_count"                 },
+     { LLM_KV_INTERLEAVE_MOE_LAYER_STEP,         "%s.interleave_moe_layer_step"         },
+ 
+@@ -347,6 +351,11 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
+     { LLM_TENSOR_ATTN_NORM_2,                            "blk.%d.attn_norm_2" },
+     { LLM_TENSOR_ATTN_QKV,                               "blk.%d.attn_qkv" },
+     { LLM_TENSOR_LAYER_OUT_NORM,                         "blk.%d.layer_output_norm" },
++    { LLM_TENSOR_AFM_INP_BIAS,                           "input_bias" },
++    { LLM_TENSOR_AFM_OUTPUT_NORM_2,                      "output_norm_2" },
++    { LLM_TENSOR_AFM_ROUTER_FC1,                         "blk.%d.ifp_router_fc1" },
++    { LLM_TENSOR_AFM_ROUTER_NORM,                        "blk.%d.ifp_router_norm" },
++    { LLM_TENSOR_AFM_ROUTER_FC2,                         "blk.%d.ifp_router_fc2" },
+     { LLM_TENSOR_ATTN_OUT_NORM,                          "blk.%d.attn_output_norm" },
+     { LLM_TENSOR_POS_EMBD,                               "position_embd" },
+     { LLM_TENSOR_FFN_ACT,                                "blk.%d.ffn.act" },
+@@ -1191,6 +1200,36 @@ static std::set<llm_tensor> llm_get_tensor_names(llm_arch arch) {
+                 LLM_TENSOR_FFN_UP,
+                 LLM_TENSOR_FFN_POST_NORM,
+             };
++        case LLM_ARCH_AFM:
++            return {
++                LLM_TENSOR_TOKEN_EMBD,
++                LLM_TENSOR_AFM_INP_BIAS,
++                LLM_TENSOR_OUTPUT_NORM,
++                LLM_TENSOR_AFM_OUTPUT_NORM_2,
++                LLM_TENSOR_OUTPUT,
++                LLM_TENSOR_ATTN_Q,
++                LLM_TENSOR_ATTN_K,
++                LLM_TENSOR_ATTN_V,
++                LLM_TENSOR_ATTN_OUT,
++                LLM_TENSOR_ATTN_Q_NORM,
++                LLM_TENSOR_ATTN_K_NORM,
++                LLM_TENSOR_ATTN_POST_NORM,
++                LLM_TENSOR_FFN_NORM,
++                LLM_TENSOR_FFN_POST_NORM,
++                LLM_TENSOR_LAYER_OUT_NORM,
++                LLM_TENSOR_FFN_GATE,
++                LLM_TENSOR_FFN_UP,
++                LLM_TENSOR_FFN_DOWN,
++                LLM_TENSOR_FFN_GATE_EXPS,
++                LLM_TENSOR_FFN_UP_EXPS,
++                LLM_TENSOR_FFN_DOWN_EXPS,
++                LLM_TENSOR_FFN_GATE_SHEXP,
++                LLM_TENSOR_FFN_UP_SHEXP,
++                LLM_TENSOR_FFN_DOWN_SHEXP,
++                LLM_TENSOR_AFM_ROUTER_FC1,
++                LLM_TENSOR_AFM_ROUTER_NORM,
++                LLM_TENSOR_AFM_ROUTER_FC2,
++            };
+         case LLM_ARCH_GEMMA3:
+             return {
+                 LLM_TENSOR_TOKEN_EMBD,
+@@ -2420,6 +2459,11 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
+     {LLM_TENSOR_ATTN_Q_NORM,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+     {LLM_TENSOR_ATTN_K_NORM,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+     {LLM_TENSOR_LAYER_OUT_NORM,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
++    {LLM_TENSOR_AFM_INP_BIAS,               {LLM_TENSOR_LAYER_INPUT,     GGML_OP_ADD}},
++    {LLM_TENSOR_AFM_OUTPUT_NORM_2,          {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_MUL}},
++    {LLM_TENSOR_AFM_ROUTER_FC1,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
++    {LLM_TENSOR_AFM_ROUTER_NORM,            {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
++    {LLM_TENSOR_AFM_ROUTER_FC2,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
+     {LLM_TENSOR_ATTN_Q_A_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+     {LLM_TENSOR_ATTN_KV_A_NORM,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+     {LLM_TENSOR_ATTN_SUB_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
+diff --git a/src/llama-arch.h b/src/llama-arch.h
+index 270d28b16..91b229bec 100644
+--- a/src/llama-arch.h
++++ b/src/llama-arch.h
+@@ -124,6 +124,7 @@ enum llm_arch {
+     LLM_ARCH_MIMO2,
+     LLM_ARCH_LLAMA_EMBED,
+     LLM_ARCH_MAINCODER,
++    LLM_ARCH_AFM,
+     LLM_ARCH_UNKNOWN,
+ };
+ 
+@@ -193,6 +194,9 @@ enum llm_kv {
+     LLM_KV_TIME_DECAY_EXTRA_DIM,
+     LLM_KV_RESIDUAL_SCALE,
+     LLM_KV_EMBEDDING_SCALE,
++    LLM_KV_KV_REUSE_FIRST_LAYER,
++    LLM_KV_ATTENTION_K_QUANT_SCALE,
++    LLM_KV_ATTENTION_V_QUANT_SCALE,
+     LLM_KV_TOKEN_SHIFT_COUNT,
+     LLM_KV_INTERLEAVE_MOE_LAYER_STEP,
+ 
+@@ -367,6 +371,11 @@ enum llm_tensor {
+     LLM_TENSOR_ATTN_Q_NORM,
+     LLM_TENSOR_ATTN_K_NORM,
+     LLM_TENSOR_LAYER_OUT_NORM,
++    LLM_TENSOR_AFM_INP_BIAS,
++    LLM_TENSOR_AFM_OUTPUT_NORM_2,
++    LLM_TENSOR_AFM_ROUTER_FC1,
++    LLM_TENSOR_AFM_ROUTER_NORM,
++    LLM_TENSOR_AFM_ROUTER_FC2,
+     LLM_TENSOR_POST_ATTN_NORM,
+     LLM_TENSOR_POST_MLP_NORM,
+     LLM_TENSOR_PER_LAYER_TOKEN_EMBD, // gemma3n
+diff --git a/src/llama-graph.cpp b/src/llama-graph.cpp
+index 16d42c4ae..1aa2c2f96 100644
+--- a/src/llama-graph.cpp
++++ b/src/llama-graph.cpp
+@@ -1848,18 +1848,26 @@ ggml_tensor * llm_graph_context::build_attn(
+     // by doing so, the number of splits in the graph is reduced
+     // expand k later to enable rope fusion which directly writes into k-v cache
+     ggml_build_forward_expand(gf, q_cur);
+-    ggml_build_forward_expand(gf, v_cur);
+-    ggml_build_forward_expand(gf, k_cur);
++    if (v_cur) {
++        ggml_build_forward_expand(gf, v_cur);
++    }
++    if (k_cur) {
++        ggml_build_forward_expand(gf, k_cur);
++    }
+ 
+     const auto * mctx_cur = inp->mctx;
+ 
+-    // store to KV cache
++    // store to KV cache (k_cur/v_cur are null for layers that reuse another layer's KV cache)
+     {
+         const auto & k_idxs = inp->get_k_idxs();
+         const auto & v_idxs = inp->get_v_idxs();
+ 
+-        ggml_build_forward_expand(gf, mctx_cur->cpy_k(ctx0, k_cur, k_idxs, il));
+-        ggml_build_forward_expand(gf, mctx_cur->cpy_v(ctx0, v_cur, v_idxs, il));
++        if (k_cur) {
++            ggml_build_forward_expand(gf, mctx_cur->cpy_k(ctx0, k_cur, k_idxs, il));
++        }
++        if (v_cur) {
++            ggml_build_forward_expand(gf, mctx_cur->cpy_v(ctx0, v_cur, v_idxs, il));
++        }
+     }
+ 
+     const auto & kq_mask = inp->get_kq_mask();
+diff --git a/src/llama-hparams.h b/src/llama-hparams.h
+index caed0ec1b..4b998f303 100644
+--- a/src/llama-hparams.h
++++ b/src/llama-hparams.h
+@@ -44,7 +44,11 @@ struct llama_hparams {
+     uint32_t n_embd;
+     uint32_t n_embd_features = 0;
+     uint32_t n_layer;
+-    int32_t n_layer_kv_from_start = -1; // if non-negative, the first n_layer_kv_from_start layers have KV cache
++    int32_t n_layer_kv_from_start = -1;
++
++    // afm: per-layer int8 K/V cache emulation scales (0 = no quantization)
++    std::array<float, LLAMA_MAX_LAYERS> k_quant_scale = {};
++    std::array<float, LLAMA_MAX_LAYERS> v_quant_scale = {}; // if non-negative, the first n_layer_kv_from_start layers have KV cache
+     uint32_t n_rot;
+     uint32_t n_embd_head_k; // dimension of keys (d_k). d_q is assumed to be the same, but there are n_head q heads, and only n_head_kv k-v heads
+     uint32_t n_embd_head_v; // dimension of values (d_v) aka n_embd_head
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 1501e392c..d87cb22a7 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -385,6 +385,7 @@ namespace GGUFMeta {
+     }
+ 
+     template bool llama_model_loader::get_arr<std::vector<std::string>>(enum llm_kv kid, std::vector<std::string> & result, bool required);
++    template bool llama_model_loader::get_arr<std::array<float, 512>>(enum llm_kv kid, std::array<float, 512> & result, bool required);
+ 
+     template<typename T>
+     bool llama_model_loader::get_key(const std::string & key, T & result, bool required) {
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index 72490a89b..f25bbc965 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -1097,6 +1097,22 @@ void llama_model::load_hparams(llama_model_loader & ml) {
+                 // Set non-causal attention for diffusion models
+                 hparams.causal_attn = false;
+             } break;
++        case LLM_ARCH_AFM:
++            {
++                // Apple Foundation Model (afmplus-v11.2-ifp): post-LN "x/y" residual, IFP sparse FFN, cross-layer KV reuse
++                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS,       hparams.f_norm_rms_eps);
++                ml.get_key(LLM_KV_LEADING_DENSE_BLOCK_COUNT,         hparams.n_layer_dense_lead);
++                ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp);
++                ml.get_key(LLM_KV_EXPERT_SHARED_FEED_FORWARD_LENGTH, hparams.n_ff_shexp);
++                ml.get_key(LLM_KV_EMBEDDING_SCALE,                   hparams.f_embedding_scale);
++                uint32_t kv_first = hparams.n_layer;
++                ml.get_key(LLM_KV_KV_REUSE_FIRST_LAYER,              kv_first, false);
++                hparams.n_layer_kv_from_start = kv_first;
++                ml.get_arr(LLM_KV_ATTENTION_K_QUANT_SCALE, hparams.k_quant_scale, false);
++                ml.get_arr(LLM_KV_ATTENTION_V_QUANT_SCALE, hparams.v_quant_scale, false);
++                hparams.f_attention_scale     = 1.0f / std::sqrt(float(hparams.n_embd_head_k));
++                type = LLM_TYPE_3B;
++            } break;
+         case LLM_ARCH_QWEN2MOE:
+             {
+                 ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
+@@ -3601,6 +3617,55 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+                         layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff}, 0);
+                     }
+                 } break;
++            case LLM_ARCH_AFM:
++                {
++                    tok_embd    = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD,        "weight"), {n_embd, n_vocab}, 0);
++                    inp_bias    = create_tensor(tn(LLM_TENSOR_AFM_INP_BIAS,      "weight"), {n_embd}, 0);
++                    output_norm = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,       "weight"), {n_embd}, 0);
++                    output_norm_2 = create_tensor(tn(LLM_TENSOR_AFM_OUTPUT_NORM_2, "weight"), {n_embd}, 0);
++                    output      = create_tensor(tn(LLM_TENSOR_OUTPUT,            "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
++                    if (output == NULL) {
++                        output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
++                    }
++                    const int64_t n_ff_exp   = hparams.n_ff_exp;
++                    const int64_t n_ff_shexp = hparams.n_ff_shexp;
++                    const int64_t n_sparse   = n_layer - hparams.n_layer_dense_lead;
++                    for (int i = 0; i < n_layer; ++i) {
++                        auto & layer = layers[i];
++                        layer.wq = create_tensor(tn(LLM_TENSOR_ATTN_Q,   "weight", i), {n_embd, n_embd_head_k * n_head}, 0);
++                        if (hparams.has_kv(i)) {
++                            layer.wk = create_tensor(tn(LLM_TENSOR_ATTN_K, "weight", i), {n_embd, n_embd_k_gqa}, 0);
++                            layer.wv = create_tensor(tn(LLM_TENSOR_ATTN_V, "weight", i), {n_embd, n_embd_v_gqa}, 0);
++                            layer.attn_k_norm = create_tensor(tn(LLM_TENSOR_ATTN_K_NORM, "weight", i), {n_embd_head_k}, TENSOR_NOT_REQUIRED);
++                        }
++                        layer.wo = create_tensor(tn(LLM_TENSOR_ATTN_OUT, "weight", i), {n_embd_head_k * n_head, n_embd}, 0);
++                        layer.attn_q_norm    = create_tensor(tn(LLM_TENSOR_ATTN_Q_NORM,    "weight", i), {n_embd_head_k}, 0);
++                        layer.attn_post_norm = create_tensor(tn(LLM_TENSOR_ATTN_POST_NORM, "weight", i), {n_embd}, 0);
++                        layer.ffn_norm       = create_tensor(tn(LLM_TENSOR_FFN_NORM,       "weight", i), {n_embd}, 0);
++                        layer.ffn_post_norm  = create_tensor(tn(LLM_TENSOR_FFN_POST_NORM,  "weight", i), {n_embd}, 0);
++                        layer.layer_out_norm = create_tensor(tn(LLM_TENSOR_LAYER_OUT_NORM, "weight", i), {n_embd}, 0);
++                        if (i < (int) hparams.n_layer_dense_lead) {
++                            layer.ffn_gate = create_tensor(tn(LLM_TENSOR_FFN_GATE, "weight", i), {n_embd, n_ff}, 0);
++                            layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd, n_ff}, 0);
++                            layer.ffn_down = create_tensor(tn(LLM_TENSOR_FFN_DOWN, "weight", i), {n_ff, n_embd}, 0);
++                        } else {
++                            layer.ffn_gate_exps  = create_tensor(tn(LLM_TENSOR_FFN_GATE_EXPS,  "weight", i), {n_embd, n_ff_exp, n_expert}, 0);
++                            layer.ffn_up_exps    = create_tensor(tn(LLM_TENSOR_FFN_UP_EXPS,    "weight", i), {n_embd, n_ff_exp, n_expert}, 0);
++                            layer.ffn_down_exps  = create_tensor(tn(LLM_TENSOR_FFN_DOWN_EXPS,  "weight", i), {n_ff_exp, n_embd, n_expert}, 0);
++                            layer.ffn_gate_shexp = create_tensor(tn(LLM_TENSOR_FFN_GATE_SHEXP, "weight", i), {n_embd, n_ff_shexp}, 0);
++                            layer.ffn_up_shexp   = create_tensor(tn(LLM_TENSOR_FFN_UP_SHEXP,   "weight", i), {n_embd, n_ff_shexp}, 0);
++                            layer.ffn_down_shexp = create_tensor(tn(LLM_TENSOR_FFN_DOWN_SHEXP, "weight", i), {n_ff_shexp, n_embd}, 0);
++                        }
++                        if (i == (int) hparams.n_layer_dense_lead) {
++                            const int64_t n_rh = 256;
++                            layer.ifp_router_fc1   = create_tensor(tn(LLM_TENSOR_AFM_ROUTER_FC1,  "weight", i), {n_embd, n_rh}, 0);
++                            layer.ifp_router_fc1_b = create_tensor(tn(LLM_TENSOR_AFM_ROUTER_FC1,  "bias",   i), {n_rh}, 0);
++                            layer.ifp_router_norm  = create_tensor(tn(LLM_TENSOR_AFM_ROUTER_NORM, "weight", i), {n_rh}, 0);
++                            layer.ifp_router_fc2   = create_tensor(tn(LLM_TENSOR_AFM_ROUTER_FC2,  "weight", i), {n_rh, n_expert * n_sparse}, 0);
++                            layer.ifp_router_fc2_b = create_tensor(tn(LLM_TENSOR_AFM_ROUTER_FC2,  "bias",   i), {n_expert * n_sparse}, 0);
++                        }
++                    }
++                } break;
+             case LLM_ARCH_QWEN2MOE:
+                 {
+                     tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
+@@ -7108,6 +7173,27 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+         }
+     }
+ 
++    if (arch == LLM_ARCH_AFM && !ml.no_alloc) {
++        // Apple's IFP schedule keeps the expert choice of each sequence between decode calls (re-picked only at
++        // prompt ends and every expert_selection_frequency positions); its router logits live in this small buffer
++        const auto & lr = layers[hparams.n_layer_dense_lead];
++        ggml_backend_buffer_type_t buft = ggml_backend_cpu_buffer_type();
++        if (lr.ifp_router_fc2 && lr.ifp_router_fc2->buffer) {
++            ggml_backend_dev_t dev = ggml_backend_buft_get_device(ggml_backend_buffer_get_type(lr.ifp_router_fc2->buffer));
++            if (dev) { buft = ggml_backend_dev_buffer_type(dev); }
++        }
++        ggml_init_params ip = { /*.mem_size =*/ ggml_tensor_overhead(), /*.mem_buffer =*/ NULL, /*.no_alloc =*/ true };
++        ggml_context * sctx = ggml_init(ip);
++        const int64_t n_out = lr.ifp_router_fc2 ? lr.ifp_router_fc2->ne[1] : 1;
++        afm_route_state = ggml_new_tensor_2d(sctx, GGML_TYPE_F32, n_out, LLAMA_AFM_ROUTE_SLOTS + 1); // +1: discard slot
++        ggml_set_name(afm_route_state, "afm.route_state");
++        ggml_backend_buffer_t sbuf = ggml_backend_alloc_ctx_tensors_from_buft(sctx, buft);
++        if (!sbuf) { throw std::runtime_error("afm: failed to allocate the routing state buffer"); }
++        ggml_backend_buffer_clear(sbuf, 0);
++        std::vector<ggml_backend_buffer_ptr> sb; sb.emplace_back(sbuf);
++        pimpl->ctxs_bufs.emplace_back(ggml_context_ptr(sctx), std::move(sb));
++    }
++
+     if (ml.no_alloc) {
+         return true;
+     }
+@@ -7569,6 +7655,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+                 } else {
+                     llama_memory_i::layer_reuse_cb reuse = nullptr;
+ 
++                    if (arch == LLM_ARCH_AFM) {
++                        // layers >= n_layer_kv_from_start reuse the K/V of the last KV-owning layer
++                        reuse = [&](int32_t il) {
++                            if (il >= (int32_t) hparams.n_layer_kv_from_start) {
++                                return (int32_t) hparams.n_layer_kv_from_start - 1;
++                            }
++                            return -1;
++                        };
++                    }
++
+                     if (arch == LLM_ARCH_GEMMA3N) {
+                         reuse = [&](int32_t il) {
+                             if (il >= (int32_t) hparams.n_layer_kv_from_start) {
+@@ -7612,7 +7708,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+                                 hparams.n_swa,
+                                 hparams.swa_type,
+                                 nullptr,
+-                                nullptr);
++                                reuse);
+                     }
+                 }
+             }
+@@ -7729,6 +7825,10 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
+             {
+                 llm = std::make_unique<llm_build_qwen2vl>(*this, params);
+             } break;
++        case LLM_ARCH_AFM:
++            {
++                llm = std::make_unique<llm_build_afm>(*this, params);
++            } break;
+         case LLM_ARCH_QWEN2MOE:
+             {
+                 llm = std::make_unique<llm_build_qwen2moe>(*this, params);
+@@ -8285,6 +8385,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+         case LLM_ARCH_QWEN:
+         case LLM_ARCH_QWEN2:
+         case LLM_ARCH_DREAM:
++        case LLM_ARCH_AFM:
+         case LLM_ARCH_QWEN2MOE:
+         case LLM_ARCH_QWEN3:
+         case LLM_ARCH_QWEN3MOE:
+diff --git a/src/llama-model.h b/src/llama-model.h
+index d1de16e3f..b27f26510 100644
+--- a/src/llama-model.h
++++ b/src/llama-model.h
+@@ -263,6 +263,13 @@ struct llama_layer {
+     struct ggml_tensor * ffn_post_norm    = nullptr;
+     struct ggml_tensor * layer_out_norm   = nullptr;
+     struct ggml_tensor * layer_out_norm_b = nullptr;
++
++    // afm (Apple Foundation Model) IFP router, stored on the router-input layer
++    struct ggml_tensor * ifp_router_fc1   = nullptr;
++    struct ggml_tensor * ifp_router_fc1_b = nullptr;
++    struct ggml_tensor * ifp_router_norm  = nullptr;
++    struct ggml_tensor * ifp_router_fc2   = nullptr;
++    struct ggml_tensor * ifp_router_fc2_b = nullptr;
+     struct ggml_tensor * ffn_norm_exps    = nullptr;
+     struct ggml_tensor * ffn_norm_enc     = nullptr;
+ 
+@@ -420,6 +427,8 @@ struct llama_layer {
+     struct llama_layer_nextn nextn;
+ };
+ 
++#define LLAMA_AFM_ROUTE_SLOTS 64   // afm: routing-state slots (sequence id modulo this)
++
+ struct llama_model {
+     llm_type type = LLM_TYPE_UNKNOWN;
+     llm_arch arch = LLM_ARCH_UNKNOWN;
+@@ -440,6 +449,9 @@ struct llama_model {
+ 
+     struct ggml_tensor * output_norm     = nullptr;
+     struct ggml_tensor * output_norm_b   = nullptr;
++    struct ggml_tensor * output_norm_2   = nullptr; // afm: second final RMSNorm
++    struct ggml_tensor * inp_bias        = nullptr; // afm: constant added to the scaled input embedding
++    struct ggml_tensor * afm_route_state = nullptr; // afm: persisted IFP router logits per sequence slot (runtime state)
+     struct ggml_tensor * output          = nullptr;
+     struct ggml_tensor * output_b        = nullptr;
+     struct ggml_tensor * output_norm_enc = nullptr;
+diff --git a/src/models/afm.cpp b/src/models/afm.cpp
+new file mode 100644
+index 000000000..edfd45a9c
+--- /dev/null
++++ b/src/models/afm.cpp
+@@ -0,0 +1,306 @@
++#include "models.h"
++
++#include <algorithm>
++#include <cstdlib>
++
++static float afm_env_f(const char * k, float d) { const char * v = getenv(k); return v ? (float) atof(v) : d; }
++
++// Per-ubatch indices for Apple's IFP expert schedule (TokenGenerationInference.IFPExpertPicker):
++//  - a run of >1 tokens of one sequence is a prompt chunk: all of its tokens use the router logits of the chunk's LAST
++//    token, which become the sequence's persisted choice;
++//  - a single decode token re-picks from its own logits when pos % freq == 0, otherwise reuses the persisted choice.
++class llm_graph_input_afm_route : public llm_graph_input_i {
++public:
++    llm_graph_input_afm_route(int64_t n_slots, int64_t freq) : n_slots(n_slots), freq(freq) {}
++    void set_input(const llama_ubatch * ub) override {
++        const int64_t T = ub->n_tokens;
++        std::vector<int32_t> ist(T), itk(T); std::vector<int64_t> idst(T); std::vector<float> use(T);
++        std::vector<std::pair<llama_seq_id, std::pair<int64_t, int64_t>>> runs;   // seq -> (count, last index)
++        auto run = [&](llama_seq_id s) -> std::pair<int64_t, int64_t> & {
++            for (auto & r : runs) { if (r.first == s) { return r.second; } }
++            runs.push_back({s, {0, 0}}); return runs.back().second; };
++        for (int64_t i = 0; i < T; ++i) { auto & r = run(ub->seq_id[i][0]); r.first++; r.second = i; }
++        for (int64_t i = 0; i < T; ++i) {
++            const llama_seq_id s = ub->seq_id[i][0];
++            const int64_t slot = ((s % n_slots) + n_slots) % n_slots;
++            const auto & r = run(s);
++            ist[i] = (int32_t) slot; itk[i] = (int32_t) i; idst[i] = n_slots; use[i] = 1.0f;     // n_slots = discard slot
++            if (r.first > 1) {
++                itk[i] = (int32_t) r.second; if (i == r.second) { idst[i] = slot; }
++            } else if (ub->pos[i] % freq == 0) {
++                idst[i] = slot;
++            } else {
++                use[i] = 0.0f;
++            }
++        }
++        ggml_backend_tensor_set(src_state, ist.data(), 0, T*sizeof(int32_t));
++        ggml_backend_tensor_set(src_tok,   itk.data(), 0, T*sizeof(int32_t));
++        ggml_backend_tensor_set(dst,       idst.data(), 0, T*sizeof(int64_t));
++        ggml_backend_tensor_set(use_tok,   use.data(), 0, T*sizeof(float));
++    }
++    bool can_reuse(const llm_graph_params & params) override { return src_tok->ne[0] == (int64_t) params.ubatch.n_tokens; }
++    ggml_tensor * src_state = nullptr; // I32 [T]   persisted slot to read
++    ggml_tensor * src_tok   = nullptr; // I32 [T]   in-batch token whose fresh logits to read
++    ggml_tensor * dst       = nullptr; // I64 [T]   slot to write this token's fresh logits to (n_slots = discard)
++    ggml_tensor * use_tok   = nullptr; // F32 [1,T] 1 = fresh logits, 0 = persisted
++    const int64_t n_slots, freq;
++};
++
++// Apple Foundation Model, on-device "afmplus-v11.2-ifp" (3B, Instruction-Following-Pruned sparse FFN).
++//
++//   L0:   x = k * embd + inp_bias                                   (no norm on the first layer input)
++//   L>0:  x = rms(h) * layer_out_norm[L-1]
++//         h'  = x + rms(attn(x)) * attn_post_norm                   (post-LN "x/y" residual: residual is the
++//         y   = rms(h') * ffn_norm                                    normalised stream, not raw h)
++//         h   = y + rms(ffn(y)) * ffn_post_norm
++//   attn: q = rms(rope_neox(Wq x)) * q_norm ; k likewise (k_norm optional) ; GQA ; layers >= kv_reuse_first
++//         reuse the K/V cache of the last KV-owning layer
++//   ffn:  dense SwiGLU for the first n_layer_dense_lead layers; afterwards an UNWEIGHTED sum of a shared SwiGLU
++//         (the always-on experts) and n_expert_used routed SwiGLU experts. The routing logits for all sparse layers
++//         come from one small router network evaluated on the layer-n_layer_dense_lead input x.
++//   routing schedule (Apple's IFPExpertPicker): the router runs on ONE token, not per token -- the last token of
++//         the prompt picks the experts for every prompt token and for generation, and a decode token re-picks only
++//         when its position is a multiple of 32. The choice persists per sequence in model.afm_route_state.
++//   out:  logits = (rms(rms(h) * output_norm) * output_norm_2) @ tok_embd^T
++llm_build_afm::llm_build_afm(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
++    const int64_t n_embd_head = hparams.n_embd_head_k;
++    const int     n_dense     = (int) hparams.n_layer_dense_lead;
++
++    ggml_tensor * inpL = build_inp_embd(model.tok_embd);
++    // research knobs (unset = model defaults): AFM_KSCALE, AFM_NO_SHEXP, AFM_NO_ROUTED, AFM_NUSED, AFM_KVQ=0,
++    // AFM_ROUTE_POOL/_START/_MODE (pool router input over a token range), AFM_ROUTE_CUM (causal prefix-mean routing)
++    const float kscale    = afm_env_f("AFM_KSCALE", hparams.f_embedding_scale);
++    const bool  no_shexp  = afm_env_f("AFM_NO_SHEXP", 0) != 0;
++    const bool  no_routed = afm_env_f("AFM_NO_ROUTED", 0) != 0;
++    const int   n_used    = (int) afm_env_f("AFM_NUSED", (float) n_expert_used);
++    const bool  kvq       = afm_env_f("AFM_KVQ", 1) != 0; // default on when the GGUF carries scales
++    const int   pool_n    = (int) afm_env_f("AFM_ROUTE_POOL", 0);
++    const int   pool_s    = (int) afm_env_f("AFM_ROUTE_POOL_START", 0);
++    const int   pool_mode = (int) afm_env_f("AFM_ROUTE_POOL_MODE", 0); // 0 mean input, 1 mean logits, 2 mean sigmoid, 3 vote
++    const int   vote_k    = (int) afm_env_f("AFM_ROUTE_VOTE_K", 32);     // mode 3: each pooled token votes for its top-k experts
++    const bool  hybrid    = afm_env_f("AFM_ROUTE_HYBRID", 0) != 0;      // pooled experts for tokens < pool_n, per-token after
++    // Apple's schedule (TokenGenerationInference IFPExpertPicker): experts for the whole prompt come from the router on the
++    // LAST prompt token; during generation they are re-picked from the current token at absolute positions p % FREQ == 0.
++    // AFM_ROUTE_SCHED=<prompt length> applies it to a teacher-forced batch that starts at position 0.
++    const int   sched_p   = (int) afm_env_f("AFM_ROUTE_SCHED", 0);
++    const int   sched_f   = (int) afm_env_f("AFM_ROUTE_FREQ", 32);
++    const int   sched_lag = (int) afm_env_f("AFM_ROUTE_SCHED_LAG", 0);   // 1: a boundary pick takes effect one token later
++    const bool  route_at_ffn = afm_env_f("AFM_ROUTE_AT_FFN", 0) != 0;      // research: router input = layer-12 FFN input
++    // emulate the ANE int8 KV cache: x -> clamp(round(x*s), -127, 127) / s
++    auto fq8 = [&](ggml_tensor * t, float s) {
++        // round-to-nearest via the fp32 magic constant 1.5*2^23 (backend-independent), saturate to int8, rescale
++        ggml_tensor * r = ggml_scale_bias(ctx0, t, s, 12582912.0f);
++        r = ggml_scale_bias(ctx0, r, 1.0f, -12582912.0f);
++        return ggml_scale(ctx0, ggml_clamp(ctx0, r, -127.0f, 127.0f), 1.0f/s); };
++    const bool  route_cum = afm_env_f("AFM_ROUTE_CUM", 0) != 0;
++    if (ubatch.token) {
++        inpL = ggml_scale(ctx0, inpL, kscale);
++    }
++    inpL = ggml_add(ctx0, inpL, model.inp_bias);
++    cb(inpL, "inp_scaled", -1);
++
++    ggml_tensor * inp_pos     = build_inp_pos();
++    auto        * inp_attn    = build_attn_inp_kv();
++    ggml_tensor * inp_out_ids = build_inp_out_ids();
++
++    ggml_tensor * h             = nullptr;
++    ggml_tensor * router_logits = nullptr; // [n_expert * n_sparse_layers, n_tokens]
++
++    for (int il = 0; il < n_layer; ++il) {
++        const auto & layer = model.layers[il];
++
++        ggml_tensor * x = il == 0 ? inpL : build_norm(h, model.layers[il - 1].layer_out_norm, NULL, LLM_NORM_RMS, il);
++        cb(x, "attn_in", il);
++
++        auto route_block = [&](ggml_tensor * x) {
++            ggml_tensor * r_in = x;
++            const int64_t p0 = std::min<int64_t>(pool_s, x->ne[1] - 1);
++            const int64_t np = std::max<int64_t>(1, std::min<int64_t>(pool_n, x->ne[1]) - p0);
++            if (pool_n > 0 && pool_mode == 0) {
++                ggml_tensor * xv = ggml_view_2d(ctx0, x, n_embd, np, x->nb[1], p0 * x->nb[1]);
++                r_in = ggml_reshape_2d(ctx0, ggml_mean(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, xv))), n_embd, 1);
++            }
++            if (route_cum && pool_n == 0) {
++                // causal prefix mean of the router input: r_t = mean_{s<=t} x_s
++                const int64_t T = x->ne[1];
++                ggml_tensor * tri = ggml_diag_mask_zero(ctx0, ggml_fill(ctx0, ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, T, T), 1.0f), 0);
++                tri = ggml_div(ctx0, tri, ggml_sum_rows(ctx0, tri));
++                r_in = ggml_mul_mat(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, x)), tri);
++            }
++            auto router_net = [&](ggml_tensor * in) {
++                ggml_tensor * r = build_lora_mm(layer.ifp_router_fc1, in);
++                r = ggml_add(ctx0, r, layer.ifp_router_fc1_b);
++                r = ggml_silu(ctx0, r);
++                r = build_norm(r, layer.ifp_router_norm, NULL, LLM_NORM_RMS, il);
++                r = build_lora_mm(layer.ifp_router_fc2, r);
++                return ggml_add(ctx0, r, layer.ifp_router_fc2_b);
++            };
++            router_logits = router_net(r_in);
++            ggml_tensor * per_tok = (r_in == x) ? router_logits : router_net(x);                    // [E*layers, T]
++            const bool apple_sched = model.afm_route_state && afm_env_f("AFM_ROUTE_TOKEN", 0) == 0 && pool_n == 0 && !route_cum;
++            if (apple_sched && sched_p == 0) {
++                auto inp = std::make_unique<llm_graph_input_afm_route>(model.afm_route_state->ne[1] - 1, std::max(1, sched_f));
++                const int64_t T = per_tok->ne[1];
++                inp->src_state = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, T); ggml_set_input(inp->src_state);
++                inp->src_tok   = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, T); ggml_set_input(inp->src_tok);
++                inp->dst       = ggml_new_tensor_1d(ctx0, GGML_TYPE_I64, T); ggml_set_input(inp->dst);
++                inp->use_tok   = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 1, T); ggml_set_input(inp->use_tok);
++                ggml_tensor * fresh = ggml_get_rows(ctx0, per_tok, inp->src_tok);                       // [E*layers, T]
++                ggml_tensor * kept  = ggml_get_rows(ctx0, model.afm_route_state, inp->src_state);       // [E*layers, T]
++                router_logits = ggml_add(ctx0, kept, ggml_mul(ctx0, ggml_sub(ctx0, fresh, kept), inp->use_tok));
++                ggml_build_forward_expand(gf, ggml_set_rows(ctx0, model.afm_route_state, per_tok, inp->dst));
++                res->add_input(std::move(inp));
++            } else if (sched_p > 0) {
++                // src(t) = max(P-1, F*floor((t-lag)/F)); one-hot selection S[j,t] = [j == src(t)], logits = per_tok @ S
++                const int64_t T = x->ne[1];
++                ggml_tensor * t  = ggml_arange(ctx0, 0.0f, (float) T, 1.0f);                                   // [T]
++                ggml_tensor * fl = ggml_scale_bias(ctx0, t, 1.0f/sched_f, -(sched_lag + 0.5f*(sched_f - 1))/sched_f);
++                fl = ggml_scale_bias(ctx0, ggml_scale_bias(ctx0, fl, 1.0f, 12582912.0f), 1.0f, -12582912.0f); // round
++                ggml_tensor * src = ggml_clamp(ctx0, ggml_scale(ctx0, fl, (float) sched_f), (float) (sched_p - 1), 1e9f);
++                ggml_tensor * tmpl = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, T, T);
++                ggml_tensor * jm = ggml_repeat(ctx0, ggml_reshape_2d(ctx0, t, T, 1), tmpl);                     // [j, t] = j
++                ggml_tensor * sm = ggml_repeat(ctx0, ggml_reshape_2d(ctx0, src, 1, T), tmpl);                   // [j, t] = src(t)
++                ggml_tensor * S  = ggml_relu(ctx0, ggml_scale_bias(ctx0, ggml_abs(ctx0, ggml_sub(ctx0, jm, sm)), -1.0f, 1.0f));
++                router_logits = ggml_mul_mat(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, per_tok)), S);         // [E*layers, T]
++            } else if (pool_n > 0 && pool_mode == 3) {
++                // frequency vote: per sparse layer, every pooled token votes for its top-k experts; experts ranked by
++                // vote count, ties broken by the mean logit (scaled far below one vote)
++                const int64_t n_sp = router_logits->ne[0] / n_expert;
++                ggml_tensor * lv = ggml_cont(ctx0, ggml_view_2d(ctx0, router_logits, router_logits->ne[0], np, router_logits->nb[1], p0 * router_logits->nb[1]));
++                ggml_tensor * l3 = ggml_reshape_3d(ctx0, lv, n_expert, n_sp, np);                       // [E, layers, tok]
++                ggml_tensor * top = ggml_argsort_top_k(ctx0, l3, vote_k);                               // [k, layers, tok] i32
++                ggml_tensor * eye = ggml_diag(ctx0, ggml_fill(ctx0, ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, n_expert), 1.0f)); // [E, E]
++                ggml_tensor * oh  = ggml_get_rows(ctx0, eye, ggml_reshape_1d(ctx0, ggml_cont(ctx0, top), vote_k * n_sp * np)); // [E, k*layers*tok]
++                oh = ggml_reshape_4d(ctx0, oh, n_expert, vote_k, n_sp, np);                            // [E, k, layers, tok]
++                ggml_tensor * cnt = ggml_sum_rows(ctx0, ggml_cont(ctx0, ggml_permute(ctx0, oh, 1, 0, 2, 3))); // [1, E, layers, tok]
++                cnt = ggml_reshape_3d(ctx0, cnt, n_expert, n_sp, np);                                  // [E, layers, tok]
++                cnt = ggml_sum_rows(ctx0, ggml_cont(ctx0, ggml_permute(ctx0, cnt, 1, 2, 0, 3)));       // [1, E, layers]
++                cnt = ggml_reshape_2d(ctx0, cnt, n_expert, n_sp);                                      // votes per (expert, layer)
++                ggml_tensor * ml = ggml_reshape_2d(ctx0, ggml_mean(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, lv))), n_expert, n_sp);
++                router_logits = ggml_reshape_2d(ctx0, ggml_add(ctx0, cnt, ggml_scale(ctx0, ml, 1e-3f)), router_logits->ne[0], 1);
++            } else if (pool_n > 0 && pool_mode != 0) {
++                ggml_tensor * lv = ggml_view_2d(ctx0, router_logits, router_logits->ne[0], np, router_logits->nb[1], p0 * router_logits->nb[1]);
++                if (pool_mode == 2) { lv = ggml_sigmoid(ctx0, lv); }
++                router_logits = ggml_reshape_2d(ctx0, ggml_mean(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, lv))), router_logits->ne[0], 1);
++            }
++            if (pool_n > 0) {
++                const int64_t T = x->ne[1];
++                const int64_t nh = hybrid ? std::min<int64_t>(pool_n, T) : T;                     // tokens that use the pooled choice
++                ggml_tensor * pooled = ggml_repeat(ctx0, router_logits, ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, router_logits->ne[0], nh));
++                if (nh < T) {
++                    ggml_tensor * rest = ggml_view_2d(ctx0, per_tok, per_tok->ne[0], T - nh, per_tok->nb[1], nh * per_tok->nb[1]);
++                    router_logits = ggml_concat(ctx0, pooled, ggml_cont(ctx0, rest), 1);
++                } else {
++                    router_logits = pooled;
++                }
++            }
++            cb(router_logits, "ifp_router_logits", il);
++                };
++        if (il == n_dense && !route_at_ffn) { route_block(x); }
++
++        ggml_tensor * cur;
++        {
++            ggml_tensor * Qcur = build_lora_mm(layer.wq, x);
++            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens);
++            Qcur = ggml_rms_norm(ctx0, Qcur, hparams.f_norm_rms_eps);
++            Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                                 ext_factor, attn_factor, beta_fast, beta_slow);
++            Qcur = ggml_mul(ctx0, Qcur, layer.attn_q_norm);
++            cb(Qcur, "Qcur", il);
++
++            if (hparams.has_kv(il)) {
++                ggml_tensor * Kcur = build_lora_mm(layer.wk, x);
++                ggml_tensor * Vcur = build_lora_mm(layer.wv, x);
++                Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
++                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
++                Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps);
++                Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                                     ext_factor, attn_factor, beta_fast, beta_slow);
++                if (layer.attn_k_norm) {
++                    Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm);
++                }
++                if (kvq) {
++                    const float ks = hparams.k_quant_scale[il];
++                    const float vs = hparams.v_quant_scale[il];
++                    if (ks > 0) { Kcur = fq8(Kcur, ks); }
++                    if (vs > 0) { Vcur = fq8(Vcur, vs); }
++                }
++                cb(Kcur, "Kcur", il);
++                cb(Vcur, "Vcur", il);
++                cur = build_attn(inp_attn, layer.wo, NULL, Qcur, Kcur, Vcur, nullptr, nullptr, nullptr,
++                                 hparams.f_attention_scale, il);
++            } else {
++                cur = build_attn(inp_attn, layer.wo, NULL, Qcur, nullptr, nullptr, nullptr, nullptr, nullptr,
++                                 hparams.f_attention_scale, il);
++            }
++        }
++
++        if (il == n_layer - 1 && inp_out_ids) {
++            cur = ggml_get_rows(ctx0, cur, inp_out_ids);
++            x   = ggml_get_rows(ctx0, x,   inp_out_ids);
++            if (router_logits) {
++                router_logits = ggml_get_rows(ctx0, router_logits, inp_out_ids);
++            }
++        }
++
++        cur = build_norm(cur, layer.attn_post_norm, NULL, LLM_NORM_RMS, il);
++        ggml_tensor * hp = ggml_add(ctx0, x, cur);
++        cb(hp, "attn_out", il);
++
++        ggml_tensor * y = build_norm(hp, layer.ffn_norm, NULL, LLM_NORM_RMS, il);
++        if (il == n_dense && route_at_ffn) { route_block(y); }   // research: router on the layer-12 FFN input
++        cb(y, "ffn_in", il);
++
++        ggml_tensor * f;
++        if (il < n_dense) {
++            f = build_ffn(y,
++                    layer.ffn_up,   NULL, NULL,
++                    layer.ffn_gate, NULL, NULL,
++                    layer.ffn_down, NULL, NULL,
++                    NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
++        } else {
++            ggml_tensor * shared = build_ffn(y,
++                    layer.ffn_up_shexp,   NULL, NULL,
++                    layer.ffn_gate_shexp, NULL, NULL,
++                    layer.ffn_down_shexp, NULL, NULL,
++                    NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
++            cb(shared, "ffn_shexp", il);
++
++            const int64_t n_tok = y->ne[1];
++            ggml_tensor * lg = ggml_view_2d(ctx0, router_logits, n_expert, n_tok, router_logits->nb[1],
++                                            (size_t) (il - n_dense) * n_expert * ggml_element_size(router_logits));
++            lg = ggml_cont(ctx0, lg);
++            cb(lg, "ffn_moe_logits", il);
++            ggml_tensor * sel = ggml_argsort_top_k(ctx0, lg, n_used); // [n_expert_used, n_tok]
++            cb(sel, "ffn_moe_topk", il);
++
++            ggml_tensor * y3 = ggml_reshape_3d(ctx0, y, n_embd, 1, n_tok);
++            ggml_tensor * up = build_lora_mm_id(layer.ffn_up_exps,   y3, sel); // [n_ff_exp, n_used, n_tok]
++            ggml_tensor * gt = build_lora_mm_id(layer.ffn_gate_exps, y3, sel);
++            ggml_tensor * act = ggml_swiglu_split(ctx0, gt, up);
++            ggml_tensor * ex  = build_lora_mm_id(layer.ffn_down_exps, act, sel); // [n_embd, n_used, n_tok]
++            cb(ex, "ffn_moe_down", il);
++
++            // unweighted sum over the selected experts: [n_embd, n_used, n_tok] -> [n_embd, n_tok]
++            ggml_tensor * moe = ggml_sum_rows(ctx0, ggml_cont(ctx0, ggml_permute(ctx0, ex, 1, 0, 2, 3)));
++            moe = ggml_reshape_2d(ctx0, moe, n_embd, n_tok);
++            cb(moe, "ffn_moe_out", il);
++            f = no_routed ? shared : (no_shexp ? moe : ggml_add(ctx0, moe, shared));
++        }
++        f = build_norm(f, layer.ffn_post_norm, NULL, LLM_NORM_RMS, il);
++        h = ggml_add(ctx0, y, f);
++        h = build_cvec(h, il);
++        cb(h, "l_out", il);
++    }
++
++    ggml_tensor * cur = build_norm(h,   model.output_norm,   NULL, LLM_NORM_RMS, -1);
++    cur               = build_norm(cur, model.output_norm_2, NULL, LLM_NORM_RMS, -1);
++    cb(cur, "result_norm", -1);
++    res->t_embd = cur;
++
++    cur = build_lora_mm(model.output, cur);
++    cb(cur, "result_output", -1);
++    res->t_logits = cur;
++
++    ggml_build_forward_expand(gf, cur);
++}
+diff --git a/src/models/models.h b/src/models/models.h
+index 3a44f7f14..05f8b235c 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -426,6 +426,10 @@ struct llm_build_qwen2 : public llm_graph_context {
+     llm_build_qwen2(const llama_model & model, const llm_graph_params & params);
+ };
+ 
++struct llm_build_afm : public llm_graph_context {
++    llm_build_afm(const llama_model & model, const llm_graph_params & params);
++};
++
+ struct llm_build_qwen2moe : public llm_graph_context {
+     llm_build_qwen2moe(const llama_model & model, const llm_graph_params & params);
+ };

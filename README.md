@@ -1,355 +1,90 @@
-# Apple On-Device Foundation Model — IFP Teardown & Reconstruction
+# afm-ifp-teardown — Apple's on-device foundation model in llama.cpp
 
-A complete static reverse-engineering of Apple's on-device **`afmplus-v11.0-ifp`** model — the
-sparse Mixture-of-Experts language backbone shipped in
-`com.apple.MobileAsset.UAF.FM.GenerativeModels` (macOS 26/27) — from container formats down to a
-component-validated PyTorch forward pass, plus a working CLI/server over Apple's runtime.
+A from-weights reconstruction of the language model behind Apple Intelligence on macOS 27
+(`SystemLanguageModel`, display version **`afmplus-v11.2-ifp`**, the sparse on-device model, "AFM 3 Core Advanced"),
+packaged as a GGUF that runs in llama.cpp on macOS, Windows and Linux.
 
-> **This repo contains original research only: the teardown paper and the decode/inference
-> code. It does NOT contain, and will not distribute, Apple's weights or tokenizer data** — that
-> is Apple's copyrighted, proprietary property. The code operates on the asset files that
-> already exist locally on an Apple device. Use for interoperability/research on hardware you
-> own, consistent with your local law and Apple's license.
+This repository contains **code only**. It does not contain, and will never contain, Apple's weights, tokenizer, decoded
+assets or a GGUF. The converter rebuilds the GGUF from the model files Apple Intelligence has already installed on
+your own Mac.
 
----
-
-> **Status (2026-10).** The reconstruction below targets **afmplus-v11.1-ifp**. Three developments since:
->
-> 1. **Controlled negative result.** A systematic evaluation (42 controlled experiments) established
->    that every shipped byte is recovered and individually correct, yet the assembled forward does not
->    predict text — the defect localizes to a *residual-axis basis convention* that is invisible to every
->    static statistic. Full treatment in `paper/` → *The Reconstruction Gap: A Controlled Negative Result*.
-> 2. **The on-device model has since been updated to `afmplus-v11.2-ifp`** by a macOS update (different
->    weights; the ifp3 sparsity config changed to 23 active / 0 shared experts). The v11.1 build is no
->    longer installed. Work now continues against v11.2, using owner-authorized on-device introspection —
->    on hardware I own — to obtain the per-layer ground truth a static teardown cannot. The v11.1 decode
->    artifacts are archived privately offline and, as always, never published (Apple's proprietary weights).
-> 3. **The execution boundary was probed directly.** With integrity enforcement removed on owned
->    hardware, a self-signed process can hold the system inference daemon's restricted entitlements and
->    drive the neural-engine client API directly: it loads the base program, scopes a procedure
->    instance, maps the IO surfaces, and dispatches a request to the kernel — but *execution* is
->    refused. A **byte-identical replay** of Apple's own successful call (same base model — identifier
->    matched to the byte — same procedure, surfaces, options, QoS) is still refused where the daemon
->    succeeds, proving a kernel-level **process-identity** gate (platform-binary / trust-cache) that sits
->    *beneath* the entitlement layer. Separately, the shipped compute graph was decompiled and its op
->    sequence **confirms the reconstruction's composition**, placing the residual-axis gap in the weight
->    *values*, not the wiring. Full treatment in `paper/` → *The execution boundary, probed directly*.
-
----
-
-> **Reproduce it on your own device.** `reproduce/` publishes the *method* (not the weights): a guide
-> + runnable, sanitized scripts that regenerate the decode from the Foundation Models asset already
-> present on your own Apple hardware. See [`reproduce/REPRODUCE.md`](reproduce/REPRODUCE.md). Nothing
-> here redistributes Apple's weights — research / interoperability use only.
-
----
-
-## TL;DR — what was found
-
-The model is a **sparse MoE**: ~9.86 B stored params (12 dense + 32 sparse layers, d=1536, GQA,
-RoPE θ=500000, SwiGLU, 219 routable experts/layer with Instruction-Following Pruning; the shipped
-default `ifp1_r48` keeps 10 active + 4 shared). Everything Apple ships as **data** is recovered
-and validated.
-
-The headline result of the latest pass is a **correction**: the expert-selection
-router→physical-expert map — long believed the fatal, unrecoverable blocker — is **mathematically
-irrelevant**. The IFP sparse FFN is an *ungated* structured-pruned SwiGLU (a permutation-invariant
-sum over experts), so no selection map is needed to run it.
-
-| Component | Status |
+| | |
 |---|---|
-| **All 9.86 B weights** | ✅ recovered, 100% of file, verified |
-| **Container stack** (Cryptex, BBBB, odix, hwx, MPSGraph) | ✅ fully characterized |
-| **Weight codec** (4-bit LUT + per-1024 fp16 block scale + ANE 8×128 de-swizzle) | ✅ validated |
-| **Dense linear weights** | ✅ **validated against coreml2hwx ground truth** — real-weight decay 8–11 (scrambled ≈1.45) |
-| **Architecture** (32 full-qkv + 12 kv-reuse attn; 12 dense + 32 expert FFN) | ✅ recovered |
-| **Attention KV geometry** | ✅ **NKV=4 settled** (ablation: rank 53k vs 72k at NKV=8; live qkv is 3072-wide, Q2048+K512+V512) |
-| **Norms** | ✅ **γ = 1 (parameter-free) — now proven *positively* from the weights, not just by absent evidence (see PICO_NORMS.md addendum); QK-norm[128] the only explicit γ (35 recovered)** |
-| **Tokenizer** | ✅ working (byte-BPE, validated round-trip) |
-| **Router** (`ExportableExpertSelector`, plain fp16) | ✅ extracted — but ⚠️ **proven UNNECESSARY** (false blocker) |
-| **Expert-selection map** (which-of-219, "missing constant table") | ✅ **proven irrelevant AND ungated full-219 sum confirmed *optimal*** (selection/gating/scaling all score strictly worse) |
-| **`metadata.bin` swizzler** | ✅ **decoded = two physical FFN address tables** (down-proj `0x0600beef`, gate/up `0x0a00b0ef`) |
-| **down-proj experts** | ✅ **codec cracked = same as gate/up** (the missing factor was the per-block scale, not a z-order) |
-| **Tokenizer vocab size** | ✅ **262,144** (Gemma-style 2^18) — confirmed 4 ways; the previously-used `152,064` is *Qwen's* size, a borrowed constant |
-| **Embedding (pico, small model)** | 🟢 **RECOVERED via dynamic capture + validated** — pico's gather/dequant runs on the host CPU, so a repeated-token `lldb` core exposes the byte-identical embedding-row buffer. Recovered vectors pass the oracle: `dog~dogs = +0.648`, `king~kings = +0.664` (vs cross-category +0.01–0.20). First genuine AFM embedding recovery. Storage codec still uncracked (all layouts = chance vs 6 ground-truth rows) |
-| **Embedding (3B, `instruct_3b`)** | 🔴 **ANE-locked** — not a `[V,D]` table in any shipped asset (~1.14 M offsets ≤ +0.047), **and** absent from an 8.2 GB full-memory core (0 `D=1536` buffers) because the 3B's gather/dequant is **ANE-delegated** (`main-h16g-delegates`) — the dequantized vector never reaches host DRAM. Reachable only by ANE-internal (IOSurface/H11ANE) instrumentation |
-| **Attention forward** (all 44 layers) | ✅ runs stably (bounded residual growth) |
-| **Coherent text generation** | 🔴 **blocked by an information limit** — assembled 44-layer forward carries real signal (3.6× chance) but the summed-FFN direction is mis-aligned, and per-layer activations are ANE-internal so it can't be validated/bisected — see below |
-| **Running the real model** | Apple's own `FoundationModels` framework (public API; not part of this repo) |
+| Model | 56 layers (12 dense + 44 IFP-sparse), d=1536, 16 Q / 8 KV heads × 128, KV sharing in the last 21 layers, 20.3 B parameters stored |
+| Weights | Apple's 2-bit codes and fp16 scales carried into Q2_K **bit-exactly**; int4 embedding as Q4_0 (exact) |
+| Prompt format | Apple's `afm_cider_v2` template, decoded from the runtime and verified against `SystemLanguageModel.tokenCount` |
+| Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
+| Fidelity | **91.7%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens) |
+| Speed (M4) | ~150 tok/s prompt, 12–21 tok/s generation |
 
----
+The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
+result) is in [`paper/afm_teardown.pdf`](paper/afm_teardown.pdf).
 
-## pico (300M draft): the format is solved, the arrangement is not
+## 1. Get a llama.cpp build with the `afm` architecture
 
-The 300M draft model `afmplus-v11.0-pico` is the furthest-advanced reconstruction. Its status is
-tracked in detail in [PICO_POSREAD_RESULT.md](PICO_POSREAD_RESULT.md) (§46 for the decode fix, §54
-for the retraction, §57–§58 for the closed capture routes) and in the paper
-(§"A Decode Bug, and the Limits of Statistical Ordering").
+**Windows / Linux / macOS binaries:** download a zip from this repository's
+[Actions / Releases](../../releases) (`win-x64-cpu`, `win-x64-vulkan`, `win-x64-cuda12`, `linux-x64-cpu`,
+`linux-x64-vulkan`, `macos-arm64-metal`). They are plain llama.cpp builds with the patch below applied.
 
-> **⚠️ This section previously read "six of seven weight roles proven, one tensor open."**
-> That claim rested on a composition *z*-score which was later withdrawn, and it does **not**
-> survive. See §54 — the replacement likelihood oracle was then shown to have *no discriminating
-> power* on the axis it was applied to.
+**Or build it yourself** (any OS):
+```bash
+git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp
+git checkout 41ea26144e55d23f37bb765f88c07588d786567f       # the patch's base
+git apply /path/to/afm-ifp-teardown/llama.cpp-patch/llama.cpp-afm.patch
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF    # add -DGGML_CUDA=ON or -DGGML_VULKAN=ON as needed
+cmake --build build -j
+```
 
-| component | status |
+## 2. Convert (on a Mac with Apple Intelligence; ~3 min, 6.3 GiB)
+```bash
+pip install numpy gguf
+python3 afm2gguf/afm2gguf.py -o afm-v11.2-ifp.gguf
+```
+The converter finds the model through the AssetsV2 catalog and checks everything it decodes (container layout,
+palette, router mask, tokenizer, norm-gain alignment) before writing. If the model files are not mounted it prints
+the `hdiutil attach` command for the asset's cryptex image. The resulting file is portable: copy it to any machine.
+
+## 3. Run
+```bash
+llama-cli    -m afm-v11.2-ifp.gguf --jinja -st --temp 0 -p "Why is the sky blue?"
+llama-server -m afm-v11.2-ifp.gguf --jinja          # OpenAI-compatible API; a system message = Apple's "instructions"
+```
+
+## How faithful is it?
+
+Measured against Apple's own model through the public FoundationModels API (`tools/afm.swift`, temperature 0, the same
+instructions), on 40 prompts:
+
+| Expert routing | next-token agreement (teacher-forced) | first answer token | answers identical to Apple's |
+|---|---|---|---|
+| Apple's schedule (default) | **91.7%** | 35/40 | 7/40 |
+| per token (`AFM_ROUTE_TOKEN=1`) | 90.5% | 38/40 | 11/40 |
+| earlier one-turn template, per token | 87.5% | 30/40 | – |
+
+"Answers identical" compares our free-running greedy answer with Apple's character for character; a single different
+early token sends the rest of an answer elsewhere. Apple's schedule was confirmed independently: replaying 47 of Apple's
+own expert re-picks, our router changes as many experts per re-pick as Apple's (27 vs 27 on average, r = 0.84).
+
+Remaining differences are numerical: Apple runs the model on the Neural Engine in fp16 with a lookup-table SiLU and
+an int8 KV cache (the int8 cache is emulated; the rest is not).
+
+## What is in this repository
+
+| Path | |
 |---|---|
-| embedding, tokenizer | ✅ correct — embedding decoded from `program.odix` and validated **bit-exactly** against independently captured rows; semantics confirmed (` Paris` → `PARIS/París/巴黎/Париж`) |
-| tile format | ✅ **solved** — header 96 B (codebook 32 / zeros 32 / scales 32), payload 8192 B, 32 B zero pad. Proven structurally, confirmed on **two independent builds** |
-| intra-bank slot map | ✅ `o = slot % nout, i = slot // nout` — beats every alternative chunk width by **7×** |
-| architecture, all 7 shapes | ✅ confirmed from Apple's shipped `manifest.plist`, not inferred |
-| hidden RMSNorm γ | ✅ **γ = 1 proven positively** (not merely "not found") |
-| tensor **values** | ✅ trained matrices (stable rank 13–48 vs 257.6 for random) |
-| **element→position ordering** | 🔴 **open for every role** — not determinable by permutation search, and not observable at runtime |
-| GGUF export | ✅ compiles and runs (~15 tok/s); ❌ output incoherent |
+| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets |
+| `llama.cpp-patch/` | the `afm` architecture for llama.cpp (graph, KV sharing, Apple's expert schedule, int8 KV emulation, Metal kernels) |
+| `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |
+| `tools/template_probe.swift` | checks the prompt template against Apple's `tokenCount` |
+| `tools/afm.swift` | CLI / OpenAI-style server over Apple's live model (the fidelity reference) |
+| `paper/` | the report (LaTeX source, figures, PDF) |
+| `disclosure/` | correspondence with Apple about this work |
 
-**The decode bug that was real.** The tile payload begins at `+96`, not `+128` — the decoder was
-treating 32 bytes of payload as header, displacing every weight by exactly four input channels. Found
-by its *cause* (a shared magnitude artefact in input channels 1020–1023) rather than inferred from a
-statistic, and proven structurally: all 64 examined tiles carry exactly zero in their final 32 bytes.
-Fixing it moved layer-0 attention sharpness from 0.0468 to **0.6058** (norm-matched random: 0.0050).
+Earlier research notes and scripts (the v11.0/v11.1 work, the 300M draft model, the nano model) remain in the git
+history; commit `e9a59b2` is the last one that contains them.
 
-**Why the ordering resists.** A storage-order correction must hold for *every* layer. Applying the
-best surviving candidate to one layer at a time improves 14 of 24 layers — and a **random**
-permutation improves 14 of 24. Perturbing the axis at random helps half the time, which is what a
-tensor already contributing noise looks like: no ranking among permutations carries information.
+## Responsible use
 
-**Both dynamic routes are closed on measurement.** Four privileged captures (five cores, ~40 GB)
-established that pico's activations never enter user-process memory — they live in ANE device memory
-`save-core` cannot reach. The runtime *does* log `shape=` and `strides=` on every tensor load, but
-unredaction now requires a signed logging profile, and those are graph-boundary strides in any case,
-not the compiled weight order.
-
-**What `OutTrans=1` actually is.** An *activation-layout* flag, not a coefficient encoding: it writes
-output channels 16× strided and interleaved. Determined perfectly by the L2 result stride across all
-**988** weight-bearing tasks in the shipped binary — 180/180 of the `OutTrans=1` tasks have a large
-stride, 0/808 of the `OutTrans=0` tasks do.
-
-**The coefficient layout is confirmed, in the shipped mode.** The 128-byte coefficient header turns
-out to be emitted by a **bias**, not a per-channel scale. Forcing that mode and running a positional
-read recovers a **perfect bijection over all 819,200 positions**, identical to the 64-byte mode:
-`o = 16·bank + (slot mod 16)`, `i = ⌊slot/16⌋`.
-
-**Why `down` still resists.** Its values are provably correct — permutation preserves singular
-values, and its spectrum is clearly trained (`s₁/s₁₀ = 2.11`) against a random control (`1.02`). Only
-the ordering is wrong. But the 3200-wide FFN axis is referenced by *only four tensors, all of which
-are among the ones in question*, so the constraint system is **underdetermined from the shipped
-data** — which is why ~15 controlled ordering hypotheses all failed.
-
-**The compiler is not the variable.** Two macOS builds spanning a major `ANECompiler` version gap
-(10.24.3 vs 9.509.0), two Xcode versions, six ANE architecture targets and two optimisation settings
-all produce byte-identical results. `ANECompiler` ships with macOS, not Xcode; simulator runtimes
-have no Neural Engine at all. A portable probe kit for testing further machines is in
-[`tools/ane_probe_kit/`](tools/ane_probe_kit).
-
-**On method.** Six instruments used in this work were later withdrawn. The two most recent were
-discarded because a null result was being read as evidence from a statistic never shown to carry
-information. The remedy now used throughout is a **positive control** — calibrate the instrument on a
-correctly-ordered reference model first (it separates true from random pairings at *z* ≈ +300 to
-+400), and only then apply it. Every retraction is recorded in place.
-
-## The current boundary — component-complete, blocked by absent ground truth
-
-> **Update (2026-08-26) — the gap is now quantified and the search space is closed.**
-> The narrative below this box predates a systematic evaluation pass and several of its
-> specifics are superseded (in particular the rank-oracle numbers, the "FFN magnitude
-> dominates" reading, and the 219-expert framing). See
-> [`paper/reconstruction.tex`](paper/reconstruction.tex) — *The Reconstruction Gap: A
-> Controlled Negative Result* — for the full treatment. Summary:
->
-> **The headline number.** Scoring mean log-rank of the true next token on real text, against
-> a *0-layer floor* (embedding read straight through the tied unembedding, all 56 blocks
-> bypassed):
->
-> | model | layers | floor | final | value from depth |
-> |---|---:|---:|---:|---:|
-> | Qwen2.5-0.5B-Instruct | 24 | 9.4617 | 1.7718 | **−7.6900** |
-> | Qwen2.5-1.5B-Instruct | 28 | 9.2452 | 1.4673 | **−7.7779** |
-> | ifp3 reconstruction | 56 | 7.1193 | 7.5873 | **+0.4680** |
->
-> A working transformer turns depth into ≈ −7.7 nats. The reconstruction turns it into +0.47:
-> the layers destroy information the embedding already carries. The floor itself is *sound*
-> (4.66 nats below chance, vs 1.78 for Qwen-0.5B), so the embedding decode is fine and it is
-> the layers that are inert.
->
-> **Branch decomposition** (full depth; the both-off control reproduces the floor exactly):
-> attention removed → 7.0891 (**−0.0303, the only sub-floor configuration**); FFN removed →
-> 7.9718 (+0.8525); full → 7.5873. The reconstructed attention *destroys* 0.50 nats; the FFN
-> stack alone is worth 0.03 where healthy layers are worth 7.7.
->
-> **The sharpest anomaly is the missing attention sink** — 0.054 of attention mass on position 0
-> versus 0.428/0.423 in both controls, while local (0.312 vs 0.353/0.366) and tail
-> (0.469 vs 0.483/0.467) mass are *normal*. It is not a wrong-BOS problem: placing every one of
-> the 262,144 vocabulary tokens at position 0 yields a maximum sink of 0.047 against an
-> ordinary-token band of 0.031 ± 0.007.
->
-> **13 hypothesis classes eliminated with controls** — codec palette (all 24 code→value orders,
-> round-trip error exactly 0), weight scale (OV gain 0.488 vs 0.497/1.783), Q/K conditioning,
-> normalisation placement (16 × 4 conventions incl. Gemma3-exact), gamma slot→role (24) and
-> dimension order, head layout (64 combos at full depth, with nulls), RoPE (incl. disabled),
-> residual basis (ANE stripe + all 84 reshape-transposes of 1536), expert routing (7 schemes,
-> random null mid-pack), layer regions, prompt format, and the evaluation corpus itself.
->
-> **What is missing is not a component** — all 218 tensors are present, decode with correct
-> statistics, and are consumed by the forward. What is missing is *mutual consistency on the
-> shared 1536-dim residual axis*. That single hypothesis explains every measurement, and it
-> explains why the tests came back clean: **every static statistic — row norms, singular
-> spectra, palette frequencies, OV gain, QK participation — is invariant to a permutation of
-> that axis.** The structured part of that hypothesis is now closed (84 reshape-transposes, none
-> beats identity); unstructured relabelings are not brute-forceable.
->
-> **Methodological findings**, which generalise beyond this model: log-rank is maximised by a
-> reconstruction that *does nothing*; causal signal-growth is maximised by one that *injects
-> noise* (a 5.1× "win" on that metric scored 9.27 vs 7.59 on real text); and a truncated model
-> can be blind to the component under test — ablating attention entirely from a 12-layer prefix
-> moves log-rank by only −0.071, inside its own noise band, so five sweeps run there constrained
-> the instrument rather than the model. **Rule: ablate the component before varying it.**
->
-> **Cross-model corroboration.** The same method applied to `afmplus-v11.0-nano` — a *dense* 3.33B
-> sibling with no MoE and no routing metadata — converges on identical behaviour (top-1 exactly
-> 0.00%, argmax = current token). Two independent decodes of two architectures do not share a
-> per-model mistake.
-
-
-The model is **component-complete**: weights, codec, de-swizzle, architecture, norms, tokenizer,
-and — critically — the fact that *no expert-selection map is needed* are all established. Several
-earlier "walls" collapsed on inspection:
-
-- **The router→expert map is a false blocker.** The runtime graph's `ANE_IFPLayerSequence` op has
-  no router, top-k, gather, scatter, or softmax-over-experts; weights enter through a fixed symbol.
-  A non-gated SwiGLU is a permutation-invariant sum `FFN(h) = Σᵢ SiLU(gᵢ·hₙ)(uᵢ·hₙ)·dᵢ`, so the
-  logical which-of-219 order does not affect the output. Summing the resident set is the correct
-  pruned FFN; summing the full superset recovers the un-pruned base model. (The earlier
-  "~17× overcount" was an artifact of a mis-specified *gated* interpretation.)
-- **The down-proj was never a different format.** It uses the same 4-bit → codebook → per-1024
-  fp16 block-scale codec as gate/up. The prior "down-proj = noise" verdict was a mis-calibrated
-  low-rank metric; the omitted per-block scale was the missing factor.
-- **The norms aren't missing — they're folded.** The shipped graph has 661 *parameter-free*
-  RMSNorm ops; each learned γ is folded into the adjacent linear at ANE-compile time, so γ=1 is
-  the correct runtime. Only the per-head QK-norm γ∈ℝ¹²⁸ survives explicitly (35 recovered from a
-  live heap).
-- **The dense weights are validated without Apple's activations.** Compiling a positional-probe
-  weight through Apple's own `coreml2hwx` toolchain and reading back the byte permutation confirms
-  the de-swizzle; the recovered dense weights carry genuine low-rank structure (decay 8–11).
-- **Intermediate activations are ANE-internal.** A search of an 8 GB IOSurface-targeted process
-  core for the input embeddings scores 0.17 (noise): nothing crosses to host DRAM, so the forward
-  is validated end-to-end (against Apple's emitted token), not per-layer.
-  **Independently re-confirmed and strengthened (§57):** four privileged captures — five cores,
-  ~40 GB, including the *correct* host process identified via `lsof` — put the best scale-invariant
-  cosine at **0.365**, indistinguishable from noise, while `program.odix` *is* present in the same
-  cores. The generations ran 100+ draft-model forward passes inside the capture window, so this is
-  not a sampling accident.
-
-**A full 44-layer forward ablation (against Apple's emitted token) confirmed two of these and
-re-located the remaining gap honestly.** Using a rank oracle (`"The capital of France is"` →
-`▁Paris`; chance ≈ 76k of 152k):
-
-- **NKV=4 is settled** (attention-only rank 53k vs 72k at NKV=8) and **the ungated full-219 sum is
-  not just sufficient but *optimal*** — vs the full sum (rank 24.9k), skipping the sparse FFN gives
-  122k, scaling it ×0.1 gives 36k, and top-14 activation-gating gives 39k. Every form of selection
-  or attenuation is *worse*, corroborating the false-blocker result from the forward side.
-- **But the assembled forward does not produce coherent text.** With the best conventions
-  (interleaved RoPE, down-proj on the `[EH,D]` neuron axis, interleaved expert-region offsets,
-  block gate/up fusion) it reaches rank ≈ 21k — **3.6× better than chance, still garbage.** The
-  summed-FFN branch has norm ≈ 4.9×10⁴ against a residual norm ≈ 1.5×10², and dominates the output
-  with a **mis-aligned (junk) direction**; every sandwich/post-norm placement is *worse* than a
-  plain residual add, so it is a direction error (per-neuron gate/up/down alignment at the
-  56,064-wide intermediate and/or per-layer expert offsets), not a magnitude one.
-
-**The honest boundary is an *information* limit, not a mechanical one.** Fixing the FFN alignment
-requires per-layer ground truth to bisect against — and Apple's runtime keeps every intermediate
-activation ANE-internal (a search of an 8 GB IOSurface-targeted core for even the *input
-embeddings* scores 0.17 = noise). So the alignment cannot be validated or debugged
-component-by-component from any accessible artifact. This is the same class of wall reached
-independently from the ANE/`.hwx` side; it needs either ANE-internal activation capture or a clean
-single-geometry re-extraction, not further convention search.
-
-### The embedding is not in the shipped weight file (2026-07-15)
-
-The single largest correction in this project's history. The token embedding — long marked
-"✅ exact" — was **never validated**: the test used was `argmax(E · rms(E[t])) == t`, which the
-*same matrix on both sides* satisfies trivially. **Any** matrix, including pure noise, passes it.
-
-Replacing it with a falsifiable test — mean cosine of orthographic variants (`▁dog`/`dog`,
-`▁year`/`▁years`) minus an **id-matched** random control — and **calibrating it on a real model**
-(Qwen3-4B `token_embd.weight`, Q6_K, re-quantized to AFM's exact signed-4-bit + per-token-scale
-format) gives a clean instrument: **a real embedding scores +0.53; 4-bit costs only ~2%**
-(0.533 → 0.522; `ĠParis~Paris` = +0.842). Against it:
-
-- **~1.14 M candidate offsets across the 4.9 GB raster score ≤ +0.047** — unscaled tail and
-  scaled region, interleaved and contiguous, 4-bit and int8. The embedding is **not a `[V,D]`
-  table in the raster**.
-- The **only** vocab-structured table in the entire package (in `main-h16g.odix`, pinned to
-  +0.777/0.78 by the untrained-`<unused>`-row zero signature, 8-way nibble-interleaved, signed
-  4-bit) scores **+0.003** — it is **not the embedding** (likely `c_sparsity_embedding`).
-- `VOCAB = 262,144`, not the `152,064` previously assumed — that is *Qwen's* vocab size.
-
-**Leading hypothesis: the embedding is ANE-baked into `binary_0.hwx` or fused into
-`AFM_fused_interleaved_embedding_gather_dequant_reshape`** — consistent with the proven fact that
-the ANE performs embedding lookup, all 44 layers, and logits entirely on-chip. If so, a
-from-weights standalone forward may be **impossible from the shipped assets**.
-
-### Update (2026-07-17): dynamic capture RECOVERS the small model's embedding; the 3B's is ANE-locked
-
-The hypothesis above is now resolved, differently for each model.
-
-- **Small model (`afmplus-v11.0-pico`, D=1024): recovered.** Its architecture is now fully mapped from `program.odix` (static): **24 dense layers, D=1024, SwiGLU FFN 3200, GQA 16 Q / 4 KV heads (head-dim 64), RoPE, vocab 262144** — ≈295 M transformer params (the "300M" label), the speculative-decoding draft the runtime loads alongside the 3B. Its gather/dequant runs on the **host
-  CPU**, so the dequantized `in_embeddings` is in host DRAM during a forward. A prompt of one token
-  repeated ~1500× makes the resident buffer a long run of **byte-identical `[1024]` fp16 rows** — an
-  unmistakable period-D signature — captured with a privileged `lldb` core (attach **by-PID** +
-  `save-core`; `--waitfor` cannot resolve E5RT symbols or save a core). Recovered vectors pass the
-  oracle: **`dog~dogs = +0.648`, `king~kings = +0.664`**, cross-category +0.01–0.20 — a real embedding
-  space. **First genuine recovery of an AFM token embedding.** (The storage codec in `program.odix`
-  stays uncracked — rowmajor / `[8,1,1]` / ANE `[512,D]`-tile all score at chance vs six ground-truth
-  rows — so this reads the *dequantized output*, not the codec; a full table would need token-by-token
-  harvest.)
-- **3B (`instruct_3b`, D=1536): ANE-locked.** Both models load during inference, but an **8.2 GB
-  full-memory core** (wired + IOSurface pages) taken during a repeated-token 3B prefill has **zero
-  D=1536 identical-row buffers**, while the D=1024 pico buffers are present in the same core. The 3B's
-  gather/dequant is **ANE-delegated** (`main-h16g-delegates`), so its dequantized embedding never
-  crosses to host DRAM. Confirmed from both sides (static absence + dynamic host-capture absence);
-  reachable only by ANE-internal (IOSurface/H11ANE DMA) instrumentation.
-
-Never committed: any recovered embedding bytes (Apple's proprietary weights) — only the method and the
-validation statistics.
-
-*Methodological note.* Six plausible-looking results were falsified by controls during this pass,
-including an `alloc_const [flags,offset,size,dtype]` claim in `ODIX_DECOMPILER.md` that was a u32
-read straddling FlatBuffer **u16** vtables. Without ground truth, statistical shortcuts into these
-assets reliably produce mirages; every claim here now carries a stated control.
-
-Full consolidated record: see the teardown paper §"From-Weights Reconstruction".
-
----
-
-## What's here
-
-| Path | Contents |
-|---|---|
-| `paper/afm_teardown.pdf` | Full teardown paper (AMS-style, 15 pp.) — compile from `.tex` |
-| `FINDINGS.md` | Condensed technical findings (layout, codec, MLIR/odix parse) |
-| `disclosure/CORRESPONDENCE.md` | Dated disclosure record — what Apple was told, when, and their responses |
-| `ROUTER_EXTRACTION.md` | The `ExportableExpertSelector` extraction (now proven unnecessary to run) |
-| `ODIX_DECOMPILER.md` | `main-h16g.odix` structural map (38 configs, op format) |
-| `src/afm_tokenizer.py` | Byte-BPE tokenizer (validated) |
-| `src/deswizzle.py`, `crack_lut.py` | ANE de-swizzle + LUT codec + structure-ratio metric |
-| `src/odix.py` | Parser for Apple's `odix` container |
-| `src/rebuild_full_pt.py` | Decode → single-file weight export |
-| `src/afm_forward_working.py` | Reconstructed forward pass (attn + ungated MoE-SwiGLU) |
-| `src/afm_generate.py` | End-to-end generation harness (over Apple's runtime) |
-
-## Reproducing the teardown (on your own device)
-
-1. From macOS **Recovery** Terminal (the live system seals the asset cache), copy the model
-   assets to external storage — see the paper §"Recovery Pipeline" for the `cp -R` of
-   `.../AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels`.
-2. `hdiutil attach -readonly` the IFP Cryptex; point `rebuild_full_pt.py` at
-   `model.odixpackage/ifp/ifp_rasterized_weights.bin`.
-3. It decodes, R-verifies each tensor, and writes a single `state_dict` (audit: 100.00% of file,
-   0 non-finite). The forward harness runs the reconstructed model.
-
----
-
-## License
-
-Original research and code: MIT. **Apple's model weights and tokenizer data are not included and
-not covered by this license.** Interoperability/research use on your own hardware only.
+The model weights belong to Apple. Do not redistribute the GGUF you produce. This project is unofficial and is not
+affiliated with or endorsed by Apple; Apple has been asked whether redistribution would be permitted
+(see `disclosure/`).

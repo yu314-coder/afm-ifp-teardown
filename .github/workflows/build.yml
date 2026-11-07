@@ -1,0 +1,145 @@
+# Builds llama.cpp (pinned upstream commit) with the `afm` architecture patch for Windows, Linux and macOS.
+# The binaries contain no model data; the GGUF is produced locally on a Mac by afm2gguf/afm2gguf.py.
+name: build llama.cpp + afm
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['llama.cpp-patch/**', '.github/workflows/build.yml']
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  LLAMA_SHA: 41ea26144e55d23f37bb765f88c07588d786567f   # patch base (ggml-org/llama.cpp)
+  VULKAN_VERSION: 1.4.313.2
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: win-x64-cpu,     os: windows-2022, kind: cpu }
+          - { name: win-x64-vulkan,  os: windows-2022, kind: vulkan }
+          - { name: win-x64-cuda12,  os: windows-2022, kind: cuda }
+          - { name: linux-x64-cpu,   os: ubuntu-24.04, kind: cpu }
+          - { name: linux-x64-vulkan, os: ubuntu-24.04, kind: vulkan }
+          - { name: macos-arm64-metal, os: macos-14,   kind: metal }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout llama.cpp at the patch base
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ env.LLAMA_SHA }}
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          path: afm
+      - name: Apply the afm patch
+        shell: bash
+        run: git apply --whitespace=nowarn afm/llama.cpp-patch/llama.cpp-afm.patch && git --no-pager diff --stat | tail -1
+
+      # ---------------------------------------------------------------- Windows
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows' && matrix.kind == 'vulkan'
+        shell: pwsh
+        run: |
+          curl.exe -o $env:RUNNER_TEMP/VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+      - name: Install CUDA toolkit (Windows)
+        if: runner.os == 'Windows' && matrix.kind == 'cuda'
+        uses: ./.github/actions/windows-setup-cuda
+        with:
+          cuda_version: '12.4'
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          choco install ninja -y
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          set FLAGS=-DGGML_NATIVE=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
+          if "${{ matrix.kind }}"=="cpu"    set FLAGS=%FLAGS% -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_OPENMP=OFF
+          if "${{ matrix.kind }}"=="vulkan" set FLAGS=%FLAGS% -DGGML_VULKAN=ON
+          if "${{ matrix.kind }}"=="cuda"   set FLAGS=%FLAGS% -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=75-virtual;80-virtual;86-real;89-real
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release %FLAGS% || exit /b 1
+          cmake --build build -j 4 || exit /b 1
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dst = "pkg\llama-afm-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          Copy-Item build\bin\*.exe, build\bin\*.dll $dst -ErrorAction SilentlyContinue
+          if ("${{ matrix.kind }}" -eq "cuda") {
+            foreach ($d in @("$env:CUDA_PATH\bin", "$env:CUDA_PATH\bin\x64")) {
+              Get-ChildItem $d -Include cudart64_*.dll, cublas64_*.dll, cublasLt64_*.dll -Recurse -ErrorAction SilentlyContinue | Copy-Item -Destination $dst
+            }
+          }
+          Copy-Item LICENSE "$dst\LICENSE-llama.cpp"
+          Copy-Item afm\README.md "$dst\README-afm.md"
+          Compress-Archive -Path "$dst\*" -DestinationPath "pkg\llama-afm-${{ matrix.name }}.zip"
+
+      # ---------------------------------------------------------------- Linux
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+          FLAGS="-DGGML_NATIVE=OFF -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF"
+          if [ "${{ matrix.kind }}" = cpu ];    then FLAGS="$FLAGS -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON"; fi
+          if [ "${{ matrix.kind }}" = vulkan ]; then sudo apt-get install -y -qq libvulkan-dev glslc; FLAGS="$FLAGS -DGGML_VULKAN=ON"; fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_RPATH='$ORIGIN' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON $FLAGS
+          cmake --build build -j 4
+
+      # ---------------------------------------------------------------- macOS
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DLLAMA_CURL=OFF \
+                -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DCMAKE_INSTALL_RPATH='@loader_path' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+          cmake --build build -j 4
+      - name: Package (Linux / macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          dst=pkg/llama-afm-${{ matrix.name }}; mkdir -p $dst
+          cp -a build/bin/llama-* $dst/; cp -a build/bin/*.so* build/bin/*.dylib $dst/ 2>/dev/null || true
+          cp LICENSE $dst/LICENSE-llama.cpp; cp afm/README.md $dst/README-afm.md
+          (cd pkg && zip -qry llama-afm-${{ matrix.name }}.zip llama-afm-${{ matrix.name }})
+
+      - name: Smoke test (CPU builds)
+        if: matrix.kind == 'cpu' || matrix.kind == 'metal'
+        shell: bash
+        run: |
+          b=build/bin; [ -d build/bin/Release ] && b=build/bin/Release
+          "$b/llama-cli" --version 2>&1 | head -3 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-afm-${{ matrix.name }}
+          path: pkg/llama-afm-${{ matrix.name }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          body: |
+            llama.cpp (ggml-org/llama.cpp @ ${{ env.LLAMA_SHA }}) with the `afm` architecture patch from this repository.
+            These binaries contain no Apple model data. Produce the GGUF on a Mac with Apple Intelligence enabled
+            (`python3 afm2gguf/afm2gguf.py -o afm-v11.2-ifp.gguf`), copy it to the target machine, then run e.g.
+            `llama-cli -m afm-v11.2-ifp.gguf --jinja -st --temp 0 -p "Hello"`.
