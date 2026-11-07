@@ -58,12 +58,16 @@ instructions), on 40 prompts:
 | Expert routing | next-token agreement (teacher-forced) | first answer token | answers identical to Apple's |
 |---|---|---|---|
 | Apple's schedule (default) | **91.7%** | 35/40 | 7/40 |
+| prompt per token, then Apple's schedule (`AFM_ROUTE_PROMPT_OWN=1`) | 91.3% | 38/40 | 9/40 |
 | per token (`AFM_ROUTE_TOKEN=1`) | 90.5% | 38/40 | 11/40 |
 | earlier one-turn template, per token | 87.5% | 30/40 | – |
 
 "Answers identical" compares our free-running greedy answer with Apple's character for character; a single different
 early token sends the rest of an answer elsewhere. Apple's schedule was confirmed independently: replaying 47 of Apple's
 own expert re-picks, our router changes as many experts per re-pick as Apple's (27 vs 27 on average, r = 0.84).
+On the 93 teacher-forced misses, Apple's token is our second choice 76% of the time and in our top five 98%; what
+separates the port from Apple now is arithmetic (Apple's Neural Engine runs in fp16), which also nudges a few expert
+picks — see the paper's "Toward 100%" section.
 
 Remaining differences are numerical: Apple runs the model on the Neural Engine in fp16 with a lookup-table SiLU and
 an int8 KV cache (the int8 cache is emulated; the rest is not).

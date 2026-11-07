@@ -435,6 +435,7 @@ The reference is Apple's own model, queried through the public FoundationModels 
 Routing (exact template) & teacher-forced & first token & identical answers \\
 \midrule
 Apple's schedule (pick at last prompt token, re-pick every 32) & 91.75\% & 35/40 & 7/40 \\
+prompt tokens per token, then Apple's schedule & 91.30\% & 38/40 & 9/40 \\
 per token & 90.51\% & 38/40 & 11/40 \\
 \bottomrule
 \end{tabular}
@@ -457,12 +458,12 @@ standard (pre-norm) residual instead of x/y & 0\% \\
 \caption{Ablations: both expert groups are needed, the routed count matters, and the residual form is not negotiable.}
 \end{table}
 
-\paragraph{The embedding scale.} The input multiplier $k$ is the one constant we fit rather than read (the embedding gather has no multiply; the factor sits in the first ANE stage). With Apple's template and schedule, teacher-forced agreement is flat around the chosen value: 91.5\% at $k=8$, 91.4\% at 9 and 91.75\% at 10. Apple's int8 calibration range for the layer-0 values, which scale with $k$, is consistent with $k$ between about 8 and 12.
+\paragraph{The embedding scale.} The input multiplier $k$ is the one constant we fit rather than read (the embedding gather has no multiply; the factor sits in the first ANE stage). With Apple's template and schedule, teacher-forced agreement is flat: 91.5\%, 91.4\%, \textbf{91.75\%}, 91.5\%, 91.2\% and 91.4\% at $k=8,9,10,11,12,14$; the first-token score is 35/40 throughout, so $k$ is not what separates us from Apple. Apple's int8 calibration range for the layer-0 values, which scale with $k$, is consistent with $k$ between about 8 and 12.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.48\linewidth]{figs/fig_ranks.pdf}
-\caption{Where the disagreements sat in the earlier per-token measurement (141 misses): Apple's token was our second choice in 72\%, in our top three in 92\% and in our top five in 99\% (median logit margin 1.0).}\label{fig:ranks}
+\caption{Where the 93 remaining disagreements sit (default configuration): Apple's token is our second choice in 76\%, in our top three in 90\% and in our top five in 98\%; the median logit gap to it is 1.15, and 45\% of the misses are within one logit.}\label{fig:ranks}
 \end{figure}
 
 \paragraph{The tokenizer.} Apple's \code{SystemLanguageModel.tokenCount} gives Apple's own token count. Our first tokenizer (and the research encoder) matched it on 73 of 81 texts; it had byte-fallback tokens labelled as normal text and control tokens mislabelled. The converter's tokenizer matches on 81/81 (and on 16/16 texts built from tabs, runs of spaces and indented code) and lifted fidelity from 86.0\% to 87.5\%. Apple's tokenizer file marks all user-defined pieces with one type code; mapped naively, llama.cpp prints space runs as the escape character U+2581 instead of spaces and drops tab runs entirely, so the converter types space runs as normal text and tab runs as user-defined.

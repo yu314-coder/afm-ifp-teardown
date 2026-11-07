@@ -400,14 +400,15 @@ index d1de16e3f..b27f26510 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..edfd45a9c
+index 000000000..8af8a0aae
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,306 @@
+@@ -0,0 +1,349 @@
 +#include "models.h"
 +
 +#include <algorithm>
 +#include <cstdlib>
++#include <cmath>
 +
 +static float afm_env_f(const char * k, float d) { const char * v = getenv(k); return v ? (float) atof(v) : d; }
 +
@@ -417,7 +418,7 @@ index 000000000..edfd45a9c
 +//  - a single decode token re-picks from its own logits when pos % freq == 0, otherwise reuses the persisted choice.
 +class llm_graph_input_afm_route : public llm_graph_input_i {
 +public:
-+    llm_graph_input_afm_route(int64_t n_slots, int64_t freq) : n_slots(n_slots), freq(freq) {}
++    llm_graph_input_afm_route(int64_t n_slots, int64_t freq, bool prompt_own) : n_slots(n_slots), freq(freq), prompt_own(prompt_own) {}
 +    void set_input(const llama_ubatch * ub) override {
 +        const int64_t T = ub->n_tokens;
 +        std::vector<int32_t> ist(T), itk(T); std::vector<int64_t> idst(T); std::vector<float> use(T);
@@ -432,7 +433,8 @@ index 000000000..edfd45a9c
 +            const auto & r = run(s);
 +            ist[i] = (int32_t) slot; itk[i] = (int32_t) i; idst[i] = n_slots; use[i] = 1.0f;     // n_slots = discard slot
 +            if (r.first > 1) {
-+                itk[i] = (int32_t) r.second; if (i == r.second) { idst[i] = slot; }
++                if (!prompt_own) { itk[i] = (int32_t) r.second; }
++                if (i == r.second) { idst[i] = slot; }
 +            } else if (ub->pos[i] % freq == 0) {
 +                idst[i] = slot;
 +            } else {
@@ -450,6 +452,7 @@ index 000000000..edfd45a9c
 +    ggml_tensor * dst       = nullptr; // I64 [T]   slot to write this token's fresh logits to (n_slots = discard)
 +    ggml_tensor * use_tok   = nullptr; // F32 [1,T] 1 = fresh logits, 0 = persisted
 +    const int64_t n_slots, freq;
++    const bool    prompt_own;   // prompt-chunk tokens route on their own logits (the pick for generation is unchanged)
 +};
 +
 +// Apple Foundation Model, on-device "afmplus-v11.2-ifp" (3B, Instruction-Following-Pruned sparse FFN).
@@ -492,6 +495,9 @@ index 000000000..edfd45a9c
 +    const int   sched_f   = (int) afm_env_f("AFM_ROUTE_FREQ", 32);
 +    const int   sched_lag = (int) afm_env_f("AFM_ROUTE_SCHED_LAG", 0);   // 1: a boundary pick takes effect one token later
 +    const bool  route_at_ffn = afm_env_f("AFM_ROUTE_AT_FFN", 0) != 0;      // research: router input = layer-12 FFN input
++    const bool  prompt_own   = afm_env_f("AFM_ROUTE_PROMPT_OWN", 0) != 0;  // prompt tokens per-token; generation keeps Apple's pick
++    const int   f16_act      = (int) afm_env_f("AFM_F16_ACT", 0);          // research: round activations to fp16 (1: residual, 2: +router input, 3: +attn/ffn outputs)
++    auto f16r = [&](ggml_tensor * t) { return ggml_cast(ctx0, ggml_cast(ctx0, t, GGML_TYPE_F16), GGML_TYPE_F32); };
 +    // emulate the ANE int8 KV cache: x -> clamp(round(x*s), -127, 127) / s
 +    auto fq8 = [&](ggml_tensor * t, float s) {
 +        // round-to-nearest via the fp32 magic constant 1.5*2^23 (backend-independent), saturate to int8, rescale
@@ -509,6 +515,36 @@ index 000000000..edfd45a9c
 +    auto        * inp_attn    = build_attn_inp_kv();
 +    ggml_tensor * inp_out_ids = build_inp_out_ids();
 +
++    // research (teacher-forced batches starting at position 0 only): AFM_ROPE_F16=1 computes the RoPE angles the way an
++    // fp16 pipeline would (fp16 position x fp16 inverse frequency, rounded to fp16); 2 also rounds cos/sin to fp16;
++    // 9 = the same custom path in fp32 (must equal ggml_rope_ext)
++    const int rope_f16 = (int) afm_env_f("AFM_ROPE_F16", 0);
++    ggml_tensor * rope_c = nullptr, * rope_s = nullptr;
++    if (rope_f16) {
++        const int64_t T = n_tokens, hd2 = n_rot/2;
++        auto rnd = [&](ggml_tensor * t) { return rope_f16 == 9 ? t : f16r(t); };
++        ggml_tensor * pp  = rnd(ggml_arange(ctx0, 0.0f, (float) T, 1.0f));
++        ggml_tensor * inv = rnd(ggml_exp(ctx0, ggml_scale(ctx0, ggml_arange(ctx0, 0.0f, (float) hd2, 1.0f), -2.0f*logf(freq_base)/n_rot)));
++        ggml_tensor * tm  = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, hd2, T);
++        ggml_tensor * th  = rnd(ggml_mul(ctx0, ggml_repeat(ctx0, ggml_reshape_2d(ctx0, inv, hd2, 1), tm),
++                                              ggml_repeat(ctx0, ggml_reshape_2d(ctx0, pp, 1, T), tm)));
++        rope_c = ggml_cos(ctx0, th); rope_s = ggml_sin(ctx0, th);
++        if (rope_f16 == 2) { rope_c = f16r(rope_c); rope_s = f16r(rope_s); }
++        rope_c = ggml_reshape_3d(ctx0, rope_c, hd2, 1, T); rope_s = ggml_reshape_3d(ctx0, rope_s, hd2, 1, T);
++    }
++    auto rope = [&](ggml_tensor * t) -> ggml_tensor * {
++        if (!rope_f16) {
++            return ggml_rope_ext(ctx0, t, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                                 ext_factor, attn_factor, beta_fast, beta_slow);
++        }
++        const int64_t hd2 = n_rot/2;   // NEOX: rotate (i, i + n_rot/2)
++        ggml_tensor * a = ggml_cont(ctx0, ggml_view_3d(ctx0, t, hd2, t->ne[1], t->ne[2], t->nb[1], t->nb[2], 0));
++        ggml_tensor * b = ggml_cont(ctx0, ggml_view_3d(ctx0, t, hd2, t->ne[1], t->ne[2], t->nb[1], t->nb[2], hd2*t->nb[0]));
++        ggml_tensor * o1 = ggml_sub(ctx0, ggml_mul(ctx0, a, rope_c), ggml_mul(ctx0, b, rope_s));
++        ggml_tensor * o2 = ggml_add(ctx0, ggml_mul(ctx0, b, rope_c), ggml_mul(ctx0, a, rope_s));
++        return ggml_concat(ctx0, o1, o2, 0);
++    };
++
 +    ggml_tensor * h             = nullptr;
 +    ggml_tensor * router_logits = nullptr; // [n_expert * n_sparse_layers, n_tokens]
 +
@@ -519,6 +555,7 @@ index 000000000..edfd45a9c
 +        cb(x, "attn_in", il);
 +
 +        auto route_block = [&](ggml_tensor * x) {
++            if (f16_act >= 2) { x = f16r(x); }   // Apple's expert state is an fp16 tensor
 +            ggml_tensor * r_in = x;
 +            const int64_t p0 = std::min<int64_t>(pool_s, x->ne[1] - 1);
 +            const int64_t np = std::max<int64_t>(1, std::min<int64_t>(pool_n, x->ne[1]) - p0);
@@ -545,7 +582,7 @@ index 000000000..edfd45a9c
 +            ggml_tensor * per_tok = (r_in == x) ? router_logits : router_net(x);                    // [E*layers, T]
 +            const bool apple_sched = model.afm_route_state && afm_env_f("AFM_ROUTE_TOKEN", 0) == 0 && pool_n == 0 && !route_cum;
 +            if (apple_sched && sched_p == 0) {
-+                auto inp = std::make_unique<llm_graph_input_afm_route>(model.afm_route_state->ne[1] - 1, std::max(1, sched_f));
++                auto inp = std::make_unique<llm_graph_input_afm_route>(model.afm_route_state->ne[1] - 1, std::max(1, sched_f), prompt_own);
 +                const int64_t T = per_tok->ne[1];
 +                inp->src_state = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, T); ggml_set_input(inp->src_state);
 +                inp->src_tok   = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, T); ggml_set_input(inp->src_tok);
@@ -563,6 +600,10 @@ index 000000000..edfd45a9c
 +                ggml_tensor * fl = ggml_scale_bias(ctx0, t, 1.0f/sched_f, -(sched_lag + 0.5f*(sched_f - 1))/sched_f);
 +                fl = ggml_scale_bias(ctx0, ggml_scale_bias(ctx0, fl, 1.0f, 12582912.0f), 1.0f, -12582912.0f); // round
 +                ggml_tensor * src = ggml_clamp(ctx0, ggml_scale(ctx0, fl, (float) sched_f), (float) (sched_p - 1), 1e9f);
++                if (prompt_own) {   // m = 1 for t < P (t integer), src = m*t + (1-m)*src
++                    ggml_tensor * m = ggml_clamp(ctx0, ggml_scale_bias(ctx0, t, -1.0f, (float) sched_p), 0.0f, 1.0f);
++                    src = ggml_add(ctx0, src, ggml_mul(ctx0, m, ggml_sub(ctx0, t, src)));
++                }
 +                ggml_tensor * tmpl = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, T, T);
 +                ggml_tensor * jm = ggml_repeat(ctx0, ggml_reshape_2d(ctx0, t, T, 1), tmpl);                     // [j, t] = j
 +                ggml_tensor * sm = ggml_repeat(ctx0, ggml_reshape_2d(ctx0, src, 1, T), tmpl);                   // [j, t] = src(t)
@@ -609,8 +650,7 @@ index 000000000..edfd45a9c
 +            ggml_tensor * Qcur = build_lora_mm(layer.wq, x);
 +            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens);
 +            Qcur = ggml_rms_norm(ctx0, Qcur, hparams.f_norm_rms_eps);
-+            Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-+                                 ext_factor, attn_factor, beta_fast, beta_slow);
++            Qcur = rope(Qcur);
 +            Qcur = ggml_mul(ctx0, Qcur, layer.attn_q_norm);
 +            cb(Qcur, "Qcur", il);
 +
@@ -620,8 +660,7 @@ index 000000000..edfd45a9c
 +                Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
 +                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
 +                Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps);
-+                Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-+                                     ext_factor, attn_factor, beta_fast, beta_slow);
++                Kcur = rope(Kcur);
 +                if (layer.attn_k_norm) {
 +                    Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm);
 +                }
@@ -650,7 +689,9 @@ index 000000000..edfd45a9c
 +        }
 +
 +        cur = build_norm(cur, layer.attn_post_norm, NULL, LLM_NORM_RMS, il);
++        if (f16_act >= 3) { cur = f16r(cur); }
 +        ggml_tensor * hp = ggml_add(ctx0, x, cur);
++        if (f16_act >= 1) { hp = f16r(hp); }
 +        cb(hp, "attn_out", il);
 +
 +        ggml_tensor * y = build_norm(hp, layer.ffn_norm, NULL, LLM_NORM_RMS, il);
@@ -694,7 +735,9 @@ index 000000000..edfd45a9c
 +            f = no_routed ? shared : (no_shexp ? moe : ggml_add(ctx0, moe, shared));
 +        }
 +        f = build_norm(f, layer.ffn_post_norm, NULL, LLM_NORM_RMS, il);
++        if (f16_act >= 3) { f = f16r(f); }
 +        h = ggml_add(ctx0, y, f);
++        if (f16_act >= 1) { h = f16r(h); }
 +        h = build_cvec(h, il);
 +        cb(h, "l_out", il);
 +    }

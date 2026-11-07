@@ -83,7 +83,7 @@ fig.tight_layout(); fig.savefig(f'{OUT}/fig_repick.pdf'); plt.close(fig)
 
 # 5. where the remaining disagreements sit
 fig, ax = plt.subplots(figsize=(3.4, 2.3))
-ks = ['2nd', 'top-3', 'top-5']; vs = [72, 92, 99]
+ks = ['2nd', 'top-3', 'top-5']; vs = [76, 90, 98]
 ax.bar(ks, vs, color=BLUE)
 for i, v in enumerate(vs): ax.text(i, v + 1, f'{v}%', ha='center', fontsize=8)
 ax.set_ylim(0, 108); ax.set_ylabel("Apple's token within our ...\n(% of mismatches)")

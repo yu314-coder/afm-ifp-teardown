@@ -121,6 +121,19 @@ activation-capture question, flagged as not a security issue.
 
 ---
 
+## Licensing request to Apple Rights and Permissions — 8 November 2026
+
+Separate from the security cases, a permission request was submitted through apple.com
+(Legal → Contact → *Rights and Permissions*, the channel for licensing Apple copyrighted material).
+It states that the converter and llama.cpp patch are public in this repository, that no model data
+has been published, and asks: (1) whether Apple objects to that code remaining public under the MIT
+license, (2) whether the converted weights may be redistributed and on what terms, (3) what Apple
+would want changed in a code-only release, (4) whether Apple would publish the weights itself. It
+cites the two Product Security cases above. Apple's form confirmed receipt with a standard page
+stating that requests receiving no reply from an Apple employee cannot be processed.
+
+---
+
 ## Standing position
 
 Apple has twice stated in writing that this work does not raise a security issue for them, and has
