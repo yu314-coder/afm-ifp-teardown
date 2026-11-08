@@ -43,7 +43,7 @@ A Complete From-Weights Reconstruction of \code{afmplus-v11.2-ifp}\\ (AFM~3 Core
 \date{November 8, 2026}
 
 \begin{abstract}
-We reconstruct Apple's current on-device foundation language model---asset \code{com.apple.fm.language.instruct\_3b.base.generic\_sparse}, display version \code{afmplus-v11.2-ifp}, the model Apple calls \emph{AFM~3 Core Advanced}---entirely from the files Apple Intelligence installs on a Mac, and run it in llama.cpp on any operating system. The model is a 56-layer, 20.3-billion-parameter transformer with a 1536-wide residual stream, 16 query and 8 key/value heads, KV-cache sharing across its last 21 layers, an unusual post-normalised (``x/y'') residual with four learned RMSNorm gains per layer, and an Instruction-Following-Pruned sparse feed-forward network: 23 always-on experts plus 23 of 348 routed experts per token, chosen by a separate router network evaluated once at layer~12. Every 2-bit weight is carried into GGUF \emph{bit-exactly} (55 million spot-checked weights, zero differences); the tokenizer reproduces Apple's own token counts on 81/81 test texts. The two things the model files do not contain---the prompt template and the rule that picks experts---we read out of Apple's inference frameworks: the conversation is rendered as a system turn plus a separate developer turn, and the experts for a whole prompt are chosen from the last prompt token's hidden state and re-chosen every 32 positions. Both are confirmed by Apple's public token counter and by Apple's own runtime log. Against Apple's live model at temperature zero, the reconstruction's next-token choice agrees with Apple's on \textbf{91.7\%} of answer tokens. Nothing in the model is trained or fitted except one input scale factor, to which the results are insensitive.
+We reconstruct Apple's current on-device foundation language model---asset \code{com.apple.fm.language.instruct\_3b.base.generic\_sparse}, display version \code{afmplus-v11.2-ifp}, the model Apple calls \emph{AFM~3 Core Advanced}---entirely from the files Apple Intelligence installs on a Mac, and run it in llama.cpp on any operating system. The model is a 56-layer, 20.3-billion-parameter transformer with a 1536-wide residual stream, 16 query and 8 key/value heads, KV-cache sharing across its last 21 layers, an unusual post-normalised (``x/y'') residual with four learned RMSNorm gains per layer, and an Instruction-Following-Pruned sparse feed-forward network: 23 always-on experts plus 23 of 348 routed experts per token, chosen by a separate router network evaluated once at layer~12. Every 2-bit weight is carried into GGUF \emph{bit-exactly} (55 million spot-checked weights, zero differences); the tokenizer reproduces Apple's own token counts on 81/81 test texts. The two things the model files do not contain---the prompt template and the rule that picks experts---we read out of Apple's inference frameworks: the conversation is rendered as a system turn plus a separate developer turn, and the experts for a whole prompt are chosen from the last prompt token's hidden state and re-chosen every 32 positions. Both are confirmed by Apple's public token counter and by Apple's own runtime log. Against Apple's live model at temperature zero, the reconstruction's next-token choice agrees with Apple's on \textbf{96.1\%} of answer tokens, and 17 of 40 free-running answers are identical to Apple's character for character. The last four points came from two layer-0 details found late: llama.cpp applied the embedding scale twice (Apple applies none), and Apple adds the layer-0 input bias only to generated tokens, never to the prompt. Nothing in the model is trained or fitted.
 
 For most of this project the assembled model predicted nothing. The cause was a single misaligned read: every normalisation gain was taken one element early. We found it with probes \emph{calibrated} on a healthy Apple model---Xcode's on-device code model, whose MPSGraph package we dumped to readable MLIR, executed on the GPU from our own process and reproduced exactly in NumPy. The report documents the model's full structure, the storage formats, the debugging instruments and their calibration, the prompt template and expert schedule recovered from Apple's runtime, the llama.cpp implementation, a standalone converter, every negative result, and what still separates the port from 100\%.
 \end{abstract}
@@ -65,7 +65,7 @@ Layers & 56 = 12 dense + 23 sparse (own K/V) + 21 sparse (reuse layer-34 K/V) \\
 Width & $d=1536$; 16 Q / 8 KV heads $\times$ 128; dense FFN 3072; expert width 256 \\
 Weights & 2-bit palette $\{-1.5,-0.5,0.5,1.5\}$ $\times$ fp16 row scale; int4 embedding \\
 GGUF & 6.31\,GiB, Q2\_K (bit-exact) + Q4\_0 (exact); custom arch \code{afm} \\
-Fidelity & 91.7\% teacher-forced top-1 vs Apple (40 prompts, 1127 tokens) \\
+Fidelity & 96.1\% teacher-forced top-1 vs Apple (40 prompts, 1127 tokens); 17/40 answers identical \\
 Runtime rules & \code{afm\_cider\_v2} template and IFP expert schedule, decoded from Apple's frameworks \\
 Tokenizer & matches Apple's \code{SystemLanguageModel.tokenCount} on 81/81 texts \\
 Runtime & llama.cpp fork: Metal, CUDA, Vulkan, CPU; 150 tok/s prompt, 12--21 tok/s generation (M4) \\
@@ -347,7 +347,7 @@ The earlier parse located the table by statistical signatures and accepted a sta
 \caption{Copy-circuit probe: for each layer, the best attention head's median rank of the input token in $E\,W_O W_V\,e_t$. Healthy CodeLM has rank-0 heads; AFM's raw $W_OW_V$ peaks at weak copying because in AFM the write passes through the signed gain $g_0$, whose positions were scrambled by the table shift.}\label{fig:copy}
 \end{figure}
 
-\paragraph{Apple's int8 calibration as a ground truth.} The ANE program stores per-layer scales for its int8 K/V cache. Apple chose them from real activations, so they bound the true magnitudes. With the corrected gains, the reconstruction's values stay inside Apple's ranges, and its keys stay inside up to the 99.9th percentile; only the most extreme 0.1\% of keys would clip (Figure~\ref{fig:kv}). This is an independent check of the internal scales, including the input embedding scale.
+\paragraph{Apple's int8 calibration as a ground truth.} The ANE program stores per-layer scales for its int8 K/V cache. Apple chose them from real activations, so they bound the true magnitudes. With the corrected gains, the reconstruction's values stay inside Apple's ranges, and its keys stay inside up to the 99.9th percentile; only the most extreme 0.1\% of keys would clip (Figure~\ref{fig:kv}). This is an independent check of the internal scales. (Figure~\ref{fig:kv} was made with the v1.0 forward; with the correct layer-0 input the layer-0 values use only part of Apple's range, so Apple's layer-0 scale is not a tight bound.)
 
 \begin{figure}[h]
 \centering
@@ -408,10 +408,11 @@ so every prompt token uses the last prompt token's choice. Averaging the prompt 
 
 The fork adds one architecture, \code{afm}, in \code{src/models/afm.cpp} (about 180 lines), plus three supporting changes.
 \begin{itemize}
-\item \textbf{Graph.} Layer 0 adds the scaled embedding and bias; each later layer normalises the previous output with $g_3$; queries and keys use \code{rms\_norm}, NEOX RoPE, then a gain multiply; the residuals follow Figure~\ref{fig:layer}. Sparse layers run the always-on experts as a ``shared expert'' SwiGLU of width 5888 and the routed experts with \code{mul\_mat\_id}, summed by one row reduction with no weights. The router network lives on layer 12 and its logits are sliced per layer. The output applies the double norm and the tied embedding.
+\item \textbf{Graph.} Layer 0 takes the dequantised embedding row as is (no multiplier) and, for generated tokens only, adds the input bias (Section~\ref{sec:fidelity}); each later layer normalises the previous output with $g_3$; queries and keys use \code{rms\_norm}, NEOX RoPE, then a gain multiply; the residuals follow Figure~\ref{fig:layer}. Sparse layers run the always-on experts as a ``shared expert'' SwiGLU of width 5888 and the routed experts with \code{mul\_mat\_id}, summed by one row reduction with no weights. The router network lives on layer 12 and its logits are sliced per layer. The output applies the double norm and the tied embedding.
 \item \textbf{KV reuse.} Layers 35--55 call attention with null K/V, and the cache maps them to layer 34. This needed a two-line fix in the non-sliding-window attention path, which assumed K/V were always present.
 \item \textbf{Metal kernels.} Metal's batched expert matmul is instantiated for specific experts-per-token counts; we added 14 and 23 (ifp2, ifp3). CUDA uses a generic path for such counts, and Vulkan supports Q2\_K expert matmuls, so no change is needed there.
 \item \textbf{Apple's expert schedule.} The router's logits for each sequence persist in a small device buffer (64 sequence slots) owned by the model. A custom graph input computes, per micro-batch on the host, which logits every token uses: a run of several tokens of one sequence is a prompt chunk and takes its last token's logits, which are stored; a single decode token re-picks only when its position is a multiple of 32 and otherwise reads the stored choice. Because the indices are data rather than graph structure, llama.cpp's graph reuse and multi-sequence batching stay correct. \code{AFM\_ROUTE\_TOKEN=1} restores per-token routing.
+\item \textbf{The embedding-scale pitfall.} llama.cpp's generic \code{build\_inp\_embd()} multiplies by the GGUF's \code{embedding\_scale} (a Granite feature). The first release also multiplied in the AFM graph, so a GGUF carrying our fitted 10 ran at 100. The loader now ignores the key, so old GGUFs run correctly.
 \item \textbf{int8 KV emulation.} The GGUF carries Apple's per-layer K/V scales; keys and values are rounded and saturated to int8 before caching. Rounding uses the fp32 magic constant $1.5\cdot2^{23}$, because \code{ggml\_round} misbehaved on Metal.
 \end{itemize}
 On an M4 the model processes prompts at about 150 tokens/s and generates 12--21 tokens/s. The patch applies to upstream llama.cpp (commit \code{41ea261}); the repository's workflow builds Windows (CPU, Vulkan, CUDA), Linux (CPU, Vulkan) and macOS (Metal) binaries from it.
@@ -425,7 +426,7 @@ The reference is Apple's own model, queried through the public FoundationModels 
 \begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{figs/fig_fidelity.pdf}
-\caption{Teacher-forced top-1 agreement with Apple's greedy answers (40 prompts, 1127 tokens). Blue: the shipped default. The template fix is worth three points; the routing rule decides the rest.}\label{fig:fidelity}
+\caption{Teacher-forced top-1 agreement with Apple's greedy answers (40 prompts, 1127 tokens). Blue: the shipped default. The template fix is worth three points, the layer-0 fixes (no embedding multiplier, input bias on generated tokens only) four more, and Apple's routing schedule beats per-token routing.}\label{fig:fidelity}
 \end{figure}
 
 \begin{table}[h]
@@ -434,9 +435,11 @@ The reference is Apple's own model, queried through the public FoundationModels 
 \toprule
 Routing (exact template) & teacher-forced & first token & identical answers \\
 \midrule
-Apple's schedule (pick at last prompt token, re-pick every 32) & 91.75\% & 35/40 & 7/40 \\
-prompt tokens per token, then Apple's schedule & 91.30\% & 38/40 & 9/40 \\
-per token & 90.51\% & 38/40 & 11/40 \\
+Apple's schedule (pick at last prompt token, re-pick every 32) & \textbf{96.10\%} & 37/40 & 17/40 \\
+per token & 93.79\% & 36/40 & 12/40 \\
+\midrule
+v1.0: Apple's schedule, embedding $\times100$, bias on every token & 91.75\% & 35/40 & 7/40 \\
+v1.0: per token & 90.51\% & 38/40 & 11/40 \\
 \bottomrule
 \end{tabular}
 \caption{Routing rules. ``Identical answers'' = our free-running greedy answer equals Apple's exactly (up to 200 tokens); one different early token sends the rest of an answer elsewhere, so this measure is dominated by the first few tokens.}\label{tab:routing}
@@ -458,12 +461,14 @@ standard (pre-norm) residual instead of x/y & 0\% \\
 \caption{Ablations: both expert groups are needed, the routed count matters, and the residual form is not negotiable.}
 \end{table}
 
-\paragraph{The embedding scale.} The input multiplier $k$ is the one constant we fit rather than read (the embedding gather has no multiply; the factor sits in the first ANE stage). With Apple's template and schedule, teacher-forced agreement is flat: 91.5\%, 91.4\%, \textbf{91.75\%}, 91.5\%, 91.2\% and 91.4\% at $k=8,9,10,11,12,14$; the first-token score is 35/40 throughout, so $k$ is not what separates us from Apple. Apple's int8 calibration range for the layer-0 values, which scale with $k$, is consistent with $k$ between about 8 and 12.
+\paragraph{The layer-0 input: no multiplier, and a bias only for generated tokens.} Earlier drafts fitted an input multiplier $k$ and found the score flat for $k=8$--14. That scan was invalid: llama.cpp's generic embedding code already applied the GGUF's \code{embedding\_scale}, and the AFM graph applied it again, so the scan really covered $k=80$--140. Dumping llama.cpp's intermediate tensors and comparing them with an independent NumPy forward exposed a factor of exactly 10 at the layer-0 input. Scanning the true multiplier with the expert picks held fixed gives a sharp optimum at $k=1$ (mean log-loss of Apple's tokens 0.140, against 0.143 at 0.75 and 1.25 and 0.240 at 100). This matches what Apple's files say: the gather has no multiply.
+
+With $k=1$ the body of the network and the router disagreed. The body wanted the input bias added, but the router's picks were best when the bias was negligible. We found this by computing the picks from a forward at a larger $k$, or with the bias removed; a version that changed only the layer-0 attention balance did not help (78\%). Apple's ANE program has two procedure families. The prompt procedures (\code{prompt\_opt}) add a zero constant at layer 0. The extend procedures, which compute generated tokens, add the bias vector. Applying the bias to generated tokens only is one consistent model for both parts. It reaches 95.9\% with the picks held fixed and 96.1\% in the shipped runtime, which gives the bias to single-token decode steps and not to prompt chunks. Flipping the bias's sign costs two points, so the vector is real; it simply belongs to one procedure family.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.48\linewidth]{figs/fig_ranks.pdf}
-\caption{Where the 93 remaining disagreements sit (default configuration): Apple's token is our second choice in 76\%, in our top three in 90\% and in our top five in 98\%; the median logit gap to it is 1.15, and 45\% of the misses are within one logit.}\label{fig:ranks}
+\caption{Where the 93 disagreements of the v1.0 configuration sat: Apple's token is our second choice in 76\%, in our top three in 90\% and in our top five in 98\%; the median logit gap to it is 1.15, and 45\% of the misses are within one logit.}\label{fig:ranks}
 \end{figure}
 
 \paragraph{The tokenizer.} Apple's \code{SystemLanguageModel.tokenCount} gives Apple's own token count. Our first tokenizer (and the research encoder) matched it on 73 of 81 texts; it had byte-fallback tokens labelled as normal text and control tokens mislabelled. The converter's tokenizer matches on 81/81 (and on 16/16 texts built from tabs, runs of spaces and indented code) and lifted fidelity from 86.0\% to 87.5\%. Apple's tokenizer file marks all user-defined pieces with one type code; mapped naively, llama.cpp prints space runs as the escape character U+2581 instead of spaces and drops tab runs entirely, so the converter types space runs as normal text and tab runs as user-defined.
@@ -509,16 +514,18 @@ Recorded so that nobody repeats them:
 \section{Toward 100\%}\label{sec:open}
 %======================================================================
 
-The prompt template and the expert schedule, the two open items of earlier drafts, are now Apple's own (Section~\ref{sec:runtime}). What remains is numerical:
+The prompt template, the expert schedule and the layer-0 input are now Apple's own. 44 of 1127 answer tokens still differ. Apple's token is almost always our second or third choice. Earlier drafts called the remaining gap a numerical noise floor; the layer-0 bug shows that this was premature. What we measured directly:
 \begin{enumerate}
-\item \textbf{Numerics.} The ANE computes in fp16 with a lookup-table SiLU and its own accumulation order; we emulate only the int8 KV cache. The re-pick comparison (Figure~\ref{fig:repick}) quantifies the effect on routing: our router changes about as many experts as Apple's at each boundary, but individual picks differ by a few experts in 1012.
-\item \textbf{The input embedding scale} $k$ is the one constant not read from Apple's files: the embedding gather in the ODIE program has no multiply, so it is folded into the first ANE stage. It is fitted; Section~\ref{sec:fidelity} shows the agreement as a function of $k$.
+\item \textbf{The ANE's matrix multiplies are accurate.} We ran our own CoreML programs on the Neural Engine, confirming the device with Core ML's compute plan. Sums accumulate at high precision and only the fp16 output is rounded (relative error $2.8\times10^{-4}$, the same as fp32 accumulation with an fp16 result). The low-precision accumulation one first sees comes from Core ML's fp16 CPU path, not the ANE.
+\item \textbf{Its SiLU is a 33-knot piecewise-linear table} (knots every 0.5 on $[-8,8]$, fitted values, for example $0.2964$ at $x=0.5$ where SiLU is 0.3112). The same 128-byte table appears 2113 times in AFM's ANE program, once per FFN task, and it is the program's only activation table. We tabulated it for all 65\,536 fp16 inputs and can emulate it exactly. Doing so changes 20 of 1127 predictions (10 fixed, 8 broken in the v1.0 setup), so it is not where the gap lies. Its softmax, exp and rsqrt are also approximate (0.3--0.4\% relative error).
+\item \textbf{Apple's speculative decoding is exact.} Every FM-API adapter sets \code{draft\_soft\_match\_tolerance} to 0 and turns rejection sampling off, so the draft model never changes a greedy token. The FM-API adapter is the declared-empty adapter (signature = SHA-256 of the empty string), and there is no repetition penalty.
+\item \textbf{The router is robust to arithmetic.} Computing it with fp16 accumulation moves 0.01 of 23 experts per layer-pick, and random noise strong enough to swap a third of an expert per layer changes 2\% of predictions without moving the agreement.
 \end{enumerate}
 Every weight, gain, bias, the router, the tokenizer, the template and the routing rule come from Apple's files and code; nothing was trained or fine-tuned.
 
-\paragraph{The noise floor.} How far can numerics alone move the score? Two mathematically identical fp32 implementations of the same computation---llama.cpp's RoPE kernel and our own RoPE built from elementwise operations, or one batch of 84 tokens versus a prompt batch followed by single-token steps---disagree on 1.1--2.4\% of next-token choices. The 2-bit weights and, above all, the int8 KV cache turn tiny rounding differences into different quantisation steps. A port that does not reproduce the ANE's arithmetic bit for bit should therefore expect to differ from Apple on a percent or two of tokens however exact its model is, and differences of half a point between configurations are within noise.
+\paragraph{Path noise.} Two mathematically identical fp32 implementations of the same computation disagree on 0.1--2.4\% of next-token choices: fp16-rounded activations against fp32, CPU against Metal, llama.cpp's RoPE kernel against an elementwise one, or one batch against a prompt batch followed by single steps. The 2-bit weights and the int8 KV cache amplify rounding, so a percent or so of residual disagreement is expected even from an exact model.
 
-\paragraph{What the remaining misses are.} With Apple's schedule, 74 of the 93 misses are also missed with per-token routing, so they do not depend on routing; 19 occur only with Apple's schedule and cluster in the first answer tokens, where a prompt-level pick that differs by a few experts has the most influence. At 89 of the 93 misses our choice is an ordinary text token (the other four are a newline or end of turn), so Apple's output masking is not involved. Table~\ref{tab:night} lists the numerical experiments.
+\paragraph{What the misses were in v1.0.} With Apple's schedule, 74 of the 93 v1.0 misses were also missed with per-token routing, so they did not depend on routing. At 89 of the 93 our choice was an ordinary text token, so Apple's output masking is not involved. Table~\ref{tab:night} lists the numerical experiments, run on the v1.0 configuration.
 
 \begin{table}[h]
 \centering\small
@@ -526,7 +533,7 @@ Every weight, gain, bias, the router, the tokenizer, the template and the routin
 \toprule
 Variant of the default (teacher-forced, 1127 tokens) & top-1 \\
 \midrule
-default: Apple's schedule, int8 KV emulation, $k=10$ & 91.75\% \\
+v1.0 default: Apple's schedule, int8 KV emulation, embedding $\times100$ & 91.75\% \\
 int8 KV emulation off & 90.77\% \\
 no re-pick during generation & 90.95\% \\
 re-pick takes effect one token later & 91.39\% \\

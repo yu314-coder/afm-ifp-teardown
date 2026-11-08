@@ -337,7 +337,6 @@ TEMPLATE = ("{%- set sys_default = SYS -%}\n"
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[1])
     ap.add_argument('-o', '--out', required=True); ap.add_argument('--asset'); ap.add_argument('--tokenizer')
-    ap.add_argument('--kscale', type=float, default=10.0, help='input embedding scale (fitted; 8..14 equivalent)')
     ap.add_argument('--no-kvq', action='store_true', help='do not store int8 K/V cache emulation scales')
     a = ap.parse_args(); t0 = time.time()
     P = locate(a); log('model asset:', P['meta'].get('display_version'), os.path.dirname(P['hwx']))
@@ -369,7 +368,7 @@ def main():
                   ('leading_dense_block_count', NDENSE), ('kv_reuse_first_layer', KVSRC+1)):
         w.add_uint32(p+k, v_)
     w.add_float32(p+'rope.freq_base', 500000.0); w.add_float32(p+'attention.layer_norm_rms_epsilon', 1.0014e-5)
-    w.add_float32(p+'embedding_scale', a.kscale)
+    w.add_float32(p+'embedding_scale', 1.0)   # Apple's gather has no multiply (recorded for clarity; the llama.cpp port ignores it)
     if kv: w.add_array(p+'attention.k_quant_scale', [float(x) for x in kv[0]]); w.add_array(p+'attention.v_quant_scale', [float(x) for x in kv[1]])
     w.add_tokenizer_model('llama'); w.add_tokenizer_pre('default')
     w.add_token_list(toks); w.add_token_scores([float(x) for x in scores]); w.add_token_types([int(x) for x in types])

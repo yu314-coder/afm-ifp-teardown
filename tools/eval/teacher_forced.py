@@ -55,7 +55,8 @@ def main():
     for i, (pre, tgt) in enumerate(seqs):
         ids = np.array(pre + tgt[:-1], np.int32); ids.tofile(f'{td}/{i}.bin')
         e = dict(env)
-        if '--per-token' not in flags: e['AFM_STEPWISE' if '--stepwise' in flags else 'AFM_ROUTE_SCHED'] = str(len(pre))
+        if '--per-token' in flags: e['AFM_INBIAS_FROM'] = str(len(pre))     # answer tokens are generated tokens
+        else: e['AFM_STEPWISE' if '--stepwise' in flags else 'AFM_ROUTE_SCHED'] = str(len(pre))
         subprocess.run([exe('llama-afm-logits'), gguf, f'{td}/{i}.bin', f'{td}/{i}.f32'], check=True, env=e,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         lg = np.fromfile(f'{td}/{i}.f32', np.float32).reshape(len(ids), -1)[len(pre) - 1:]

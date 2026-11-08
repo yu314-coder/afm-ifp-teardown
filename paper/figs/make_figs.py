@@ -55,17 +55,17 @@ ax.set_xlabel('layer'); ax.set_ylabel('best head self-rank\n(of 262k / 153k)'); 
 fig.tight_layout(); fig.savefig(f'{OUT}/fig_copy.pdf'); plt.close(fig)
 
 # 4. fidelity vs Apple's greedy answers (40 prompts, 1127 answer tokens, teacher-forced top-1)
-rows = [("exact template + Apple's expert schedule (default)", 91.75, BLUE),
-        ('exact template, pick from last prompt token, no re-pick', 91.04, ORANGE),
-        ('exact template, per-token routing', 90.51, ORANGE),
-        ('exact template, router on layer-12 FFN input', 89.44, GREY),
-        ('earlier one-turn template, per-token routing', 87.5, GREY),
-        ('exact template, pick from the prompt mean', 79.33, GREY)]
+rows = [("v1.1: no embedding multiplier, input bias on generated tokens only (default)", 96.10, BLUE),
+        ('v1.1, per-token routing', 93.79, ORANGE),
+        ('v1.1 with the input bias on every token (router sees it)', 92.64, ORANGE),
+        ("v1.0: embedding scaled x100 (bug), Apple's schedule", 91.75, GREY),
+        ('v1.0, per-token routing', 90.51, GREY),
+        ('earlier one-turn template, per-token routing', 87.5, GREY)]
 fig, ax = plt.subplots(figsize=(7.2, 2.5))
 y = np.arange(len(rows))[::-1]
 ax.barh(y, [r[1] for r in rows], color=[r[2] for r in rows])
 for yy, r in zip(y, rows): ax.text(r[1] + 0.3, yy, f'{r[1]:.1f}%', va='center', fontsize=7)
-ax.set_yticks(y); ax.set_yticklabels([r[0] for r in rows], fontsize=7); ax.set_xlim(75, 95)
+ax.set_yticks(y); ax.set_yticklabels([r[0] for r in rows], fontsize=7); ax.set_xlim(80, 100)
 ax.set_xlabel('teacher-forced top-1 agreement with Apple (%)')
 fig.tight_layout(); fig.savefig(f'{OUT}/fig_fidelity.pdf'); plt.close(fig)
 

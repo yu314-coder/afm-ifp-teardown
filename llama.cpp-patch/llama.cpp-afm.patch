@@ -206,10 +206,10 @@ index 1501e392c..d87cb22a7 100644
      template<typename T>
      bool llama_model_loader::get_key(const std::string & key, T & result, bool required) {
 diff --git a/src/llama-model.cpp b/src/llama-model.cpp
-index 72490a89b..8978a6772 100644
+index 72490a89b..200835872 100644
 --- a/src/llama-model.cpp
 +++ b/src/llama-model.cpp
-@@ -1097,6 +1097,25 @@ void llama_model::load_hparams(llama_model_loader & ml) {
+@@ -1097,6 +1097,27 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                  // Set non-causal attention for diffusion models
                  hparams.causal_attn = false;
              } break;
@@ -220,7 +220,9 @@ index 72490a89b..8978a6772 100644
 +                ml.get_key(LLM_KV_LEADING_DENSE_BLOCK_COUNT,         hparams.n_layer_dense_lead);
 +                ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp);
 +                ml.get_key(LLM_KV_EXPERT_SHARED_FEED_FORWARD_LENGTH, hparams.n_ff_shexp);
-+                ml.get_key(LLM_KV_EMBEDDING_SCALE,                   hparams.f_embedding_scale);
++                // Apple's embedding gather has no multiply (x0 = code*scale + input_bias). Older converter output stored a
++                // fitted 10.0 here, which the generic build_inp_embd() then applied a second time; ignore the key.
++                hparams.f_embedding_scale = 0.0f;
 +                uint32_t kv_first = hparams.n_layer;
 +                ml.get_key(LLM_KV_KV_REUSE_FIRST_LAYER,              kv_first, false);
 +                hparams.n_layer_kv_from_start = kv_first;
@@ -235,7 +237,7 @@ index 72490a89b..8978a6772 100644
          case LLM_ARCH_QWEN2MOE:
              {
                  ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
-@@ -3601,6 +3620,55 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -3601,6 +3622,55 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                          layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff}, 0);
                      }
                  } break;
@@ -291,7 +293,7 @@ index 72490a89b..8978a6772 100644
              case LLM_ARCH_QWEN2MOE:
                  {
                      tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
-@@ -7108,6 +7176,27 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -7108,6 +7178,27 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
          }
      }
  
@@ -319,7 +321,7 @@ index 72490a89b..8978a6772 100644
      if (ml.no_alloc) {
          return true;
      }
-@@ -7569,6 +7658,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+@@ -7569,6 +7660,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
                  } else {
                      llama_memory_i::layer_reuse_cb reuse = nullptr;
  
@@ -336,7 +338,7 @@ index 72490a89b..8978a6772 100644
                      if (arch == LLM_ARCH_GEMMA3N) {
                          reuse = [&](int32_t il) {
                              if (il >= (int32_t) hparams.n_layer_kv_from_start) {
-@@ -7612,7 +7711,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+@@ -7612,7 +7713,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
                                  hparams.n_swa,
                                  hparams.swa_type,
                                  nullptr,
@@ -345,7 +347,7 @@ index 72490a89b..8978a6772 100644
                      }
                  }
              }
-@@ -7729,6 +7828,10 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
+@@ -7729,6 +7830,10 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
              {
                  llm = std::make_unique<llm_build_qwen2vl>(*this, params);
              } break;
@@ -356,7 +358,7 @@ index 72490a89b..8978a6772 100644
          case LLM_ARCH_QWEN2MOE:
              {
                  llm = std::make_unique<llm_build_qwen2moe>(*this, params);
-@@ -8285,6 +8388,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+@@ -8285,6 +8390,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
          case LLM_ARCH_QWEN:
          case LLM_ARCH_QWEN2:
          case LLM_ARCH_DREAM:
@@ -403,15 +405,18 @@ index d1de16e3f..b27f26510 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..24a366f40
+index 000000000..83a8ac6eb
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,354 @@
+@@ -0,0 +1,469 @@
 +#include "models.h"
 +
 +#include <algorithm>
 +#include <cstdlib>
 +#include <cmath>
++#include <cstdio>
++#include <string>
++#include <vector>
 +
 +static float afm_env_f(const char * k, float d) { const char * v = getenv(k); return v ? (float) atof(v) : d; }
 +
@@ -458,9 +463,67 @@ index 000000000..24a366f40
 +    const bool    prompt_own;   // prompt-chunk tokens route on their own logits (the pick for generation is unchanged)
 +};
 +
++// Apple runs prompt chunks through the prompt_opt procedures, whose layer-0 constant is zero, and generated tokens through
++// the extend procedures, which add the input bias. 1 = this token gets the bias: a lone token of its sequence in the
++// ubatch (a decode step); 0 = part of a multi-token run of one sequence (a prompt chunk).
++class llm_graph_input_afm_bias_mask : public llm_graph_input_i {
++public:
++    void set_input(const llama_ubatch * ub) override {
++        const int64_t T = ub->n_tokens;
++        std::vector<float> m(T);
++        for (int64_t i = 0; i < T; ++i) {
++            int64_t cnt = 0;
++            for (int64_t j = 0; j < T; ++j) { cnt += ub->seq_id[j][0] == ub->seq_id[i][0]; }
++            m[i] = cnt == 1 ? 1.0f : 0.0f;
++        }
++        ggml_backend_tensor_set(t, m.data(), 0, T*sizeof(float));
++    }
++    bool can_reuse(const llm_graph_params & params) override { return t->ne[1] == (int64_t) params.ubatch.n_tokens; }
++    ggml_tensor * t = nullptr;   // F32 [1, T]
++};
++
++// research: Neural Engine elementwise functions as exact lookup tables. AFM_ANE_SILU=<file> holds 65536 fp16 outputs
++// indexed by the fp16 bit pattern of the input (tabulated on the ANE through CoreML); the input is rounded to fp16
++// first, as on the ANE. CPU custom op (the scheduler runs it on the CPU backend).
++static const uint16_t * afm_load_lut(const char * env) {
++    static std::vector<std::pair<std::string, std::vector<uint16_t>>> cache;
++    const char * path = getenv(env);
++    if (!path) { return nullptr; }
++    for (auto & c : cache) { if (c.first == path) { return c.second.data(); } }
++    std::vector<uint16_t> t(65536);
++    FILE * f = fopen(path, "rb");
++    if (!f || fread(t.data(), 2, 65536, f) != 65536) { fprintf(stderr, "%s: cannot read 65536 fp16 from %s\n", env, path); if (f) fclose(f); return nullptr; }
++    fclose(f); cache.push_back({path, std::move(t)}); return cache.back().second.data();
++}
++static void afm_lut_op(ggml_tensor * dst, const ggml_tensor * a, int ith, int nth, void * ud) {
++    const uint16_t * tab = (const uint16_t *) ud;
++    const int64_t n = ggml_nelements(dst), per = (n + nth - 1) / nth, i0 = per * ith, i1 = std::min<int64_t>(n, i0 + per);
++    const float * x = (const float *) a->data; float * y = (float *) dst->data;
++    for (int64_t i = i0; i < i1; ++i) { y[i] = ggml_fp16_to_fp32((ggml_fp16_t) tab[(uint16_t) ggml_fp32_to_fp16(x[i])]); }
++}
++
++// research: AFM_ROUTE_FORCE=<file> replaces the router logits of a batch with float32 [T, n_expert * n_sparse_layers]
++// read from the file (row t = token t); only the top-k selection matters, the routed experts are summed unweighted
++class llm_graph_input_afm_force : public llm_graph_input_i {
++public:
++    explicit llm_graph_input_afm_force(const char * path) : path(path) {}
++    void set_input(const llama_ubatch *) override {
++        std::vector<float> buf(ggml_nelements(t), 0.0f);
++        if (FILE * f = fopen(path.c_str(), "rb")) {
++            const size_t n = fread(buf.data(), sizeof(float), buf.size(), f); fclose(f);
++            if (n != buf.size()) { fprintf(stderr, "AFM_ROUTE_FORCE: %s has %zu of %zu floats\n", path.c_str(), n, buf.size()); }
++        } else { fprintf(stderr, "AFM_ROUTE_FORCE: cannot read %s\n", path.c_str()); }
++        ggml_backend_tensor_set(t, buf.data(), 0, ggml_nbytes(t));
++    }
++    bool can_reuse(const llm_graph_params &) override { return false; }
++    ggml_tensor * t = nullptr;
++    std::string path;
++};
++
 +// Apple Foundation Model, on-device "afmplus-v11.2-ifp" (3B, Instruction-Following-Pruned sparse FFN).
 +//
-+//   L0:   x = k * embd + inp_bias                                   (no norm on the first layer input)
++//   L0:   x = embd (+ inp_bias on generated tokens only; prompt chunks add nothing, as in Apple's prompt_opt procedures)
++//         embd = int4 code * per-token scale; no multiplier, no norm on the first layer input
 +//   L>0:  x = rms(h) * layer_out_norm[L-1]
 +//         h'  = x + rms(attn(x)) * attn_post_norm                   (post-LN "x/y" residual: residual is the
 +//         y   = rms(h') * ffn_norm                                    normalised stream, not raw h)
@@ -481,7 +544,7 @@ index 000000000..24a366f40
 +    ggml_tensor * inpL = build_inp_embd(model.tok_embd);
 +    // research knobs (unset = model defaults): AFM_KSCALE, AFM_NO_SHEXP, AFM_NO_ROUTED, AFM_NUSED, AFM_KVQ=0,
 +    // AFM_ROUTE_POOL/_START/_MODE (pool router input over a token range), AFM_ROUTE_CUM (causal prefix-mean routing)
-+    const float kscale    = afm_env_f("AFM_KSCALE", hparams.f_embedding_scale);
++    const float kscale    = afm_env_f("AFM_KSCALE", 1.0f);   // research multiplier; Apple applies none
 +    const bool  no_shexp  = afm_env_f("AFM_NO_SHEXP", 0) != 0;
 +    const bool  no_routed = afm_env_f("AFM_NO_ROUTED", 0) != 0;
 +    const int   n_used    = (int) afm_env_f("AFM_NUSED", (float) n_expert_used);
@@ -509,10 +572,35 @@ index 000000000..24a366f40
 +        r = ggml_scale_bias(ctx0, r, 1.0f, -12582912.0f);
 +        return ggml_scale(ctx0, ggml_clamp(ctx0, r, -127.0f, 127.0f), 1.0f/s); };
 +    const bool  route_cum = afm_env_f("AFM_ROUTE_CUM", 0) != 0;
++    const bool  gamma_first = afm_env_f("AFM_QK_GAMMA_FIRST", 0) != 0;   // research: q/k gain before RoPE
++    const uint16_t * lut_silu = afm_load_lut("AFM_ANE_SILU");          // research: ANE SiLU table for the FFNs
++    const uint16_t * lut_silu_r = afm_load_lut("AFM_ANE_SILU_ROUTER"); // research: ANE SiLU table for the router
++    auto lut_apply = [&](ggml_tensor * t, const uint16_t * tab) {
++        return ggml_map_custom1(ctx0, ggml_cont(ctx0, t), afm_lut_op, GGML_N_TASKS_MAX, (void *) tab); };
++    auto ffn_lut = [&](ggml_tensor * yy, ggml_tensor * wu, ggml_tensor * wg, ggml_tensor * wd) {
++        ggml_tensor * u = build_lora_mm(wu, yy), * g = build_lora_mm(wg, yy);
++        return build_lora_mm(wd, ggml_mul(ctx0, lut_apply(g, lut_silu), u)); };
 +    if (ubatch.token) {
 +        inpL = ggml_scale(ctx0, inpL, kscale);
 +    }
-+    inpL = ggml_add(ctx0, inpL, model.inp_bias);
++    if (afm_env_f("AFM_INBIAS_MUL", 1.0f) != 0.0f) {   // research: AFM_INBIAS_MUL scales (0 removes) the layer-0 input bias
++        ggml_tensor * bias = ggml_scale(ctx0, model.inp_bias, afm_env_f("AFM_INBIAS_MUL", 1.0f));
++        ggml_tensor * m = nullptr;   // [1, T]: which tokens get the bias
++        const int from = (int) afm_env_f("AFM_INBIAS_FROM", afm_env_f("AFM_ROUTE_SCHED", 0));
++        if (afm_env_f("AFM_INBIAS_ALL", 0) != 0) {
++            // research: bias on every token (the pre-2026-11-08 behaviour)
++        } else if (from > 0) {
++            // teacher-forced batch from position 0 with a prompt of `from` tokens: bias on the answer positions only
++            ggml_tensor * t = ggml_arange(ctx0, 0.0f, (float) n_tokens, 1.0f);
++            m = ggml_reshape_2d(ctx0, ggml_clamp(ctx0, ggml_scale_bias(ctx0, t, 1.0f, 1.0f - (float) from), 0.0f, 1.0f), 1, n_tokens);
++        } else {
++            auto inp = std::make_unique<llm_graph_input_afm_bias_mask>();
++            inp->t = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 1, n_tokens); ggml_set_input(inp->t);
++            m = inp->t; res->add_input(std::move(inp));
++        }
++        if (m) { bias = ggml_mul(ctx0, ggml_repeat(ctx0, ggml_reshape_2d(ctx0, bias, n_embd, 1), inpL), m); }
++        inpL = ggml_add(ctx0, inpL, bias);
++    }
 +    cb(inpL, "inp_scaled", -1);
 +
 +    ggml_tensor * inp_pos     = build_inp_pos();
@@ -560,6 +648,13 @@ index 000000000..24a366f40
 +        const auto & layer = model.layers[il];
 +
 +        ggml_tensor * x = il == 0 ? inpL : build_norm(h, model.layers[il - 1].layer_out_norm, NULL, LLM_NORM_RMS, il);
++        if (il == (int) afm_env_f("AFM_X_FORCE_LAYER", -1) && getenv("AFM_X_FORCE")) {
++            // research: replace this layer's input with float32 [T, n_embd] from a file (e.g. computed on the ANE)
++            auto inp = std::make_unique<llm_graph_input_afm_force>(getenv("AFM_X_FORCE"));
++            inp->t = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd, x->ne[1]); ggml_set_input(inp->t);
++            x = ggml_add(ctx0, ggml_scale(ctx0, x, 0.0f), inp->t);   // keep the earlier graph alive (inputs stay allocated)
++            res->add_input(std::move(inp));
++        }
 +        cb(x, "attn_in", il);
 +
 +        auto route_block = [&](ggml_tensor * x) {
@@ -581,14 +676,15 @@ index 000000000..24a366f40
 +            auto router_net = [&](ggml_tensor * in) {
 +                ggml_tensor * r = build_lora_mm(layer.ifp_router_fc1, in);
 +                r = ggml_add(ctx0, r, layer.ifp_router_fc1_b);
-+                r = ggml_silu(ctx0, r);
++                r = lut_silu_r ? lut_apply(r, lut_silu_r) : ggml_silu(ctx0, r);
 +                r = build_norm(r, layer.ifp_router_norm, NULL, LLM_NORM_RMS, il);
 +                r = build_lora_mm(layer.ifp_router_fc2, r);
 +                return ggml_add(ctx0, r, layer.ifp_router_fc2_b);
 +            };
 +            router_logits = router_net(r_in);
 +            ggml_tensor * per_tok = (r_in == x) ? router_logits : router_net(x);                    // [E*layers, T]
-+            const bool apple_sched = model.afm_route_state && afm_env_f("AFM_ROUTE_TOKEN", 0) == 0 && pool_n == 0 && !route_cum;
++            const bool apple_sched = model.afm_route_state && afm_env_f("AFM_ROUTE_TOKEN", 0) == 0 && pool_n == 0 && !route_cum &&
++                                     !getenv("AFM_ROUTE_FORCE");
 +            if (apple_sched && sched_p == 0) {
 +                auto inp = std::make_unique<llm_graph_input_afm_route>(model.afm_route_state->ne[1] - 1, std::max(1, sched_f), prompt_own);
 +                const int64_t T = per_tok->ne[1];
@@ -650,6 +746,12 @@ index 000000000..24a366f40
 +                }
 +            }
 +            cb(router_logits, "ifp_router_logits", il);
++            if (const char * fp = getenv("AFM_ROUTE_FORCE")) {
++                auto inp = std::make_unique<llm_graph_input_afm_force>(fp);
++                inp->t = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, router_logits->ne[0], x->ne[1]); ggml_set_input(inp->t);
++                router_logits = inp->t;
++                res->add_input(std::move(inp));
++            }
 +                };
 +        if (il == n_dense && !route_at_ffn) { route_block(x); }
 +
@@ -658,8 +760,12 @@ index 000000000..24a366f40
 +            ggml_tensor * Qcur = build_lora_mm(layer.wq, x);
 +            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens);
 +            Qcur = ggml_rms_norm(ctx0, Qcur, hparams.f_norm_rms_eps);
-+            Qcur = rope(Qcur);
-+            Qcur = ggml_mul(ctx0, Qcur, layer.attn_q_norm);
++            if (gamma_first) {   // research: gain before RoPE
++                Qcur = rope(ggml_mul(ctx0, Qcur, layer.attn_q_norm));
++            } else {
++                Qcur = rope(Qcur);
++                Qcur = ggml_mul(ctx0, Qcur, layer.attn_q_norm);
++            }
 +            cb(Qcur, "Qcur", il);
 +
 +            if (hparams.has_kv(il)) {
@@ -668,12 +774,19 @@ index 000000000..24a366f40
 +                Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
 +                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
 +                Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps);
++                if (gamma_first && layer.attn_k_norm) { Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm); }
 +                Kcur = rope(Kcur);
-+                if (layer.attn_k_norm) {
++                if (gamma_first) {
++                } else if (layer.attn_k_norm) {
 +                    Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm);
++                } else if (const char * g = getenv("AFM_K_GAMMA_FROM")) {   // research: borrow a gain for a K without one
++                    const int src = atoi(g);
++                    ggml_tensor * gm = src < 0 ? layer.attn_q_norm : model.layers[src].attn_k_norm;
++                    if (gm) { Kcur = ggml_mul(ctx0, Kcur, gm); }
 +                }
-+                if (kvq) {
-+                    const float ks = hparams.k_quant_scale[il];
++                if (kvq && il >= (int) afm_env_f("AFM_KVQ_FROM", 0)) {   // research: AFM_KVQ_FROM=n skips int8 emulation below layer n
++                    float ks = hparams.k_quant_scale[il];
++                    if (ks == 0 && getenv("AFM_KQ_MISSING")) { ks = afm_env_f("AFM_KQ_MISSING", 0); }   // research: int8 K for layers without a decoded scale
 +                    const float vs = hparams.v_quant_scale[il];
 +                    if (ks > 0) { Kcur = fq8(Kcur, ks); }
 +                    if (vs > 0) { Vcur = fq8(Vcur, vs); }
@@ -697,6 +810,7 @@ index 000000000..24a366f40
 +        }
 +
 +        cur = build_norm(cur, layer.attn_post_norm, NULL, LLM_NORM_RMS, il);
++        if (il == 0 && getenv("AFM_L0_ATTN_MUL")) { cur = ggml_scale(ctx0, cur, afm_env_f("AFM_L0_ATTN_MUL", 1.0f)); }   // research
 +        if (f16_act >= 3) { cur = f16r(cur); }
 +        ggml_tensor * hp = ggml_add(ctx0, x, cur);
 +        if (f16_act >= 1) { hp = f16r(hp); }
@@ -707,14 +821,17 @@ index 000000000..24a366f40
 +        cb(y, "ffn_in", il);
 +
 +        ggml_tensor * f;
-+        if (il < n_dense) {
++        if (il < n_dense && lut_silu) {
++            f = ffn_lut(y, layer.ffn_up, layer.ffn_gate, layer.ffn_down);
++        } else if (il < n_dense) {
 +            f = build_ffn(y,
 +                    layer.ffn_up,   NULL, NULL,
 +                    layer.ffn_gate, NULL, NULL,
 +                    layer.ffn_down, NULL, NULL,
 +                    NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
 +        } else {
-+            ggml_tensor * shared = build_ffn(y,
++            ggml_tensor * shared = lut_silu ? ffn_lut(y, layer.ffn_up_shexp, layer.ffn_gate_shexp, layer.ffn_down_shexp) :
++                build_ffn(y,
 +                    layer.ffn_up_shexp,   NULL, NULL,
 +                    layer.ffn_gate_shexp, NULL, NULL,
 +                    layer.ffn_down_shexp, NULL, NULL,
@@ -732,7 +849,7 @@ index 000000000..24a366f40
 +            ggml_tensor * y3 = ggml_reshape_3d(ctx0, y, n_embd, 1, n_tok);
 +            ggml_tensor * up = build_lora_mm_id(layer.ffn_up_exps,   y3, sel); // [n_ff_exp, n_used, n_tok]
 +            ggml_tensor * gt = build_lora_mm_id(layer.ffn_gate_exps, y3, sel);
-+            ggml_tensor * act = ggml_swiglu_split(ctx0, gt, up);
++            ggml_tensor * act = lut_silu ? ggml_mul(ctx0, lut_apply(gt, lut_silu), up) : ggml_swiglu_split(ctx0, gt, up);
 +            ggml_tensor * ex  = build_lora_mm_id(layer.ffn_down_exps, act, sel); // [n_embd, n_used, n_tok]
 +            cb(ex, "ffn_moe_down", il);
 +
@@ -803,10 +920,10 @@ index 000000000..a1f3701dd
 +target_compile_features(${TARGET} PRIVATE cxx_std_17)
 diff --git a/tools/afm-logits/afm-logits.cpp b/tools/afm-logits/afm-logits.cpp
 new file mode 100644
-index 000000000..790db7d2e
+index 000000000..ce9e02b62
 --- /dev/null
 +++ b/tools/afm-logits/afm-logits.cpp
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,66 @@
 +// llama-afm-logits <model.gguf> <ids1.bin> <out1.f32> [<ids2.bin> <out2.f32> ...]
 +// Teacher-forced logits for every position of each token sequence (ids: int32 little-endian; out: float32 [T, n_vocab]).
 +// Used to measure next-token agreement with Apple's live model (see tools/eval in afm-ifp-teardown).
@@ -824,11 +941,13 @@ index 000000000..790db7d2e
 +// env AFM_DUMP_ROUTER=<file>: also write the per-token IFP router logits (tensor "ifp_router_logits-12") of the last sequence
 +static const char * g_dump = nullptr;
 +static bool dump_cb(ggml_tensor * t, bool ask, void *) {
++    const char * extra = getenv("AFM_DUMP_EXTRA");   // also dump one more named tensor to <file>.<name>
 +    const bool is_r = strcmp(t->name, "ifp_router_logits-12") == 0, is_x = strcmp(t->name, "attn_in-12") == 0;
-+    if (!g_dump || !(is_r || is_x) || !ggml_is_contiguous(t) || t->type != GGML_TYPE_F32) return ask ? false : true;
++    const bool is_e = extra && strcmp(t->name, extra) == 0;
++    if (!g_dump || !(is_r || is_x || is_e) || !ggml_is_contiguous(t) || t->type != GGML_TYPE_F32) return ask ? false : true;
 +    if (ask) return true;
 +    std::vector<float> buf(ggml_nelements(t)); ggml_backend_tensor_get(t, buf.data(), 0, ggml_nbytes(t));
-+    std::string fn = std::string(g_dump) + (is_x ? ".x" : "");
++    std::string fn = std::string(g_dump) + (is_e ? std::string(".") + extra : (is_x ? ".x" : ""));
 +    FILE * f = fopen(fn.c_str(), "wb"); if (!f) return true; fwrite(buf.data(), 4, buf.size(), f); fclose(f);
 +    fprintf(stderr, "router logits %lld x %lld -> %s\n", (long long) t->ne[0], (long long) t->ne[1], fn.c_str());
 +    return true;
