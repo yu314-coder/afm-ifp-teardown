@@ -615,8 +615,10 @@ def vision_model():
 def write_vision(out):
     m = vision_model(); M = m['M']
     log(f"image encoder: ViT {V_L} layers d{V_D}, global layers {V_GLOBAL}, rms eps {m['eps']:.4g}, folded residual scale {m['fold']:.4g} undone")
-    # Apple rotates interleaved pairs (2i, 2i+1); llama.cpp's vision RoPE rotates (i, i+32): permute q/k head dims to match
-    hp = np.concatenate([np.arange(0, 64, 2), np.arange(1, 64, 2)])
+    # Apple rotates interleaved pairs (2p, 2p+1) and alternates the axes: pair 2f = y, pair 2f+1 = x, both at frequency f.
+    # llama.cpp's vision RoPE rotates (j, j+32) with y on j < 16 and x on j >= 16 (frequency j mod 16): permute q/k head dims
+    pj = np.array([2*j if j < 16 else 2*(j-16)+1 for j in range(32)])
+    hp = np.concatenate([2*pj, 2*pj+1])
     perm = (np.arange(16)[:, None]*64 + hp[None]).reshape(-1)
     w = gguf.GGUFWriter(path=None, arch='clip')
     w.add_name(f'Apple Foundation Model {DISPLAY} image encoder - local conversion')

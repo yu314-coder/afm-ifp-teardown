@@ -16,7 +16,7 @@ your own Mac.
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
 | Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
 | Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: 43% next-token agreement with Apple, exact `afm-draft` GGUF, lossless speculation |
-| Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded and running as llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.96–0.99); colours and scene gist right, text not yet |
+| Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -103,7 +103,7 @@ for llama.cpp's `mtmd`:
 ```bash
 python3 afm2gguf/afm2gguf.py --vision -o afm-v11.2-vision.gguf          # 685 MiB, projector type afm
 llama-mtmd-cli -m afm-v11.2-ifp.gguf --mmproj afm-v11.2-vision.gguf --image photo.jpg --temp 0 \
-  -p "Describe this image in one sentence.
+  -sys "You are a helpful, concise assistant." -p "Describe this image in one sentence.
 <__media__>"
 ```
 
@@ -113,14 +113,18 @@ are sized as Apple does it (aspect kept, at most 338,688 pixels, sides in multip
 from the asset's Neural Engine program, including two things the compiler had folded in: a 0.01 pre-norm scale in
 the last layer and activation tables in place of SiLU/GELU.
 
-Apple's encoder itself runs from our own process, so it is a direct reference. On identical inputs, our encoder matches it
-at cosine 0.987 per token on constant images and 0.962 on photos (llama.cpp: 0.957; Metal and CPU agree to
-0.9999). Through the 3B GGUF, it names all 8 colours of a colour probe (1/8 without the image) and gives the same
-answers as Apple's own encoder on a shape probe. Captions get colours, backgrounds and scene gist
-("This image shows a rainbow flag with seven horizontal stripes of red, orange, yellow, green, blue, and purple."), but text and simple
-shapes are **not read yet** ("HELLO" comes out as geometric shapes). The remaining difference is in the host-side
-inputs (pixel normalisation, position table, RoPE matrices) or in how the 3B treats image tokens; see the paper,
-Section "The image encoder".
+Apple's encoder itself runs from our own process, so it is a direct reference. On identical inputs our encoder
+matches it at cosine 0.987 per token on constant images and 0.95–0.97 on photos (llama.cpp: 0.95; Metal and CPU agree
+to 0.9999). The decisive host-side detail was the 2D RoPE layout: Apple alternates row and column rotations pair by
+pair. With it, the 3B GGUF answers spatial questions as Apple's model does and reads text. Teacher-forced on Apple's
+captions of 13 images it predicts Apple's next token 94.0% of the time (Apple's own encoder, same inputs: 92.9%;
+no image: 58.9%), and 5 of the 13 free-running captions through llama.cpp are identical to Apple's, e.g.
+
+> The word "HELLO" is written in black capital letters on a white background.
+
+The rest are close paraphrases ("The image shows a math problem: "2 + 3 = ?"." for Apple's "…a mathematical
+equation: 2 + 3 = ?."). Use `-sys "You are a helpful, concise assistant."` to match the instructions those
+comparisons used.
 
 ## How faithful is it?
 
