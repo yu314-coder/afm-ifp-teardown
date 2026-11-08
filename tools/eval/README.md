@@ -10,8 +10,8 @@ python3 tools/eval/free_running.py   afm-v11.2-ifp.gguf llama.cpp/build/bin orac
 ```
 
 * **Teacher-forced agreement**: Apple's answer is fed to the GGUF token by token; at each position, is the GGUF's most
-  likely next token the one Apple produced? (Expected with v1.2: 0.9672, 1090/1127, first answer token 38/40 on
-  macOS 27.0 26A5378n, asset 8d6a1a11; with `AFM_EXACT_SILU=1`: 0.9610.) `--per-token` uses per-token expert routing instead of Apple's schedule.
+  likely next token the one Apple produced? (Expected with v1.3: 0.9698, 1093/1127, first answer token 38/40 on
+  macOS 27.0 26A5378n, asset 8d6a1a11; extended set 0.9491, 5168/5445.) `--per-token` uses per-token expert routing instead of Apple's schedule.
 * **Free-running**: the GGUF answers on its own; reports answers identical to Apple's character for character
   (expected: 17/40).
 

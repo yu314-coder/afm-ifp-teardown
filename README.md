@@ -14,7 +14,7 @@ your own Mac.
 | Weights | Apple's 2-bit codes and fp16 scales carried into Q2_K **bit-exactly**; int4 embedding as Q4_0 (exact) |
 | Prompt format | Apple's `afm_cider_v2` template, decoded from the runtime and verified against `SystemLanguageModel.tokenCount` |
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
-| Fidelity | **96.7%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens); 17/40 answers identical character for character |
+| Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -57,7 +57,8 @@ instructions), on 40 prompts (reproduce with [`tools/eval`](tools/eval)):
 
 | Version / expert routing | next-token agreement (teacher-forced) | first answer token | answers identical to Apple's |
 |---|---|---|---|
-| **v1.2**, Apple's schedule + Neural Engine SiLU (default) | **96.7%** | 38/40 | **17/40** |
+| **v1.3**, as v1.2 + no input bias at re-pick tokens (default) | **97.0%** | 38/40 | **17/40** |
+| v1.2, Apple's schedule + Neural Engine SiLU | 96.7% | 38/40 | 17/40 |
 | v1.1 = v1.2 with `AFM_EXACT_SILU=1` | 96.1% | 37/40 | 17/40 |
 | v1.1, per token (`AFM_ROUTE_TOKEN=1`) | 93.8% | 36/40 | 12/40 |
 | v1.0, Apple's schedule | 91.7% | 35/40 | 7/40 |
@@ -69,6 +70,8 @@ instructions), on 40 prompts (reproduce with [`tools/eval`](tools/eval)):
 
 **What changed in v1.2:** the FFN activation uses Apple's Neural Engine SiLU by default. It is a 33-knot piecewise-linear table (fp16 output); Apple's program contains the identical table once per FFN task. We measured it on the Neural Engine through Core ML and reproduce it to within one fp16 step for every input. `AFM_EXACT_SILU=1` switches back to the exact function.
 
+**What changed in v1.3:** at a re-pick (every 32nd position), Apple runs a dense-only function on that token, and like the prompt procedures it adds no layer-0 bias. The port now does the same. On the 230-prompt set this is worth +0.08 points (12 tokens fixed, 7 broken), and it brings our expert-change counts slightly closer to Apple's.
+
 Old GGUFs work with the current patch; nothing needs to be re-converted.
 
 "Answers identical" compares our free-running greedy answer with Apple's character for character; a single different
@@ -79,7 +82,8 @@ own expert re-picks, our router changes as many experts per re-pick as Apple's (
 
 | Variant (teacher-forced, 6572 tokens) | agreement | vs default: fixed / broken |
 |---|---|---|
-| **v1.2 default** | **95.19%** | – |
+| **v1.3 default** | **95.27%** | 12 / 7 vs v1.2 |
+| v1.2 default | 95.19% | – |
 | exact SiLU (`AFM_EXACT_SILU=1`) | 94.17% | 72 / 139 |
 | per-token routing | 93.34% | – |
 | fp16 rounding of every matmul output (`AFM_MM_F16=1`) | 95.13% | 30 / 34 |
@@ -87,10 +91,13 @@ own expert re-picks, our router changes as many experts per re-pick as Apple's (
 | int8 rounding by truncation instead of to-nearest | 94.05% | 64 / 139 |
 | keys quantised before their gain | 95.09% | 43 / 50 |
 | RoPE tables rounded to fp16 | 94.99% | 21 / 34 |
+| re-picks that favour already-loaded experts | 95.15% | – |
 
 Apple's log also confirms the re-pick timing: around a boundary its runtime steps one token at a time, then logs "Picking IFP experts at position=96".
 
 **Why 100% is out of reach from outside.** We rebuilt the 12 dense layers as a Core ML program on the real Neural Engine and injected its layer-12 state into llama.cpp. Agreement stayed the same (94.9% vs 95.2%), but 3.4% of tokens flipped in both directions. Two plausible versions of the hardware arithmetic disagree on as many tokens as separate us from Apple, and Core ML does not compile our graph into Apple's hand-built Neural Engine program. The last few percent are therefore set by Apple's exact rounding, not by anything missing from the model.
+
+**Apple's expert decisions, measured.** Apple logs each pick, but the expert list is redacted as sensitive. Its public cache counter (`replaced=` at each re-pick) still shows how many experts changed. Our router predicts those counts with r = 0.93 and a mean miss of 4.6 out of about 40 changed experts. The miss is the same, within noise, for every arithmetic variant, including the state computed on the Neural Engine. So our expert picks are within a few of Apple's 1012 per pick, and no rounding model we can build gets closer.
 
 **What still differs.** 37 of 1127 answer tokens on the 40-prompt set (316 of 6572 on the larger one; 2.9% of tokens are missed whatever the routing, 1.9% only with Apple's schedule). Apple's token is almost always our second or third choice. The weights, tokenizer, prompt format, layer-0 input, attention scale and expert schedule all match Apple's; each was checked separately (see the paper).
 

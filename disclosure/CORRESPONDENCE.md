@@ -5,7 +5,7 @@ against what Apple was told and when. Apple's replies are quoted only in the ope
 that state their determination; the full messages are retained privately and are not reproduced
 here.
 
-**Portal cases:** `OE11069002425417` (closed), `OE1107308765845` (open)
+**Portal cases:** `OE11069002425417` (closed), `OE1107308765845` (closed; status seen 8 November 2026)
 **Original title:** `OE11069002425417` — *Weight recoverability in the shipped Apple Intelligence
 on-device model assets*
 **Email thread reference:** `OE01069008668316`
@@ -118,6 +118,19 @@ for and not submitted for the Apple Security Bounty**.
 
 Contents: (1) the severity correction from §4, (2) the publication question from §5, (3) the
 activation-capture question, flagged as not a security issue.
+
+---
+
+## Follow-up case closed — status as of 8 November 2026
+
+The portal shows case `OE1107308765845` as **Closed**, with the portal's standard status text:
+"We're unable to identify a security issue in your report." Like the original case, it invites new
+information as a comment.
+
+On 8 November 2026 (18:04) a comment was added to that case. It asks Product Security to forward the
+licensing question (sent to Apple Legal the same day through the Rights and Permissions form) to the
+right contact, or to name that contact. It restates that only original code and measurements are
+published, and that nothing derived from the weights will be published until Apple replies.
 
 ---
 

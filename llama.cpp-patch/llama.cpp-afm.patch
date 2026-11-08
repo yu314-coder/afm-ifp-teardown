@@ -431,10 +431,10 @@ index d1de16e3f..2809c0fbf 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..afa4c5594
+index 000000000..b8ce3e4b5
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,509 @@
+@@ -0,0 +1,520 @@
 +#include "models.h"
 +
 +#include <algorithm>
@@ -494,18 +494,21 @@ index 000000000..afa4c5594
 +// ubatch (a decode step); 0 = part of a multi-token run of one sequence (a prompt chunk).
 +class llm_graph_input_afm_bias_mask : public llm_graph_input_i {
 +public:
++    explicit llm_graph_input_afm_bias_mask(int64_t freq) : freq(freq) {}
 +    void set_input(const llama_ubatch * ub) override {
 +        const int64_t T = ub->n_tokens;
 +        std::vector<float> m(T);
 +        for (int64_t i = 0; i < T; ++i) {
 +            int64_t cnt = 0;
 +            for (int64_t j = 0; j < T; ++j) { cnt += ub->seq_id[j][0] == ub->seq_id[i][0]; }
-+            m[i] = cnt == 1 ? 1.0f : 0.0f;
++            // a re-pick token (position a multiple of the selection frequency) runs Apple's dense-only function: no bias
++            m[i] = (cnt == 1 && (freq <= 0 || ub->pos[i] % freq != 0)) ? 1.0f : 0.0f;
 +        }
 +        ggml_backend_tensor_set(t, m.data(), 0, T*sizeof(float));
 +    }
 +    bool can_reuse(const llm_graph_params & params) override { return t->ne[1] == (int64_t) params.ubatch.n_tokens; }
 +    ggml_tensor * t = nullptr;   // F32 [1, T]
++    const int64_t freq;
 +};
 +
 +// research: Neural Engine elementwise functions as exact lookup tables. AFM_ANE_SILU=<file> holds 65536 fp16 outputs
@@ -548,7 +551,8 @@ index 000000000..afa4c5594
 +
 +// Apple Foundation Model, on-device "afmplus-v11.2-ifp" (3B, Instruction-Following-Pruned sparse FFN).
 +//
-+//   L0:   x = embd (+ inp_bias on generated tokens only; prompt chunks add nothing, as in Apple's prompt_opt procedures)
++//   L0:   x = embd (+ inp_bias on generated tokens only; prompt chunks and re-pick tokens add nothing, as in Apple's
++//         prompt_opt and dense-only re-pick procedures)
 +//         embd = int4 code * per-token scale; no multiplier, no norm on the first layer input
 +//   L>0:  x = rms(h) * layer_out_norm[L-1]
 +//         h'  = x + rms(attn(x)) * attn_post_norm                   (post-LN "x/y" residual: residual is the
@@ -649,8 +653,15 @@ index 000000000..afa4c5594
 +            // teacher-forced batch from position 0 with a prompt of `from` tokens: bias on the answer positions only
 +            ggml_tensor * t = ggml_arange(ctx0, 0.0f, (float) n_tokens, 1.0f);
 +            m = ggml_reshape_2d(ctx0, ggml_clamp(ctx0, ggml_scale_bias(ctx0, t, 1.0f, 1.0f - (float) from), 0.0f, 1.0f), 1, n_tokens);
++            if (afm_env_f("AFM_INBIAS_SKIP_REPICK", 1) != 0) {
++                // research: re-pick tokens (positions >= from that are multiples of 32) run Apple's dense-only function, no bias
++                const int f = (int) afm_env_f("AFM_ROUTE_FREQ", 32);
++                ggml_tensor * fl = ggml_scale_bias(ctx0, ggml_scale_bias(ctx0, ggml_scale_bias(ctx0, t, 1.0f/f, -0.5f + 0.5f/f), 1.0f, 12582912.0f), 1.0f, -12582912.0f);
++                ggml_tensor * isb = ggml_clamp(ctx0, ggml_scale_bias(ctx0, ggml_abs(ctx0, ggml_sub(ctx0, ggml_scale(ctx0, fl, (float) f), t)), -1.0f, 1.0f), 0.0f, 1.0f); // 1 at multiples of f
++                m = ggml_sub(ctx0, m, ggml_mul(ctx0, m, ggml_reshape_2d(ctx0, isb, 1, n_tokens)));
++            }
 +        } else {
-+            auto inp = std::make_unique<llm_graph_input_afm_bias_mask>();
++            auto inp = std::make_unique<llm_graph_input_afm_bias_mask>(afm_env_f("AFM_INBIAS_SKIP_REPICK", 1) != 0 ? sched_f : 0);
 +            inp->t = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 1, n_tokens); ggml_set_input(inp->t);
 +            m = inp->t; res->add_input(std::move(inp));
 +        }
