@@ -5,7 +5,7 @@ against what Apple was told and when. Apple's replies are quoted only in the ope
 that state their determination; the full messages are retained privately and are not reproduced
 here.
 
-**Portal cases:** `OE11069002425417` (closed), `OE1107308765845` (closed; status seen 8 November 2026)
+**Portal cases:** `OE11069002425417` (closed), `OE1107308765845` (reopened by a comment, Received), `OE1104472956171` (permission request, Received)
 **Original title:** `OE11069002425417` — *Weight recoverability in the shipped Apple Intelligence
 on-device model assets*
 **Email thread reference:** `OE01069008668316`
@@ -156,3 +156,17 @@ shipped assets appear in this repository, and none will.** What is published is 
 original code, and measurements — the same category as any published format teardown.
 
 Any reply from Apple will be added here.
+
+---
+
+## New portal case: permission request — 8 November 2026
+
+Because comments on a closed case may not be read, the licensing question was filed as a new report in the
+security portal: `OE1104472956171`, *Permission request: open-source release of an AFM reconstruction (not a
+security report)*. It states up front that it is not a security report, and asks Product Security to route it or
+name the right contact. It asks: (1) whether Apple objects to the code-only repository staying public under the MIT
+license, (2) whether the converted model files may be published on GitHub or Hugging Face and on what terms, and
+(3) what Apple would want changed in the code-only release. It repeats that nothing derived from Apple's weights will
+be published unless Apple agrees. The form's required fields that do not apply ("what is required to reproduce", and
+the proof of concept) were answered "Not applicable – this is a permission request". Status: Received. The portal says
+reviews usually take about a week. The comment added earlier the same day returned case `OE1107308765845` to Received.
