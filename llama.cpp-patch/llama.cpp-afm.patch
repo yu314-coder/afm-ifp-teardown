@@ -444,11 +444,12 @@ index d1de16e3f..2809c0fbf 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..b8ce3e4b5
+index 000000000..c6fb3a9da
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,520 @@
+@@ -0,0 +1,542 @@
 +#include "models.h"
++#include "../llama-adapter.h"
 +
 +#include <algorithm>
 +#include <cstdlib>
@@ -590,7 +591,20 @@ index 000000000..b8ce3e4b5
 +    const float kscale    = afm_env_f("AFM_KSCALE", 1.0f);   // research multiplier; Apple applies none
 +    const bool  no_shexp  = afm_env_f("AFM_NO_SHEXP", 0) != 0;
 +    const bool  no_routed = afm_env_f("AFM_NO_ROUTED", 0) != 0;
-+    const int   n_used    = (int) afm_env_f("AFM_NUSED", (float) n_expert_used);
++    // IFP configuration (Apple config.json): ifp1/ifp2/ifp3 = 5/14/23 always-on experts (a prefix of the 23 stored) plus as
++    // many routed experts. The base model and the FM API use ifp3; feature adapters declare their own (lora_i1/i2/i3).
++    // the active feature adapter (an AFM LoRA written by afm2gguf --adapter) declares its IFP level in adapter.afm.ifp
++    int ifp_from_adapter = 0;
++    if (loras) {
++        for (const auto & [ad, sc] : *loras) {
++            if (sc == 0.0f) { continue; }
++            auto it = ad->gguf_kv.find("adapter.afm.ifp");
++            if (it != ad->gguf_kv.end()) { ifp_from_adapter = std::max(ifp_from_adapter, atoi(it->second.c_str())); }
++        }
++    }
++    const int   ifp       = (int) afm_env_f("AFM_IFP", ifp_from_adapter ? (float) ifp_from_adapter : 3.0f);
++    const int   n_static  = ifp == 1 ? 5 : ifp == 2 ? 14 : (int) (hparams.n_ff_shexp / hparams.n_ff_exp);
++    const int   n_used    = (int) afm_env_f("AFM_NUSED", ifp == 1 ? 5.0f : ifp == 2 ? 14.0f : (float) n_expert_used);
 +    const bool  kvq       = afm_env_f("AFM_KVQ", 1) != 0; // default on when the GGUF carries scales
 +    const int   pool_n    = (int) afm_env_f("AFM_ROUTE_POOL", 0);
 +    const int   pool_s    = (int) afm_env_f("AFM_ROUTE_POOL_START", 0);
@@ -918,12 +932,20 @@ index 000000000..b8ce3e4b5
 +                    layer.ffn_down, NULL, NULL,
 +                    NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
 +        } else {
-+            ggml_tensor * shared = lut_silu ? ffn_lut(y, layer.ffn_up_shexp, layer.ffn_gate_shexp, layer.ffn_down_shexp) :
-+                                   ane_silu ? ffn_ane(y, layer.ffn_up_shexp, layer.ffn_gate_shexp, layer.ffn_down_shexp) :
++            ggml_tensor * up_s = layer.ffn_up_shexp, * gate_s = layer.ffn_gate_shexp, * down_s = layer.ffn_down_shexp;
++            if (n_static * hparams.n_ff_exp < (int64_t) hparams.n_ff_shexp) {
++                // ifp1/ifp2: the first n_static always-on experts (256-aligned, so whole Q2_K blocks)
++                const int64_t w = n_static * hparams.n_ff_exp;
++                up_s   = ggml_view_2d(ctx0, up_s,   up_s->ne[0],   w, up_s->nb[1],   0);
++                gate_s = ggml_view_2d(ctx0, gate_s, gate_s->ne[0], w, gate_s->nb[1], 0);
++                down_s = ggml_view_2d(ctx0, down_s, w, down_s->ne[1], down_s->nb[1], 0);
++            }
++            ggml_tensor * shared = lut_silu ? ffn_lut(y, up_s, gate_s, down_s) :
++                                   ane_silu ? ffn_ane(y, up_s, gate_s, down_s) :
 +                build_ffn(y,
-+                    layer.ffn_up_shexp,   NULL, NULL,
-+                    layer.ffn_gate_shexp, NULL, NULL,
-+                    layer.ffn_down_shexp, NULL, NULL,
++                    up_s,   NULL, NULL,
++                    gate_s, NULL, NULL,
++                    down_s, NULL, NULL,
 +                    NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
 +            cb(shared, "ffn_shexp", il);
 +
@@ -1010,10 +1032,10 @@ index 000000000..a1f3701dd
 +target_compile_features(${TARGET} PRIVATE cxx_std_17)
 diff --git a/tools/afm-logits/afm-logits.cpp b/tools/afm-logits/afm-logits.cpp
 new file mode 100644
-index 000000000..bdb3dcf88
+index 000000000..aa3097694
 --- /dev/null
 +++ b/tools/afm-logits/afm-logits.cpp
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,73 @@
 +// llama-afm-logits <model.gguf> <ids1.bin> <out1.f32> [<ids2.bin> <out2.f32> ...]
 +// Teacher-forced logits for every position of each token sequence (ids: int32 little-endian; out: float32 [T, n_vocab]).
 +// Used to measure next-token agreement with Apple's live model (see tools/eval in afm-ifp-teardown).
@@ -1054,6 +1076,11 @@ index 000000000..bdb3dcf88
 +    if (getenv("AFM_KV_F32")) { cp.type_k = GGML_TYPE_F32; cp.type_v = GGML_TYPE_F32; }   // research: fp32 KV cache
 +    g_dump = getenv("AFM_DUMP_ROUTER"); if (g_dump) { cp.cb_eval = dump_cb; cp.cb_eval_user_data = nullptr; }
 +    llama_context * ctx = llama_init_from_model(model, cp);
++    if (const char * lp = getenv("AFM_LORA")) {   // research: apply a LoRA adapter (llama.cpp GGUF) at AFM_LORA_SCALE (default 1)
++        llama_adapter_lora * ad = llama_adapter_lora_init(model, lp);
++        if (!ad) { fprintf(stderr, "cannot load adapter %s\n", lp); return 1; }
++        llama_set_adapter_lora(ctx, ad, getenv("AFM_LORA_SCALE") ? (float) atof(getenv("AFM_LORA_SCALE")) : 1.0f);
++    }
 +    const int nv = llama_vocab_n_tokens(llama_model_get_vocab(model));
 +    for (int a = 2; a + 1 < argc; a += 2) {
 +        FILE * f = fopen(argv[a], "rb"); if (!f) { fprintf(stderr, "cannot read %s\n", argv[a]); return 1; } std::vector<llama_token> ids; int32_t t; while (fread(&t, 4, 1, f) == 1) ids.push_back(t); fclose(f);

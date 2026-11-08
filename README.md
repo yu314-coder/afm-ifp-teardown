@@ -50,6 +50,26 @@ llama-cli    -m afm-v11.2-ifp.gguf --jinja -st --temp 0 -p "Why is the sky blue?
 llama-server -m afm-v11.2-ifp.gguf --jinja          # OpenAI-compatible API; a system message = Apple's "instructions"
 ```
 
+## Apple Intelligence feature adapters
+
+Apple Intelligence features (summaries, proofreading, mail replies, smart replies, translation, message actions,
+reminders, Image Playground suggestions and more) are trained rank-48 LoRA adapters for this same model. The
+converter turns any of them into a llama.cpp LoRA file. llama.cpp then switches automatically to the expert
+configuration the feature was trained for: 5, 14 or 23 experts (Apple's ifp1/ifp2/ifp3).
+
+```bash
+python3 afm2gguf/afm2gguf.py --list-adapters                     # the 26 adapters on this Mac and their IFP level
+python3 afm2gguf/afm2gguf.py --adapter proofreading_review -o proofreading_review.lora.gguf
+llama-server -m afm-v11.2-ifp.gguf --lora proofreading_review.lora.gguf
+```
+
+Each adapter file also carries Apple's prompts for that feature (`adapter.afm.systemInstructions`,
+`adapter.afm.promptContentTemplates`). A feature expects its instruction in the system turn, in the same
+`afm_cider_v2` format the model uses. The layout was settled on the proofreading adapter: correct proofreading
+outputs become 7x likelier than with the base model (0.016 vs 0.119 nats per token), every other layout is worse, and
+the scale is exactly 1. (The FM API's own adapter, which Apple's public API uses, is untrained; its B factors are
+about 0, so the base GGUF is already that configuration.)
+
 ## How faithful is it?
 
 Measured against Apple's own model through the public FoundationModels API (`tools/afm.swift`, temperature 0, the same
@@ -115,7 +135,7 @@ The remaining misses are near-ties: Apple's token is our second choice in 84% an
 
 | Path | |
 |---|---|
-| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets |
+| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files |
 | `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, int8 KV emulation, Metal kernels) and the `llama-afm-logits` evaluation tool |
 | `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons |
 | `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |

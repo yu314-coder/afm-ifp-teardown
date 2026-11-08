@@ -10,6 +10,8 @@ The weights are written exactly — Apple's 2-bit codes + fp16 row scales as Q2_
 d·sc·c − dmin·m = s·(c − 1.5), bit-exact) and the int4 embedding as Q4_0 (exact).
 
 usage: python3 afm2gguf.py -o afm-v11.2-ifp.gguf [--asset DIR] [--tokenizer FILE] [--no-kvq]
+       python3 afm2gguf.py --list-adapters
+       python3 afm2gguf.py --adapter summarization -o summarization.lora.gguf   (an Apple Intelligence feature adapter)
 """
 import argparse, glob, json, mmap, os, plistlib, re, struct, sys, time
 import numpy as np
@@ -334,11 +336,74 @@ TEMPLATE = ("{%- set sys_default = SYS -%}\n"
             "{%- if add_generation_prompt -%}{{ '<start_of_turn>model\\n' }}{%- endif -%}\n")
 
 # ----------------------------------------------------------------------------- main
+
+# ----------------------------------------------------------------------------- feature adapters (rank-48 LoRA)
+# Apple Intelligence features ship as LoRA adapters for this backbone: lora_i{1,2,3}_r48_48_constant_data.bin, the digit
+# being the IFP level the feature runs at (ifp1/2/3 = 5/14/23 experts). The file is 218 (A, B) pairs, fp16, in segment
+# order dense (o, q, k, v, linear_0, linear_1, down) x12 -> kv-reuse (o, q) x21 -> standard sparse (o, q, k, v) x23;
+# A is [48, in] and B is [out, 48] (row-major, natural row order), linear_0 = up, linear_1 = gate, scale 1.
+# Verified on the proofreading adapter: correct outputs become 7x likelier than with the base model; every other
+# layout, and scales 0.75 / 1.25, are clearly worse.
+LORA_R = 48
+LORA_GROUPS = {'dense': [('o', 2048, 1536), ('q', 1536, 2048), ('k', 1536, 1024), ('v', 1536, 1024),
+                         ('l0', 1536, 3072), ('l1', 1536, 3072), ('down', 3072, 1536)],
+               'reuse': [('o', 2048, 1536), ('q', 1536, 2048)],
+               'std':   [('o', 2048, 1536), ('q', 1536, 2048), ('k', 1536, 1024), ('v', 1536, 1024)]}
+LORA_ORDER = [('dense', NDENSE, 0), ('reuse', NREUSE, KVSRC + 1), ('std', NSTD, NDENSE)]
+LORA_ROLE = {'o': 'attn_output', 'q': 'attn_q', 'k': 'attn_k', 'v': 'attn_v', 'l0': 'ffn_up', 'l1': 'ffn_gate', 'down': 'ffn_down'}
+ADAPTER_PREFIX, ADAPTER_SUFFIX = 'com.apple.fm.language.instruct_3b.', '.generic_sparse'
+
+def adapters():
+    out = {}
+    for a in sorted(glob.glob(f'{ASSETS}/*.asset')):
+        try: d = plistlib.load(open(f'{a}/Info.plist', 'rb'))
+        except Exception: continue
+        spec = (d.get('MobileAssetProperties') or {}).get('AssetSpecifier', d.get('AssetSpecifier')) or ''
+        if not (spec.startswith(ADAPTER_PREFIX) and spec.endswith(ADAPTER_SUFFIX)): continue
+        f = glob.glob(f'{a}/**/lora_i*_r48_48_constant_data.bin', recursive=True)
+        m = [x for x in (f'{a}/AssetData/metadata.json', f'{a}/.AssetData/metadata.json') if os.path.exists(x)]
+        if f: out[spec[len(ADAPTER_PREFIX):-len(ADAPTER_SUFFIX)]] = (f[0], m[0] if m else None)
+    return out
+
+def write_adapter(name, out):
+    ads = adapters()
+    if name not in ads: sys.exit(f'error: adapter {name!r} not found; available: {", ".join(sorted(ads))}')
+    path, mpath = ads[name]; meta = json.load(open(mpath)) if mpath else {}
+    if meta.get('display_version', DISPLAY) != DISPLAY: sys.exit(f"error: adapter is for {meta.get('display_version')}, not {DISPLAY}")
+    ifp = int(re.search(r'lora_i(\d)_r48', os.path.basename(path)).group(1))
+    v = np.fromfile(path, np.float16); o = 0; pairs = []
+    for g, cnt, d0 in LORA_ORDER:
+        for k in range(cnt):
+            for role, a, b in LORA_GROUPS[g]:
+                A = v[o:o + a*LORA_R].reshape(LORA_R, a); o += a*LORA_R
+                B = v[o:o + b*LORA_R].reshape(b, LORA_R); o += b*LORA_R
+                pairs.append((d0 + k, role, A, B))
+    if o != v.size: sys.exit(f'error: unexpected adapter size ({v.size} values, layout needs {o})')
+    brms = float(np.sqrt(np.mean([np.mean(np.square(B.astype(np.float32))) for _, _, _, B in pairs])))
+    log(f'adapter {name}: {len(pairs)} LoRA pairs, ifp{ifp}, B rms {brms:.2e}' + ('  (B ~ 0: an untrained, empty adapter)' if brms < 1e-4 else ''))
+    w = gguf.GGUFWriter(out, 'afm')
+    w.add_string('general.type', 'adapter'); w.add_string('adapter.type', 'lora'); w.add_float32('adapter.lora.alpha', float(LORA_R))
+    w.add_string('adapter.afm.name', name); w.add_uint32('adapter.afm.ifp', ifp)
+    for key in ('systemInstructions', 'promptContentTemplates'):
+        if meta.get(key): w.add_string('adapter.afm.' + key, json.dumps(meta[key], ensure_ascii=False))
+    for L, role, A, B in pairs:
+        nm = f'blk.{L}.{LORA_ROLE[role]}.weight'
+        w.add_tensor(nm + '.lora_a', np.ascontiguousarray(A)); w.add_tensor(nm + '.lora_b', np.ascontiguousarray(B))
+    w.write_header_to_file(); w.write_kv_data_to_file(); w.write_tensors_to_file(); w.close()
+    log(f'wrote {out}: use with  llama-server -m afm-v11.2-ifp.gguf --lora {os.path.basename(out)}  (switches to ifp{ifp} automatically)')
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[1])
-    ap.add_argument('-o', '--out', required=True); ap.add_argument('--asset'); ap.add_argument('--tokenizer')
+    ap.add_argument('-o', '--out'); ap.add_argument('--asset'); ap.add_argument('--tokenizer')
+    ap.add_argument('--list-adapters', action='store_true', help='list the Apple Intelligence feature adapters on this Mac')
+    ap.add_argument('--adapter', help='write this feature adapter as a llama.cpp LoRA GGUF instead of the model')
     ap.add_argument('--no-kvq', action='store_true', help='do not store int8 K/V cache emulation scales')
     a = ap.parse_args(); t0 = time.time()
+    if a.list_adapters:
+        for n, (p_, _) in sorted(adapters().items()): print(f'{n:44s} ifp{re.search(r"lora_i(\d)_", p_).group(1)}')
+        return
+    if not a.out: ap.error('-o/--out is required')
+    if a.adapter: return write_adapter(a.adapter, a.out)
     P = locate(a); log('model asset:', P['meta'].get('display_version'), os.path.dirname(P['hwx']))
     cfg = json.load(open(P['ifpcfg'])); c3 = cfg['configurations'][cfg['default']]
     assert cfg['num_layers'] == NL-NDENSE and cfg['expert_size'] == ES and cfg['hidden_dim'] == D and c3['active_experts'] == NSHARED
