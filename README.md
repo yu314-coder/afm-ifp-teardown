@@ -72,6 +72,8 @@ instructions), on 40 prompts (reproduce with [`tools/eval`](tools/eval)):
 
 **What changed in v1.3:** at a re-pick (every 32nd position), Apple runs a dense-only function on that token, and like the prompt procedures it adds no layer-0 bias. The port now does the same. On the 230-prompt set this is worth +0.08 points (12 tokens fixed, 7 broken), and it brings our expert-change counts slightly closer to Apple's.
 
+**Router precision:** the router decides experts by margins around 0.001, smaller than the error of some GPU matrix kernels (Metal's deviate by about 0.0001). Its small weights now stay on the CPU, so expert picks are exact and identical on every backend. That costs a few percent of speed, and `AFM_ROUTER_GPU=1` restores the GPU router. Agreement is unchanged within noise (6256 vs 6261 of 6572 tokens).
+
 Old GGUFs work with the current patch; nothing needs to be re-converted.
 
 "Answers identical" compares our free-running greedy answer with Apple's character for character; a single different
