@@ -431,10 +431,10 @@ index d1de16e3f..2809c0fbf 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..0222314e2
+index 000000000..fe9262a8e
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,498 @@
+@@ -0,0 +1,501 @@
 +#include "models.h"
 +
 +#include <algorithm>
@@ -591,6 +591,8 @@ index 000000000..0222314e2
 +    const float attn_scale   = hparams.f_attention_scale * afm_env_f("AFM_ATTN_SCALE_MUL", 1.0f);   // research multiplier
 +    const int   f16_act      = (int) afm_env_f("AFM_F16_ACT", 0);          // research: round activations to fp16 (1: residual, 2: +router input, 3: +attn/ffn outputs)
 +    auto f16r = [&](ggml_tensor * t) { return ggml_cast(ctx0, ggml_cast(ctx0, t, GGML_TYPE_F16), GGML_TYPE_F32); };
++    const bool mm16 = afm_env_f("AFM_MM_F16", 0) != 0;   // research: round every matmul / attention output to fp16 (as the ANE stores them)
++    auto r16 = [&](ggml_tensor * t) { return mm16 ? f16r(t) : t; };
 +    // emulate the ANE int8 KV cache: x -> clamp(round(x*s), -127, 127) / s
 +    auto fq8 = [&](ggml_tensor * t, float s) {
 +        // round-to-nearest via the fp32 magic constant 1.5*2^23 (backend-independent), saturate to int8, rescale
@@ -626,8 +628,8 @@ index 000000000..0222314e2
 +        return ggml_reshape(ctx0, y, x);
 +    };
 +    auto ffn_ane = [&](ggml_tensor * yy, ggml_tensor * wu, ggml_tensor * wg, ggml_tensor * wd) {
-+        ggml_tensor * u = build_lora_mm(wu, yy), * g = build_lora_mm(wg, yy);
-+        return build_lora_mm(wd, ggml_mul(ctx0, silu_ane(g), u)); };
++        ggml_tensor * u = r16(build_lora_mm(wu, yy)), * g = r16(build_lora_mm(wg, yy));
++        return r16(build_lora_mm(wd, r16(ggml_mul(ctx0, silu_ane(g), u)))); };
 +    if (ubatch.token) {
 +        inpL = ggml_scale(ctx0, inpL, kscale);
 +    }
@@ -805,7 +807,7 @@ index 000000000..0222314e2
 +
 +        ggml_tensor * cur;
 +        {
-+            ggml_tensor * Qcur = build_lora_mm(layer.wq, x);
++            ggml_tensor * Qcur = r16(build_lora_mm(layer.wq, x));
 +            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head, n_tokens);
 +            Qcur = ggml_rms_norm(ctx0, Qcur, hparams.f_norm_rms_eps);
 +            if (gamma_first) {   // research: gain before RoPE
@@ -817,8 +819,8 @@ index 000000000..0222314e2
 +            cb(Qcur, "Qcur", il);
 +
 +            if (hparams.has_kv(il)) {
-+                ggml_tensor * Kcur = build_lora_mm(layer.wk, x);
-+                ggml_tensor * Vcur = build_lora_mm(layer.wv, x);
++                ggml_tensor * Kcur = r16(build_lora_mm(layer.wk, x));
++                ggml_tensor * Vcur = r16(build_lora_mm(layer.wv, x));
 +                Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
 +                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
 +                Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps);
@@ -844,12 +846,13 @@ index 000000000..0222314e2
 +                }
 +                cb(Kcur, "Kcur", il);
 +                cb(Vcur, "Vcur", il);
-+                cur = build_attn(inp_attn, layer.wo, NULL, Qcur, Kcur, Vcur, nullptr, nullptr, nullptr,
++                cur = build_attn(inp_attn, mm16 ? nullptr : layer.wo, NULL, Qcur, Kcur, Vcur, nullptr, nullptr, nullptr,
 +                                 attn_scale, il);
 +            } else {
-+                cur = build_attn(inp_attn, layer.wo, NULL, Qcur, nullptr, nullptr, nullptr, nullptr, nullptr,
++                cur = build_attn(inp_attn, mm16 ? nullptr : layer.wo, NULL, Qcur, nullptr, nullptr, nullptr, nullptr, nullptr,
 +                                 attn_scale, il);
 +            }
++            if (mm16) { cur = r16(build_lora_mm(layer.wo, r16(cur))); }
 +        }
 +
 +        if (il == n_layer - 1 && inp_out_ids) {
@@ -901,11 +904,11 @@ index 000000000..0222314e2
 +            cb(sel, "ffn_moe_topk", il);
 +
 +            ggml_tensor * y3 = ggml_reshape_3d(ctx0, y, n_embd, 1, n_tok);
-+            ggml_tensor * up = build_lora_mm_id(layer.ffn_up_exps,   y3, sel); // [n_ff_exp, n_used, n_tok]
-+            ggml_tensor * gt = build_lora_mm_id(layer.ffn_gate_exps, y3, sel);
++            ggml_tensor * up = r16(build_lora_mm_id(layer.ffn_up_exps,   y3, sel)); // [n_ff_exp, n_used, n_tok]
++            ggml_tensor * gt = r16(build_lora_mm_id(layer.ffn_gate_exps, y3, sel));
 +            ggml_tensor * act = lut_silu ? ggml_mul(ctx0, lut_apply(gt, lut_silu), up) :
 +                                ane_silu ? ggml_mul(ctx0, silu_ane(gt), up) : ggml_swiglu_split(ctx0, gt, up);
-+            ggml_tensor * ex  = build_lora_mm_id(layer.ffn_down_exps, act, sel); // [n_embd, n_used, n_tok]
++            ggml_tensor * ex  = r16(build_lora_mm_id(layer.ffn_down_exps, r16(act), sel)); // [n_embd, n_used, n_tok]
 +            cb(ex, "ffn_moe_down", il);
 +
 +            // unweighted sum over the selected experts: [n_embd, n_used, n_tok] -> [n_embd, n_tok]

@@ -83,7 +83,7 @@ Measured directly and ruled out as the main cause:
 - **The FM-API adapter.** It is declared empty.
 - **A repetition penalty.** There is none.
 
-The model amplifies rounding: the same computation on CPU and on Metal disagrees on 2–6% of individual next-token choices, though the overall agreement stays the same within about ±4 tokens. So the last few percent need bit-exact Neural Engine emulation (its softmax, exp and normalisation are also approximations).
+The remaining misses are near-ties: Apple's token is our second choice in 84% and in our top three in all; the median logit gap is 0.4. The same model on CPU and on Metal (identical mathematics) already disagrees on 0.7% of answer tokens. Apple's Neural Engine computes in fp16 with approximate softmax, exp and normalisation, so its rounding differs from ours by more than that. The last few percent would need bit-exact Neural Engine emulation; rounding every matmul output to fp16 (`AFM_MM_F16=1`) moves the score only within noise (96.9%).
 
 ## What is in this repository
 
