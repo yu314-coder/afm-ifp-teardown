@@ -12,6 +12,7 @@ d·sc·c − dmin·m = s·(c − 1.5), bit-exact) and the int4 embedding as Q4_0
 usage: python3 afm2gguf.py -o afm-v11.2-ifp.gguf [--asset DIR] [--tokenizer FILE] [--no-kvq]
        python3 afm2gguf.py --list-adapters
        python3 afm2gguf.py --adapter summarization -o summarization.lora.gguf   (an Apple Intelligence feature adapter)
+       python3 afm2gguf.py --draft -o afm-v11.2-draft.gguf   (the speculative-decoding draft model, arch afm-draft)
 """
 import argparse, glob, json, mmap, os, plistlib, re, struct, sys, time
 import numpy as np
@@ -32,6 +33,7 @@ NL, D, NH, NKV, HD = 56, 1536, 16, 8, 128
 NDENSE, NSTD, NREUSE, KVSRC = 12, 23, 21, 34
 FF, NE, ES, NSHARED, NMASK, NROUTED = 3072, 380, 256, 23, 32, 23
 PAL = np.array([-1.5, -0.5, 0.5, 1.5], np.float32)
+D_DRAFT = 256
 
 def log(*a): print('[afm2gguf]', *a, flush=True)
 
@@ -337,6 +339,161 @@ TEMPLATE = ("{%- set sys_default = SYS -%}\n"
 
 # ----------------------------------------------------------------------------- main
 
+# ----------------------------------------------------------------------------- speculative-decoding draft model
+# Apple pairs the model with a 9M-parameter draft ("v11-ifp-9m", asset ...fm_api_generic.draft) that proposes 7 tokens per
+# step. Everything below is read from that asset's Neural Engine program (binary_0.hwx) and its program.odix:
+#  * weights: segment __KERN_0, one block per projection = 16 units (one per ANE core) of [64 B: a sorted 16-entry fp16
+#    codebook + 32 zero bytes][codes, input-major, rows-of-this-unit nibbles per input, low nibble first]; unit u holds
+#    output rows u*rows..(u+1)*rows-1; FFN gate blocks are prefixed with the 128-B Neural Engine SiLU table
+#  * norm gains: __TEXT,__const, one 0x4000-byte block per ANE procedure, addressed by the tile-source offsets
+#  * embeddings: int4 codes (8-token interleave) for the 162144 non-draft then the 100000 draft tokens, one per-dimension
+#    fp16 scale (the readout's constant tile), and the sorted list of the draft vocabulary's token ids
+SPEC_DRAFT, DRAFT_CFG = 'com.apple.fm.language.instruct_3b.fm_api_generic.draft.generic_sparse', 'v11-ifp-9m'
+_CM, _L2, _PE, _NE, _TS, _TD, _KD = 0, 0x1040, 0x1140, 0x1240, 0x1340, 0x1440, 0x1540
+SILU_TAG = bytes.fromhex('1ac9007c0000007c')
+
+def ane_tasks(blob, fo, size):
+    """H16 task stream -> [(task index, registers so far, registers written by this task)]."""
+    o = 0; R = {}; out = []
+    while o+40 <= size:
+        tid, sz16 = struct.unpack_from('<2H', blob, fo+o); tsz = sz16 & 0x7FF
+        if tsz < 9 or o+tsz*4 > size: o += 16; continue
+        w = struct.unpack_from('<%dI' % tsz, blob, fo+o); i = 10 if (w[8] >> 1) & 1 else 9; W = {}
+        while i < tsz:
+            h = w[i]; i += 1; wa = h & 0x7FFF
+            if (h >> 31) == 0:
+                for j in range(((h >> 15) & 0x3F)+1):
+                    if i >= tsz: break
+                    R[wa+j] = w[i]; W[wa+j] = w[i]; i += 1
+            else:
+                m = (h >> 15) & 0xFFFF
+                if i < tsz: R[wa] = w[i]; W[wa] = w[i]; i += 1
+                for b in range(16):
+                    if (m >> b) & 1 and i < tsz: R[wa+b+1] = w[i]; W[wa+b+1] = w[i]; i += 1
+        out.append((w[0] & 0xffff, dict(R), W)); o += (tsz*4+15) & ~15
+    return out
+
+def draft_model():
+    a = find_asset(SPEC_DRAFT)
+    if a is None: sys.exit(f'error: draft asset {SPEC_DRAFT} not found under {ASSETS}')
+    root = f'{a}/.AssetData'; meta = json.load(open(f'{root}/metadata.json'))
+    if meta.get('model_config') != DRAFT_CFG: sys.exit(f"error: this converter supports draft {DRAFT_CFG}, the asset is {meta.get('model_config')}")
+    hwx = f'{root}/model.odixpackage/MPSGraph/mpsExecutable.mpsgraphpackage/binary_0.hwx'; odix = f'{root}/model.odixpackage/program.odix'
+    blob = open(hwx, 'rb').read(); seg, sect = macho(hwx)
+    T = ane_tasks(blob, *sect[('__TEXT', '__text')]); procs = []
+    for t in T:
+        if t[0] == 0 or not procs: procs.append([])
+        procs[-1].append(t)
+    is_conv = lambda t: t[2].get(_NE) == 0x46 and (_KD+4) in t[2]
+    width = lambda p: next(t[1][_CM+1] for t in p if is_conv(t))                 # tokens per call (8 or 64)
+    pi = next(i for i, p in enumerate(procs) if sum(map(is_conv, p)) == 11*12 and width(p) == 8)
+    P = procs[pi]; kfo, ksz = sect[('__KERN_0', '__kern_0')]; K = np.frombuffer(blob, np.uint8, ksz, kfo)
+    cfo, csz = sect[('__TEXT', '__const')]; C = blob[cfo:cfo+csz]; cbase = 0x4000*pi
+    gain = lambda off, n: np.frombuffer(C, '<f2', n, cbase+off).astype(np.float32)
+    def block(off, out, n_in):
+        rpu = out//16; pre = 128 if bytes(K[off:off+8]) == SILU_TAG else 0; per = pre+64+rpu*n_in//2; rows = []
+        for u in range(16):
+            b = K[off+u*per: off+(u+1)*per]; cb = b[pre:pre+32].view(np.float16)
+            assert np.all(np.diff(cb.astype(np.float32)) > 0) and not b[pre+32:pre+64].any(), 'draft weight block check failed'
+            c = b[pre+64:]; nib = np.stack([c & 0xF, c >> 4], 1).reshape(n_in, rpu).T; rows.append(cb[nib])
+        return np.concatenate(rows, 0), pre > 0
+    convs, eps, lastoff, g256, ghead = [], None, None, [], []
+    for k, (_, R, W) in enumerate(P):
+        if (_TS+10) in W: lastoff = W[_TS+10]
+        if is_conv((0, R, W)):
+            Wm, silu = block(W[_KD+4], R[_CM+7], R[_CM+3])
+            convs.append(dict(W=Wm, silu=silu, out=R[_CM+7], inp=R[_CM+3], td=_TD in W, dst=R.get(_L2+19)))
+        if W.get(_PE) == 0x82004 and eps is None: eps = struct.unpack('<f', struct.pack('<I', R[_PE+3]))[0]
+        if W.get(_PE) == 0x80004 and R.get(_CM+3) == width(P) and R.get(_CM+2) == 1 and (_TS+1) in W: g256.append(gain(lastoff, D_DRAFT))
+        if W.get(_PE) == 0x80004 and R.get(_CM+3) == 32: ghead.append(('k' if R.get(_CM+2) == 4 else 'q', gain(lastoff, 32)))
+    assert len(convs) == 132 and len(g256) == 2*12+1 and len(ghead) == 24, (len(convs), len(g256), len(ghead))
+    layers = []
+    for L in range(12):
+        c = convs[11*L:11*L+11]; heads = dict(ghead[2*L:2*L+2])
+        kv = [x for x in c if x['out'] == 128]; sq = [x for x in c if x['out'] == 256 and x['inp'] == 256 and not x['silu']]
+        # the FFN tiles are written to descending L2 addresses, so the 768-wide hidden is [tile 2 | tile 1 | tile 0]
+        # (the last layer's buffers are re-banked and one destination register is left implicit, so use conv order)
+        up = sq[2:][::-1]; gate = [x for x in c if x['silu']][::-1]
+        for t_ in (up, gate):
+            ds = [x['dst'] for x in t_]
+            assert len(set(ds)) < 3 or ds == sorted(ds), 'draft FFN tile order check failed'
+        down = [x for x in c if x['inp'] == 768]
+        assert len(kv) == 2 and len(sq) == 5 and len(gate) == 3 and len(down) == 1 and sum(x['td'] for x in kv) == 1
+        layers.append(dict(q=sq[0]['W'], k=next(x for x in kv if not x['td'])['W'], v=next(x for x in kv if x['td'])['W'],
+                           o=sq[1]['W'], up=np.concatenate([x['W'] for x in up]), gate=np.concatenate([x['W'] for x in gate]),
+                           down=down[0]['W'], attn_norm=g256[2*L], ffn_norm=g256[2*L+1], q_norm=heads['q'], k_norm=heads['k']))
+    final = g256[-1]
+    # embeddings (program.odix): data section = [non-draft codes][draft codes][rope table][scale tile][vocab list]
+    d = np.memmap(odix, np.uint8, 'r'); data = struct.unpack_from('<Q', bytes(d[:0x18]), 0x10)[0]
+    nd = sum(t[1][_CM+7] for t in procs[0] if t[2].get(_NE) == 0x10045)        # readout width = draft vocabulary size
+    V = 262144; tail = np.asarray(d[len(d)-(1 << 20):]); best = None
+    for al in range(4):
+        u = tail[al:al+(len(tail)-al)//4*4].view('<u4').astype(np.int64); inc = np.diff(u) > 0
+        e = np.flatnonzero(np.diff(np.concatenate([[0], inc.view(np.int8), [0]]))); runs = list(zip(e[0::2], e[1::2]))
+        for s_, t_ in runs:
+            seg_ = u[s_:t_+1]; ok = np.flatnonzero(seg_ < V)
+            if len(ok) >= nd and ok[nd-1]-ok[0] == nd-1: best = seg_[ok[0]:ok[0]+nd]
+    assert best is not None and best[-1] < V, 'draft vocabulary list not found'
+    vocab = best
+    codes = lambda X, n: np.asarray(d[X:X+n//8*1024]).reshape(n//8, D_DRAFT, 4)
+    nondraft, draft = codes(data, V-nd), codes(data+(V-nd)*128, nd)
+    assert bytes(d[data+V*128:data+V*128+8]) == bytes.fromhex('0100000040000000'), 'draft embedding layout check failed'
+    S = np.frombuffer(C, '<f2', D_DRAFT, 0x200).astype(np.float32)              # readout constant tile = [0 | s]
+    assert not np.frombuffer(C, '<f2', D_DRAFT, 0).any() and np.all(S > 0)
+    r1000 = np.asarray(d[data+V*128+64+1000*64: data+V*128+64+1001*64]).view('<f2').astype(np.float32)
+    theta = float((np.arccos(r1000[8])/1000)**-2)                              # cos(1000*theta_8), theta_j = base^(-j/16)
+    return dict(meta=meta, layers=layers, final=final, eps=eps, S=S, vocab=vocab, nondraft=nondraft, draft=draft, theta=theta)
+
+def write_draft(P, out):
+    m = draft_model(); toks, scores, types = tokenizer(P['tok']); V = 262144
+    log(f"draft {DRAFT_CFG}: 12 layers, vocabulary {len(m['vocab'])} tokens, rms eps {m['eps']:.4g}, rope base {m['theta']:.4g}")
+    isd = np.zeros(V, bool); isd[m['vocab']] = True; row = np.empty(V, np.int64)
+    row[m['vocab']] = np.arange(len(m['vocab'])); nd_ids = np.flatnonzero(~isd); row[nd_ids] = np.arange(len(nd_ids))
+    def emb():                                                                   # every token's codes as Q4_0 with d = 1 (exact)
+        out_ = np.empty((V, D_DRAFT//32*18), np.uint8)
+        for r0 in range(0, V, 16384):
+            ids = np.arange(r0, r0+16384); q = np.empty((16384, D_DRAFT), np.int16)
+            for tab, sel in ((m['draft'], isd[ids]), (m['nondraft'], ~isd[ids])):
+                rr = row[ids[sel]]; x = tab[rr//8, :, (rr % 8)//2]
+                n = np.where(((rr % 8) % 2 == 1)[:, None], x >> 4, x & 0xF).astype(np.int16); q[sel] = np.where(n > 7, n-16, n)
+            out_[r0:r0+16384] = pack_q4_0(q, np.ones(16384, np.float16))
+        return out_
+    w = gguf.GGUFWriter(path=None, arch='afm-draft')
+    w.add_name(f'Apple Foundation Model {DISPLAY} draft ({DRAFT_CFG}) - local conversion')
+    w.add_description('Speculative-decoding draft model converted from this Mac\'s Apple Intelligence assets by afm2gguf. '
+                      'Use as llama.cpp --model-draft next to the afm GGUF; requires the `afm-draft` architecture.')
+    p = 'afm-draft.'
+    for k, v_ in (('context_length', int(m['meta'].get('context_length', 8192))), ('embedding_length', D_DRAFT), ('block_count', 12),
+                  ('feed_forward_length', 768), ('attention.head_count', 8), ('attention.head_count_kv', 4),
+                  ('attention.key_length', 32), ('attention.value_length', 32), ('rope.dimension_count', 32)):
+        w.add_uint32(p+k, v_)
+    w.add_float32(p+'rope.freq_base', float(round(m['theta'], -2))); w.add_float32(p+'attention.layer_norm_rms_epsilon', m['eps'])
+    dp = m['meta'].get('default_parameters', {})
+    w.add_uint32(p+'draft_steps', int(dp.get('draft_steps', 7)))
+    w.add_tokenizer_model('llama'); w.add_tokenizer_pre('default')
+    w.add_token_list(toks); w.add_token_scores([float(x) for x in scores]); w.add_token_types([int(x) for x in types])
+    w.add_bos_token_id(2); w.add_eos_token_id(106); w.add_unk_token_id(3); w.add_pad_token_id(0)
+    w.add_add_bos_token(True); w.add_add_eos_token(False); w.add_add_space_prefix(False)
+    plan = [('token_embd.weight', (V, D_DRAFT//32*18), QT.Q4_0, emb),
+            ('token_embd_scale.weight', (D_DRAFT,), QT.F32, lambda: m['S']),
+            ('output_scale.weight', (D_DRAFT,), QT.F32, lambda: m['S']),
+            ('output_norm.weight', (D_DRAFT,), QT.F32, lambda: m['final']),
+            ('output.bias', (V,), QT.F32, lambda: np.where(isd, 0.0, -np.inf).astype(np.float32))]
+    names = dict(attn_norm='attn_norm', ffn_norm='ffn_norm', q_norm='attn_q_norm', k_norm='attn_k_norm',
+                 q='attn_q', k='attn_k', v='attn_v', o='attn_output', gate='ffn_gate', up='ffn_up', down='ffn_down')
+    for L, lay in enumerate(m['layers']):
+        for key, nm in names.items():
+            arr = lay[key]; plan.append((f'blk.{L}.{nm}.weight', arr.shape, QT.F16 if arr.ndim == 2 else QT.F32, (lambda a_=arr: a_)))
+    for name, shp, qt, _ in plan:
+        if qt == QT.Q4_0: w.add_tensor_info(name, shp, np.dtype(np.uint8), int(np.prod(shp)), raw_dtype=qt)
+        elif qt == QT.F16: w.add_tensor_info(name, shp, np.dtype(np.float16), int(np.prod(shp))*2)
+        else: w.add_tensor_info(name, shp, np.dtype(np.float32), int(np.prod(shp))*4)
+    w.write_header_to_file(path=out); w.write_kv_data_to_file(); w.write_ti_data_to_file()
+    for name, shp, qt, fn in plan:
+        arr = np.ascontiguousarray(fn()); arr = arr.astype(np.float16 if qt == QT.F16 else np.float32) if qt != QT.Q4_0 else arr
+        assert arr.shape == tuple(shp), (name, arr.shape, shp); w.write_tensor_data(arr)
+    w.close(); log(f'wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): use with  llama-server -m afm-v11.2-ifp.gguf -md {os.path.basename(out)}')
+
 # ----------------------------------------------------------------------------- feature adapters (rank-48 LoRA)
 # Apple Intelligence features ship as LoRA adapters for this backbone: lora_i{1,2,3}_r48_48_constant_data.bin, the digit
 # being the IFP level the feature runs at (ifp1/2/3 = 5/14/23 experts). The file is 218 (A, B) pairs, fp16, in segment
@@ -398,13 +555,21 @@ def main():
     ap.add_argument('--list-adapters', action='store_true', help='list the Apple Intelligence feature adapters on this Mac')
     ap.add_argument('--adapter', help='write this feature adapter as a llama.cpp LoRA GGUF instead of the model')
     ap.add_argument('--no-kvq', action='store_true', help='do not store int8 K/V cache emulation scales')
+    ap.add_argument('--draft', action='store_true', help="write Apple's speculative-decoding draft model instead (arch afm-draft)")
     a = ap.parse_args(); t0 = time.time()
     if a.list_adapters:
         for n, (p_, _) in sorted(adapters().items()): print(f'{n:44s} ifp{re.search(r"lora_i(\d)_", p_).group(1)}')
         return
     if not a.out: ap.error('-o/--out is required')
     if a.adapter: return write_adapter(a.adapter, a.out)
-    P = locate(a); log('model asset:', P['meta'].get('display_version'), os.path.dirname(P['hwx']))
+    if a.draft:
+        tok = a.tokenizer
+        if tok is None:
+            t = find_asset(SPEC_TOK); tok = f'{t}/AssetData/tokenizer' if t else None
+        if not tok or not os.path.exists(tok): sys.exit(f'error: tokenizer asset {SPEC_TOK} not found; pass --tokenizer')
+        return write_draft({'tok': tok}, a.out)
+    P = locate(a)
+    log('model asset:', P['meta'].get('display_version'), os.path.dirname(P['hwx']))
     cfg = json.load(open(P['ifpcfg'])); c3 = cfg['configurations'][cfg['default']]
     assert cfg['num_layers'] == NL-NDENSE and cfg['expert_size'] == ES and cfg['hidden_dim'] == D and c3['active_experts'] == NSHARED
     seg, sect = macho(P['hwx'])

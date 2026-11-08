@@ -15,6 +15,7 @@ your own Mac.
 | Prompt format | Apple's `afm_cider_v2` template, decoded from the runtime and verified against `SystemLanguageModel.tokenCount` |
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
 | Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
+| Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: 43% next-token agreement with Apple, exact `afm-draft` GGUF, lossless speculation |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -69,6 +70,29 @@ Each adapter file also carries Apple's prompts for that feature (`adapter.afm.sy
 outputs become 7x likelier than with the base model (0.016 vs 0.119 nats per token), every other layout is worse, and
 the scale is exactly 1. (The FM API's own adapter, which Apple's public API uses, is untrained; its B factors are
 about 0, so the base GGUF is already that configuration.)
+
+## Apple's draft model (speculative decoding)
+
+Apple runs the model with a 9M-parameter draft model that proposes 7 tokens per step (asset
+`fm_api_generic.draft`, `v11-ifp-9m`). The converter rebuilds it too, from its Neural Engine program:
+
+```bash
+python3 afm2gguf/afm2gguf.py --draft -o afm-v11.2-draft.gguf          # 61 MiB, architecture afm-draft
+llama-server -m afm-v11.2-ifp.gguf -md afm-v11.2-draft.gguf --draft-max 7 --draft-min 0 --draft-p-min 0 --jinja
+```
+
+It is a 12-layer, 256-wide transformer with 8 query / 4 KV heads, int4 weight palettes and a tied int4 readout
+over a 100,000-token subset of the vocabulary. Every value comes from the asset; the layout, the K/V order, the FFN tile
+order and the norm gains were read from the ANE task stream (paper, Section "The speculative-decoding draft model").
+It predicts Apple's next answer token 43% of the time (40 prompts; 37.7% on 230), and every alternative layout we
+tried scores 0–17%.
+
+Speculative decoding with it is **lossless**: with greedy sampling, llama.cpp returns exactly the plain answers
+(40/40, Metal and CPU). The `afm` graph treats a verify batch exactly like single decode tokens: input bias, Apple's
+expert re-pick schedule, and rejected draft tokens rolled back. It is **not faster** in llama.cpp. Only about 11% of
+drafted tokens are accepted, and a verify batch costs several single decodes here, while on Apple's Neural Engine
+(fixed 8-token programs) it costs about one. Measured back to back, it was 2.1x slower on Metal and 3.5x slower on the
+CPU. `tools/eval/speculative.py` measures both.
 
 ## How faithful is it?
 
@@ -135,16 +159,16 @@ The remaining misses are near-ties: Apple's token is our second choice in 84% an
 
 | Path | |
 |---|---|
-| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files |
-| `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, int8 KV emulation, Metal kernels) and the `llama-afm-logits` evaluation tool |
-| `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons |
+| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files and the draft model |
+| `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, exact speculative verify batches, int8 KV emulation, Metal kernels), the `afm-draft` architecture and the `llama-afm-logits` evaluation tool |
+| `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons; `speculative.py` checks speculative decoding with the draft |
 | `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |
 | `tools/template_probe.swift` | checks the prompt template against Apple's `tokenCount` |
 | `tools/afm.swift` | CLI / OpenAI-style server over Apple's live model (the fidelity reference) |
 | `paper/` | the report (LaTeX source, figures, PDF) |
 | `disclosure/` | correspondence with Apple about this work |
 
-Research notes and scripts from before v1.0 (the v11.0/v11.1 work, the 300M draft model, the nano model) remain in the git
+Research notes and scripts from before v1.0 (the v11.0/v11.1 work, the 300M "pico" model, the nano model) remain in the git
 history; commit `e9a59b2` is the last one that contains them.
 
 ## Responsible use

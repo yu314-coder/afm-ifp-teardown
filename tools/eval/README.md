@@ -22,3 +22,12 @@ A larger set of 190 more prompts is in `prompts_extended.txt`:
 tools/eval/collect_oracle.sh oracle_ext/ tools/eval/prompts_extended.txt
 AFM_PROMPTS=tools/eval/prompts_extended.txt python3 tools/eval/teacher_forced.py afm-v11.2-ifp.gguf llama.cpp/build/bin oracle_ext/
 ```
+
+Speculative decoding with Apple's draft model (`afm2gguf.py --draft`) must not change any answer:
+```bash
+python3 tools/eval/speculative.py afm-v11.2-ifp.gguf afm-v11.2-draft.gguf llama.cpp/build/bin            # Metal / default
+python3 tools/eval/speculative.py afm-v11.2-ifp.gguf afm-v11.2-draft.gguf llama.cpp/build/bin -ngl 0 -devd none   # CPU
+```
+It runs every prompt plainly and with the draft (7 draft tokens, no confidence cutoff, as Apple does). Expected:
+identical answers 40/40, about 11% of drafted tokens accepted, and speculation slower than plain decoding in llama.cpp
+(see the paper's draft-model section for why).

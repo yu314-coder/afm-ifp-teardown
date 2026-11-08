@@ -12,30 +12,32 @@ index 17e358d1a..d98368780 100644
  template<typename S0, typename S0_4x4, typename S0_8x8, typename S1, typename S1_2x4, typename S1_8x8, typename block_q, short nl, void (*dequantize_func)(device const block_q *, short, thread S0_4x4 &), typename T0, typename T0_4x4, typename T1, typename T1_2x4>
  kernel void kernel_mul_mm_id(
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index f337afd6b..9637248ef 100644
+index f337afd6b..d02407c9b 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -36,6 +36,7 @@ add_library(llama
+@@ -36,6 +36,8 @@ add_library(llama
              unicode-data.cpp
              unicode.cpp
              unicode.h
 +            models/afm.cpp
++            models/afm-draft.cpp
              models/afmoe.cpp
              models/apertus.cpp
              models/arcee.cpp
 diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
-index a54bc1956..c69d1688a 100644
+index a54bc1956..b0c72b16d 100644
 --- a/src/llama-arch.cpp
 +++ b/src/llama-arch.cpp
-@@ -120,6 +120,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+@@ -120,6 +120,8 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
      { LLM_ARCH_MIMO2,            "mimo2"           },
      { LLM_ARCH_LLAMA_EMBED,      "llama-embed"      },
      { LLM_ARCH_MAINCODER,        "maincoder"        },
 +    { LLM_ARCH_AFM,              "afm"              },
++    { LLM_ARCH_AFM_DRAFT,        "afm-draft"        },
      { LLM_ARCH_UNKNOWN,          "(unknown)"        },
  };
  
-@@ -189,6 +190,9 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
+@@ -189,6 +191,9 @@ static const std::map<llm_kv, const char *> LLM_KV_NAMES = {
      { LLM_KV_TIME_DECAY_EXTRA_DIM,              "%s.time_decay_extra_dim"              },
      { LLM_KV_RESIDUAL_SCALE,                    "%s.residual_scale"                    },
      { LLM_KV_EMBEDDING_SCALE,                   "%s.embedding_scale"                   },
@@ -45,7 +47,7 @@ index a54bc1956..c69d1688a 100644
      { LLM_KV_TOKEN_SHIFT_COUNT,                 "%s.token_shift_count"                 },
      { LLM_KV_INTERLEAVE_MOE_LAYER_STEP,         "%s.interleave_moe_layer_step"         },
  
-@@ -347,6 +351,11 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
+@@ -347,6 +352,13 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
      { LLM_TENSOR_ATTN_NORM_2,                            "blk.%d.attn_norm_2" },
      { LLM_TENSOR_ATTN_QKV,                               "blk.%d.attn_qkv" },
      { LLM_TENSOR_LAYER_OUT_NORM,                         "blk.%d.layer_output_norm" },
@@ -54,10 +56,12 @@ index a54bc1956..c69d1688a 100644
 +    { LLM_TENSOR_AFM_ROUTER_FC1,                         "blk.%d.ifp_router_fc1" },
 +    { LLM_TENSOR_AFM_ROUTER_NORM,                        "blk.%d.ifp_router_norm" },
 +    { LLM_TENSOR_AFM_ROUTER_FC2,                         "blk.%d.ifp_router_fc2" },
++    { LLM_TENSOR_AFM_EMBD_SCALE,                         "token_embd_scale" },
++    { LLM_TENSOR_AFM_OUTPUT_SCALE,                       "output_scale" },
      { LLM_TENSOR_ATTN_OUT_NORM,                          "blk.%d.attn_output_norm" },
      { LLM_TENSOR_POS_EMBD,                               "position_embd" },
      { LLM_TENSOR_FFN_ACT,                                "blk.%d.ffn.act" },
-@@ -1191,6 +1200,36 @@ static std::set<llm_tensor> llm_get_tensor_names(llm_arch arch) {
+@@ -1191,6 +1203,55 @@ static std::set<llm_tensor> llm_get_tensor_names(llm_arch arch) {
                  LLM_TENSOR_FFN_UP,
                  LLM_TENSOR_FFN_POST_NORM,
              };
@@ -91,10 +95,29 @@ index a54bc1956..c69d1688a 100644
 +                LLM_TENSOR_AFM_ROUTER_NORM,
 +                LLM_TENSOR_AFM_ROUTER_FC2,
 +            };
++        case LLM_ARCH_AFM_DRAFT:
++            return {
++                LLM_TENSOR_TOKEN_EMBD,
++                LLM_TENSOR_AFM_EMBD_SCALE,
++                LLM_TENSOR_OUTPUT_NORM,
++                LLM_TENSOR_AFM_OUTPUT_SCALE,
++                LLM_TENSOR_OUTPUT,
++                LLM_TENSOR_ATTN_NORM,
++                LLM_TENSOR_ATTN_Q,
++                LLM_TENSOR_ATTN_K,
++                LLM_TENSOR_ATTN_V,
++                LLM_TENSOR_ATTN_OUT,
++                LLM_TENSOR_ATTN_Q_NORM,
++                LLM_TENSOR_ATTN_K_NORM,
++                LLM_TENSOR_FFN_NORM,
++                LLM_TENSOR_FFN_GATE,
++                LLM_TENSOR_FFN_UP,
++                LLM_TENSOR_FFN_DOWN,
++            };
          case LLM_ARCH_GEMMA3:
              return {
                  LLM_TENSOR_TOKEN_EMBD,
-@@ -2420,6 +2459,11 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
+@@ -2420,6 +2481,13 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
      {LLM_TENSOR_ATTN_Q_NORM,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
      {LLM_TENSOR_ATTN_K_NORM,                {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
      {LLM_TENSOR_LAYER_OUT_NORM,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
@@ -103,22 +126,25 @@ index a54bc1956..c69d1688a 100644
 +    {LLM_TENSOR_AFM_ROUTER_FC1,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
 +    {LLM_TENSOR_AFM_ROUTER_NORM,            {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
 +    {LLM_TENSOR_AFM_ROUTER_FC2,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
++    {LLM_TENSOR_AFM_EMBD_SCALE,             {LLM_TENSOR_LAYER_INPUT,     GGML_OP_MUL}},
++    {LLM_TENSOR_AFM_OUTPUT_SCALE,           {LLM_TENSOR_LAYER_OUTPUT,    GGML_OP_MUL}},
      {LLM_TENSOR_ATTN_Q_A_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
      {LLM_TENSOR_ATTN_KV_A_NORM,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
      {LLM_TENSOR_ATTN_SUB_NORM,              {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL}},
 diff --git a/src/llama-arch.h b/src/llama-arch.h
-index 270d28b16..91b229bec 100644
+index 270d28b16..ce0e895b8 100644
 --- a/src/llama-arch.h
 +++ b/src/llama-arch.h
-@@ -124,6 +124,7 @@ enum llm_arch {
+@@ -124,6 +124,8 @@ enum llm_arch {
      LLM_ARCH_MIMO2,
      LLM_ARCH_LLAMA_EMBED,
      LLM_ARCH_MAINCODER,
 +    LLM_ARCH_AFM,
++    LLM_ARCH_AFM_DRAFT,
      LLM_ARCH_UNKNOWN,
  };
  
-@@ -193,6 +194,9 @@ enum llm_kv {
+@@ -193,6 +195,9 @@ enum llm_kv {
      LLM_KV_TIME_DECAY_EXTRA_DIM,
      LLM_KV_RESIDUAL_SCALE,
      LLM_KV_EMBEDDING_SCALE,
@@ -128,7 +154,7 @@ index 270d28b16..91b229bec 100644
      LLM_KV_TOKEN_SHIFT_COUNT,
      LLM_KV_INTERLEAVE_MOE_LAYER_STEP,
  
-@@ -367,6 +371,11 @@ enum llm_tensor {
+@@ -367,6 +372,13 @@ enum llm_tensor {
      LLM_TENSOR_ATTN_Q_NORM,
      LLM_TENSOR_ATTN_K_NORM,
      LLM_TENSOR_LAYER_OUT_NORM,
@@ -137,6 +163,8 @@ index 270d28b16..91b229bec 100644
 +    LLM_TENSOR_AFM_ROUTER_FC1,
 +    LLM_TENSOR_AFM_ROUTER_NORM,
 +    LLM_TENSOR_AFM_ROUTER_FC2,
++    LLM_TENSOR_AFM_EMBD_SCALE,
++    LLM_TENSOR_AFM_OUTPUT_SCALE,
      LLM_TENSOR_POST_ATTN_NORM,
      LLM_TENSOR_POST_MLP_NORM,
      LLM_TENSOR_PER_LAYER_TOKEN_EMBD, // gemma3n
@@ -206,10 +234,10 @@ index 1501e392c..d87cb22a7 100644
      template<typename T>
      bool llama_model_loader::get_key(const std::string & key, T & result, bool required) {
 diff --git a/src/llama-model.cpp b/src/llama-model.cpp
-index 72490a89b..afe252c6e 100644
+index 72490a89b..fa40b1fc0 100644
 --- a/src/llama-model.cpp
 +++ b/src/llama-model.cpp
-@@ -1097,6 +1097,27 @@ void llama_model::load_hparams(llama_model_loader & ml) {
+@@ -1097,6 +1097,34 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                  // Set non-causal attention for diffusion models
                  hparams.causal_attn = false;
              } break;
@@ -234,10 +262,17 @@ index 72490a89b..afe252c6e 100644
 +                }
 +                type = LLM_TYPE_3B;
 +            } break;
++        case LLM_ARCH_AFM_DRAFT:
++            {
++                // Apple's speculative-decoding draft model (v11-ifp-9m): pre-norm, q/k RMSNorm AFTER RoPE, tied int4 readout
++                ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
++                hparams.f_attention_scale = 1.0f / std::sqrt(float(hparams.n_embd_head_k));
++                type = LLM_TYPE_UNKNOWN;
++            } break;
          case LLM_ARCH_QWEN2MOE:
              {
                  ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
-@@ -2724,6 +2745,12 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -2724,6 +2752,12 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                  }
              }
  
@@ -250,7 +285,7 @@ index 72490a89b..afe252c6e 100644
              if (!buft) {
                  buft = select_weight_buft(hparams, t_meta, op, *buft_list);
                  if (!buft) {
-@@ -3601,6 +3628,55 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -3601,6 +3635,81 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
                          layer.ffn_up   = create_tensor(tn(LLM_TENSOR_FFN_UP,   "weight", i), {n_embd,   n_ff}, 0);
                      }
                  } break;
@@ -303,10 +338,36 @@ index 72490a89b..afe252c6e 100644
 +                        }
 +                    }
 +                } break;
++            case LLM_ARCH_AFM_DRAFT:
++                {
++                    tok_embd       = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD,       "weight"), {n_embd, n_vocab}, 0);
++                    tok_embd_scale = create_tensor(tn(LLM_TENSOR_AFM_EMBD_SCALE,   "weight"), {n_embd}, 0);
++                    output_norm    = create_tensor(tn(LLM_TENSOR_OUTPUT_NORM,      "weight"), {n_embd}, 0);
++                    output_scale   = create_tensor(tn(LLM_TENSOR_AFM_OUTPUT_SCALE, "weight"), {n_embd}, 0);
++                    output         = create_tensor(tn(LLM_TENSOR_OUTPUT,           "weight"), {n_embd, n_vocab}, TENSOR_NOT_REQUIRED);
++                    if (output == NULL) {
++                        output = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, TENSOR_DUPLICATED);
++                    }
++                    output_b       = create_tensor(tn(LLM_TENSOR_OUTPUT,           "bias"),   {n_vocab}, TENSOR_NOT_REQUIRED);
++                    for (int i = 0; i < n_layer; ++i) {
++                        auto & layer = layers[i];
++                        layer.attn_norm   = create_tensor(tn(LLM_TENSOR_ATTN_NORM,   "weight", i), {n_embd}, 0);
++                        layer.wq          = create_tensor(tn(LLM_TENSOR_ATTN_Q,      "weight", i), {n_embd, n_embd_head_k * n_head}, 0);
++                        layer.wk          = create_tensor(tn(LLM_TENSOR_ATTN_K,      "weight", i), {n_embd, n_embd_k_gqa}, 0);
++                        layer.wv          = create_tensor(tn(LLM_TENSOR_ATTN_V,      "weight", i), {n_embd, n_embd_v_gqa}, 0);
++                        layer.wo          = create_tensor(tn(LLM_TENSOR_ATTN_OUT,    "weight", i), {n_embd_head_k * n_head, n_embd}, 0);
++                        layer.attn_q_norm = create_tensor(tn(LLM_TENSOR_ATTN_Q_NORM, "weight", i), {n_embd_head_k}, 0);
++                        layer.attn_k_norm = create_tensor(tn(LLM_TENSOR_ATTN_K_NORM, "weight", i), {n_embd_head_k}, 0);
++                        layer.ffn_norm    = create_tensor(tn(LLM_TENSOR_FFN_NORM,    "weight", i), {n_embd}, 0);
++                        layer.ffn_gate    = create_tensor(tn(LLM_TENSOR_FFN_GATE,    "weight", i), {n_embd, n_ff}, 0);
++                        layer.ffn_up      = create_tensor(tn(LLM_TENSOR_FFN_UP,      "weight", i), {n_embd, n_ff}, 0);
++                        layer.ffn_down    = create_tensor(tn(LLM_TENSOR_FFN_DOWN,    "weight", i), {n_ff, n_embd}, 0);
++                    }
++                } break;
              case LLM_ARCH_QWEN2MOE:
                  {
                      tok_embd = create_tensor(tn(LLM_TENSOR_TOKEN_EMBD, "weight"), {n_embd, n_vocab}, 0);
-@@ -7108,6 +7184,51 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
+@@ -7108,6 +7217,52 @@ bool llama_model::load_tensors(llama_model_loader & ml) {
          }
      }
  
@@ -322,7 +383,8 @@ index 72490a89b..afe252c6e 100644
 +        ggml_init_params ip = { /*.mem_size =*/ 3*ggml_tensor_overhead(), /*.mem_buffer =*/ NULL, /*.no_alloc =*/ true };
 +        ggml_context * sctx = ggml_init(ip);
 +        const int64_t n_out = lr.ifp_router_fc2 ? lr.ifp_router_fc2->ne[1] : 1;
-+        afm_route_state = ggml_new_tensor_2d(sctx, GGML_TYPE_F32, n_out, LLAMA_AFM_ROUTE_SLOTS + 1); // +1: discard slot
++        afm_route_state = ggml_new_tensor_2d(sctx, GGML_TYPE_F32, n_out, 2*LLAMA_AFM_ROUTE_SLOTS + 1); // +1: discard row
++        afm_route_pos.assign(LLAMA_AFM_ROUTE_SLOTS, {-1, -1});
 +        ggml_set_name(afm_route_state, "afm.route_state");
 +        afm_silu_v = ggml_new_tensor_2d(sctx, GGML_TYPE_F32, 1, 38); ggml_set_name(afm_silu_v, "afm.silu_v");
 +        afm_silu_d = ggml_new_tensor_2d(sctx, GGML_TYPE_F32, 1, 38); ggml_set_name(afm_silu_d, "afm.silu_d");
@@ -358,7 +420,7 @@ index 72490a89b..afe252c6e 100644
      if (ml.no_alloc) {
          return true;
      }
-@@ -7569,6 +7690,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+@@ -7569,6 +7724,16 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
                  } else {
                      llama_memory_i::layer_reuse_cb reuse = nullptr;
  
@@ -375,7 +437,7 @@ index 72490a89b..afe252c6e 100644
                      if (arch == LLM_ARCH_GEMMA3N) {
                          reuse = [&](int32_t il) {
                              if (il >= (int32_t) hparams.n_layer_kv_from_start) {
-@@ -7612,7 +7743,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
+@@ -7612,7 +7777,7 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
                                  hparams.n_swa,
                                  hparams.swa_type,
                                  nullptr,
@@ -384,7 +446,7 @@ index 72490a89b..afe252c6e 100644
                      }
                  }
              }
-@@ -7729,6 +7860,10 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
+@@ -7729,6 +7894,14 @@ ggml_cgraph * llama_model::build_graph(const llm_graph_params & params) const {
              {
                  llm = std::make_unique<llm_build_qwen2vl>(*this, params);
              } break;
@@ -392,22 +454,35 @@ index 72490a89b..afe252c6e 100644
 +            {
 +                llm = std::make_unique<llm_build_afm>(*this, params);
 +            } break;
++        case LLM_ARCH_AFM_DRAFT:
++            {
++                llm = std::make_unique<llm_build_afm_draft>(*this, params);
++            } break;
          case LLM_ARCH_QWEN2MOE:
              {
                  llm = std::make_unique<llm_build_qwen2moe>(*this, params);
-@@ -8285,6 +8420,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+@@ -8285,6 +8458,8 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
          case LLM_ARCH_QWEN:
          case LLM_ARCH_QWEN2:
          case LLM_ARCH_DREAM:
 +        case LLM_ARCH_AFM:
++        case LLM_ARCH_AFM_DRAFT:
          case LLM_ARCH_QWEN2MOE:
          case LLM_ARCH_QWEN3:
          case LLM_ARCH_QWEN3MOE:
 diff --git a/src/llama-model.h b/src/llama-model.h
-index d1de16e3f..2809c0fbf 100644
+index d1de16e3f..d4b1d6c39 100644
 --- a/src/llama-model.h
 +++ b/src/llama-model.h
-@@ -263,6 +263,13 @@ struct llama_layer {
+@@ -12,6 +12,7 @@
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
++#include <array>
+ #include <vector>
+ 
+ struct llama_cparams;
+@@ -263,6 +264,13 @@ struct llama_layer {
      struct ggml_tensor * ffn_post_norm    = nullptr;
      struct ggml_tensor * layer_out_norm   = nullptr;
      struct ggml_tensor * layer_out_norm_b = nullptr;
@@ -421,7 +496,7 @@ index d1de16e3f..2809c0fbf 100644
      struct ggml_tensor * ffn_norm_exps    = nullptr;
      struct ggml_tensor * ffn_norm_enc     = nullptr;
  
-@@ -420,6 +427,8 @@ struct llama_layer {
+@@ -420,6 +428,8 @@ struct llama_layer {
      struct llama_layer_nextn nextn;
  };
  
@@ -430,28 +505,131 @@ index d1de16e3f..2809c0fbf 100644
  struct llama_model {
      llm_type type = LLM_TYPE_UNKNOWN;
      llm_arch arch = LLM_ARCH_UNKNOWN;
-@@ -440,6 +449,11 @@ struct llama_model {
+@@ -440,6 +450,14 @@ struct llama_model {
  
      struct ggml_tensor * output_norm     = nullptr;
      struct ggml_tensor * output_norm_b   = nullptr;
 +    struct ggml_tensor * output_norm_2   = nullptr; // afm: second final RMSNorm
 +    struct ggml_tensor * inp_bias        = nullptr; // afm: constant added to the scaled input embedding
++    struct ggml_tensor * tok_embd_scale  = nullptr; // afm-draft: per-dimension scale of the int4 token codes (input)
++    struct ggml_tensor * output_scale    = nullptr; // afm-draft: the same scale applied before the tied readout
 +    struct ggml_tensor * afm_silu_v = nullptr;      // afm: Neural Engine SiLU table, values on a 0.5 grid from -10.5 (38)
 +    struct ggml_tensor * afm_silu_d = nullptr;      // afm: ... and per-segment slopes (value differences)
-+    struct ggml_tensor * afm_route_state = nullptr; // afm: persisted IFP router logits per sequence slot (runtime state)
++    struct ggml_tensor * afm_route_state = nullptr; // afm: persisted IFP router logits, 2 rows per sequence slot (runtime state)
++    mutable std::vector<std::array<int32_t, 2>> afm_route_pos; // afm: position each persisted pick came from (-1 = none)
      struct ggml_tensor * output          = nullptr;
      struct ggml_tensor * output_b        = nullptr;
      struct ggml_tensor * output_norm_enc = nullptr;
+diff --git a/src/models/afm-draft.cpp b/src/models/afm-draft.cpp
+new file mode 100644
+index 000000000..e6324352c
+--- /dev/null
++++ b/src/models/afm-draft.cpp
+@@ -0,0 +1,93 @@
++#include "models.h"
++
++// Apple's speculative-decoding draft model for the on-device foundation model (asset ...fm_api_generic.draft, "v11-ifp-9m"),
++// as recovered from its Neural Engine program:
++//   x0 = code[token] * s                       (int4 codes, one per-dimension fp16 scale s; no per-token scale)
++//   per layer: h = rms(x)*g_attn ; q,k = RoPE(Wq h, Wk h) -> RMSNorm over the head (AFTER RoPE) * g_q/g_k ; v = Wv h
++//              x += Wo attn(q, k, v)            (8 query heads, 4 kv heads, scale 1/sqrt(32))
++//              x += down(silu(gate h2) * up h2), h2 = rms(x)*g_ffn
++//   logits = code . (rms(x)*g_out * s) + bias   (readout tied to the input codes; bias = -inf outside the
++//                                                100000-token draft vocabulary, which is all the draft can propose)
++llm_build_afm_draft::llm_build_afm_draft(const llama_model & model, const llm_graph_params & params) : llm_graph_context(params) {
++    const int64_t n_embd_head = hparams.n_embd_head_v;
++
++    GGML_ASSERT(n_embd_head == hparams.n_embd_head_k);
++    GGML_ASSERT(n_embd_head == hparams.n_rot);
++
++    ggml_tensor * cur;
++    ggml_tensor * inpL = build_inp_embd(model.tok_embd);
++    inpL = ggml_mul(ctx0, inpL, model.tok_embd_scale);
++    cb(inpL, "inp_scaled", -1);
++
++    ggml_tensor * inp_pos     = build_inp_pos();
++    auto        * inp_attn    = build_attn_inp_kv();
++    ggml_tensor * inp_out_ids = build_inp_out_ids();
++
++    for (int il = 0; il < n_layer; ++il) {
++        ggml_tensor * inpSA = inpL;
++
++        cur = build_norm(inpL, model.layers[il].attn_norm, NULL, LLM_NORM_RMS, il);
++        cb(cur, "attn_norm", il);
++        {
++            ggml_tensor * Qcur = build_lora_mm(model.layers[il].wq, cur);
++            ggml_tensor * Kcur = build_lora_mm(model.layers[il].wk, cur);
++            ggml_tensor * Vcur = build_lora_mm(model.layers[il].wv, cur);
++
++            Qcur = ggml_reshape_3d(ctx0, Qcur, n_embd_head, n_head,    n_tokens);
++            Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
++            Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
++
++            Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                                 ext_factor, attn_factor, beta_fast, beta_slow);
++            Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
++                                 ext_factor, attn_factor, beta_fast, beta_slow);
++
++            // the head norm comes after RoPE: its gains differ inside rotation pairs, so the order matters
++            Qcur = build_norm(Qcur, model.layers[il].attn_q_norm, NULL, LLM_NORM_RMS, il);
++            Kcur = build_norm(Kcur, model.layers[il].attn_k_norm, NULL, LLM_NORM_RMS, il);
++            cb(Qcur, "Qcur", il);
++            cb(Kcur, "Kcur", il);
++            cb(Vcur, "Vcur", il);
++
++            cur = build_attn(inp_attn, model.layers[il].wo, NULL,
++                             Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, 1.0f/sqrtf(float(n_embd_head)), il);
++        }
++        if (il == n_layer - 1 && inp_out_ids) {
++            cur   = ggml_get_rows(ctx0,   cur, inp_out_ids);
++            inpSA = ggml_get_rows(ctx0, inpSA, inp_out_ids);
++        }
++        ggml_tensor * ffn_inp = ggml_add(ctx0, cur, inpSA);
++        cb(ffn_inp, "ffn_inp", il);
++
++        cur = build_norm(ffn_inp, model.layers[il].ffn_norm, NULL, LLM_NORM_RMS, il);
++        cb(cur, "ffn_norm", il);
++
++        cur = build_ffn(cur,
++                model.layers[il].ffn_up,   NULL, NULL,
++                model.layers[il].ffn_gate, NULL, NULL,
++                model.layers[il].ffn_down, NULL, NULL,
++                NULL, LLM_FFN_SILU, LLM_FFN_PAR, il);
++        cb(cur, "ffn_out", il);
++
++        cur = ggml_add(ctx0, cur, ffn_inp);
++        cur = build_cvec(cur, il);
++        cb(cur, "l_out", il);
++        inpL = cur;
++    }
++
++    // final norm: Apple computes rsqrt(mean((0.1 x)^2) + 1.19e-7) * 0.1 (an fp16 overflow guard) = rms with eps 1.19e-5
++    cur = ggml_rms_norm(ctx0, inpL, 1.1920929e-5f);
++    cur = ggml_mul(ctx0, cur, model.output_norm);
++    cb(cur, "result_norm", -1);
++    res->t_embd = cur;
++
++    cur = ggml_mul(ctx0, cur, model.output_scale);
++    cur = build_lora_mm(model.output, cur);
++    if (model.output_b) {
++        cur = ggml_add(ctx0, cur, model.output_b);
++    }
++    cb(cur, "result_output", -1);
++    res->t_logits = cur;
++
++    ggml_build_forward_expand(gf, cur);
++}
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..c6fb3a9da
+index 000000000..a7d65fab5
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,542 @@
+@@ -0,0 +1,592 @@
 +#include "models.h"
 +#include "../llama-adapter.h"
 +
 +#include <algorithm>
++#include <array>
 +#include <cstdlib>
 +#include <cmath>
 +#include <cstdio>
@@ -460,34 +638,78 @@ index 000000000..c6fb3a9da
 +
 +static float afm_env_f(const char * k, float d) { const char * v = getenv(k); return v ? (float) atof(v) : d; }
 +
++// A multi-token run of one sequence is either a prompt chunk or a speculative-decoding verify batch ([last token, draft
++// tokens...]). Verify batches request logits for every token and never start at position 0; prompt chunks request at
++// most their last token. Tokens of a verify batch must behave exactly as if decoded one at a time (Apple's extend path),
++// so that speculation cannot change the output.
++static std::vector<bool> afm_gen_runs(const llama_ubatch * ub) {
++    const int64_t T = ub->n_tokens;
++    std::vector<bool> gen(T, false);
++    for (int64_t i = 0; i < T; ++i) {
++        int64_t cnt = 0; bool all_out = true; llama_pos p0 = ub->pos[i];
++        for (int64_t j = 0; j < T; ++j) {
++            if (ub->seq_id[j][0] != ub->seq_id[i][0]) { continue; }
++            cnt++; all_out = all_out && ub->output && ub->output[j]; p0 = std::min(p0, ub->pos[j]);
++        }
++        gen[i] = cnt > 1 && all_out && p0 > 0 && !getenv("AFM_NO_SPEC_RUNS");
++    }
++    return gen;
++}
++
 +// Per-ubatch indices for Apple's IFP expert schedule (TokenGenerationInference.IFPExpertPicker):
 +//  - a run of >1 tokens of one sequence is a prompt chunk: all of its tokens use the router logits of the chunk's LAST
 +//    token, which become the sequence's persisted choice;
 +//  - a single decode token re-picks from its own logits when pos % freq == 0, otherwise reuses the persisted choice.
 +class llm_graph_input_afm_route : public llm_graph_input_i {
 +public:
-+    llm_graph_input_afm_route(int64_t n_slots, int64_t freq, bool prompt_own) : n_slots(n_slots), freq(freq), prompt_own(prompt_own) {}
++    llm_graph_input_afm_route(int64_t n_slots, int64_t freq, bool prompt_own, std::vector<std::array<int32_t, 2>> * tags)
++        : n_slots(n_slots), freq(freq), prompt_own(prompt_own), tags(tags) {}
++    // Each sequence slot keeps two persisted picks, tagged with the position of the token they came from. A pick from a
++    // position at or after the first position of this batch belongs to tokens that were rolled back (rejected draft
++    // tokens of speculative decoding, or a cleared cache) and is ignored; a new pick goes to the other row.
 +    void set_input(const llama_ubatch * ub) override {
-+        const int64_t T = ub->n_tokens;
-+        std::vector<int32_t> ist(T), itk(T); std::vector<int64_t> idst(T); std::vector<float> use(T);
-+        std::vector<std::pair<llama_seq_id, std::pair<int64_t, int64_t>>> runs;   // seq -> (count, last index)
-+        auto run = [&](llama_seq_id s) -> std::pair<int64_t, int64_t> & {
-+            for (auto & r : runs) { if (r.first == s) { return r.second; } }
-+            runs.push_back({s, {0, 0}}); return runs.back().second; };
-+        for (int64_t i = 0; i < T; ++i) { auto & r = run(ub->seq_id[i][0]); r.first++; r.second = i; }
++        const int64_t T = ub->n_tokens, discard = 2*n_slots;
++        std::vector<int32_t> ist(T), itk(T); std::vector<int64_t> idst(T, discard); std::vector<float> use(T, 1.0f);
++        const std::vector<bool> gen = afm_gen_runs(ub);
++        std::vector<llama_seq_id> seqs;
 +        for (int64_t i = 0; i < T; ++i) {
-+            const llama_seq_id s = ub->seq_id[i][0];
++            if (std::find(seqs.begin(), seqs.end(), ub->seq_id[i][0]) == seqs.end()) { seqs.push_back(ub->seq_id[i][0]); }
++        }
++        for (const llama_seq_id s : seqs) {
 +            const int64_t slot = ((s % n_slots) + n_slots) % n_slots;
-+            const auto & r = run(s);
-+            ist[i] = (int32_t) slot; itk[i] = (int32_t) i; idst[i] = n_slots; use[i] = 1.0f;     // n_slots = discard slot
-+            if (r.first > 1) {
-+                if (!prompt_own) { itk[i] = (int32_t) r.second; }
-+                if (i == r.second) { idst[i] = slot; }
-+            } else if (ub->pos[i] % freq == 0) {
-+                idst[i] = slot;
-+            } else {
-+                use[i] = 0.0f;
++            std::vector<int64_t> idx;
++            for (int64_t i = 0; i < T; ++i) { if (ub->seq_id[i][0] == s) { idx.push_back(i); } }
++            llama_pos p0 = ub->pos[idx[0]]; int64_t last = idx[0];
++            for (int64_t i : idx) { p0 = std::min(p0, ub->pos[i]); if (ub->pos[i] >= ub->pos[last]) { last = i; } }
++            auto & tg = (*tags)[slot];
++            for (auto & q : tg) { if (q >= p0) { q = -1; } }
++            const int valid = tg[1] > tg[0] ? 1 : 0, wr = 1 - valid;
++            const int32_t rd = (int32_t) (2*slot + valid);
++            int64_t writer = -1;                                  // token whose fresh logits become the persisted pick
++            const bool multi = idx.size() > 1;
++            for (int64_t i : idx) {
++                ist[i] = rd; itk[i] = (int32_t) i;
++                if (multi && gen[i]) {
++                    // verify batch: as single decode tokens -- route on the latest re-pick token (position % freq == 0) at or
++                    // before this one in the batch, else on the persisted pick
++                    int64_t src = -1;
++                    for (int64_t j : idx) {
++                        if (ub->pos[j] % freq != 0) { continue; }
++                        if (ub->pos[j] <= ub->pos[i] && (src < 0 || ub->pos[j] > ub->pos[src])) { src = j; }
++                        if (writer < 0 || ub->pos[j] > ub->pos[writer]) { writer = j; }
++                    }
++                    if (src >= 0) { itk[i] = (int32_t) src; } else { use[i] = 0.0f; }
++                } else if (multi) {
++                    // prompt chunk: every token routes on the chunk's last token, which becomes the persisted pick
++                    if (!prompt_own) { itk[i] = (int32_t) last; }
++                    writer = last;
++                } else if (ub->pos[i] % freq == 0) {
++                    writer = i;                                   // a lone decode token at a re-pick position
++                } else {
++                    use[i] = 0.0f;
++                }
 +            }
++            if (writer >= 0) { idst[writer] = 2*slot + wr; tg[wr] = ub->pos[writer]; }
 +        }
 +        ggml_backend_tensor_set(src_state, ist.data(), 0, T*sizeof(int32_t));
 +        ggml_backend_tensor_set(src_tok,   itk.data(), 0, T*sizeof(int32_t));
@@ -495,12 +717,13 @@ index 000000000..c6fb3a9da
 +        ggml_backend_tensor_set(use_tok,   use.data(), 0, T*sizeof(float));
 +    }
 +    bool can_reuse(const llm_graph_params & params) override { return src_tok->ne[0] == (int64_t) params.ubatch.n_tokens; }
-+    ggml_tensor * src_state = nullptr; // I32 [T]   persisted slot to read
++    ggml_tensor * src_state = nullptr; // I32 [T]   persisted row to read
 +    ggml_tensor * src_tok   = nullptr; // I32 [T]   in-batch token whose fresh logits to read
-+    ggml_tensor * dst       = nullptr; // I64 [T]   slot to write this token's fresh logits to (n_slots = discard)
++    ggml_tensor * dst       = nullptr; // I64 [T]   row to write this token's fresh logits to (2*n_slots = discard)
 +    ggml_tensor * use_tok   = nullptr; // F32 [1,T] 1 = fresh logits, 0 = persisted
 +    const int64_t n_slots, freq;
 +    const bool    prompt_own;   // prompt-chunk tokens route on their own logits (the pick for generation is unchanged)
++    std::vector<std::array<int32_t, 2>> * tags;
 +};
 +
 +// Apple runs prompt chunks through the prompt_opt procedures, whose layer-0 constant is zero, and generated tokens through
@@ -512,11 +735,13 @@ index 000000000..c6fb3a9da
 +    void set_input(const llama_ubatch * ub) override {
 +        const int64_t T = ub->n_tokens;
 +        std::vector<float> m(T);
++        const std::vector<bool> gen = afm_gen_runs(ub);
 +        for (int64_t i = 0; i < T; ++i) {
 +            int64_t cnt = 0;
 +            for (int64_t j = 0; j < T; ++j) { cnt += ub->seq_id[j][0] == ub->seq_id[i][0]; }
-+            // a re-pick token (position a multiple of the selection frequency) runs Apple's dense-only function: no bias
-+            m[i] = (cnt == 1 && (freq <= 0 || ub->pos[i] % freq != 0)) ? 1.0f : 0.0f;
++            // a re-pick token (position a multiple of the selection frequency) runs Apple's dense-only function: no bias;
++            // tokens of a speculative verify batch are generated tokens like a lone decode token
++            m[i] = ((cnt == 1 || gen[i]) && (freq <= 0 || ub->pos[i] % freq != 0)) ? 1.0f : 0.0f;
 +        }
 +        ggml_backend_tensor_set(t, m.data(), 0, T*sizeof(float));
 +    }
@@ -780,7 +1005,7 @@ index 000000000..c6fb3a9da
 +            const bool apple_sched = model.afm_route_state && afm_env_f("AFM_ROUTE_TOKEN", 0) == 0 && pool_n == 0 && !route_cum &&
 +                                     !getenv("AFM_ROUTE_FORCE");
 +            if (apple_sched && sched_p == 0) {
-+                auto inp = std::make_unique<llm_graph_input_afm_route>(model.afm_route_state->ne[1] - 1, std::max(1, sched_f), prompt_own);
++                auto inp = std::make_unique<llm_graph_input_afm_route>(LLAMA_AFM_ROUTE_SLOTS, std::max(1, sched_f), prompt_own, &model.afm_route_pos);
 +                const int64_t T = per_tok->ne[1];
 +                inp->src_state = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, T); ggml_set_input(inp->src_state);
 +                inp->src_tok   = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, T); ggml_set_input(inp->src_tok);
@@ -789,6 +1014,8 @@ index 000000000..c6fb3a9da
 +                ggml_tensor * fresh = ggml_get_rows(ctx0, per_tok, inp->src_tok);                       // [E*layers, T]
 +                ggml_tensor * kept  = ggml_get_rows(ctx0, model.afm_route_state, inp->src_state);       // [E*layers, T]
 +                router_logits = ggml_add(ctx0, kept, ggml_mul(ctx0, ggml_sub(ctx0, fresh, kept), inp->use_tok));
++                // read the persisted choice BEFORE this batch overwrites it (a verify batch can hold both readers and a re-pick)
++                ggml_build_forward_expand(gf, router_logits);
 +                ggml_build_forward_expand(gf, ggml_set_rows(ctx0, model.afm_route_state, per_tok, inp->dst));
 +                res->add_input(std::move(inp));
 +            } else if (sched_p > 0) {
@@ -991,15 +1218,19 @@ index 000000000..c6fb3a9da
 +    ggml_build_forward_expand(gf, cur);
 +}
 diff --git a/src/models/models.h b/src/models/models.h
-index 3a44f7f14..05f8b235c 100644
+index 3a44f7f14..bf8be0e62 100644
 --- a/src/models/models.h
 +++ b/src/models/models.h
-@@ -426,6 +426,10 @@ struct llm_build_qwen2 : public llm_graph_context {
+@@ -426,6 +426,14 @@ struct llm_build_qwen2 : public llm_graph_context {
      llm_build_qwen2(const llama_model & model, const llm_graph_params & params);
  };
  
 +struct llm_build_afm : public llm_graph_context {
 +    llm_build_afm(const llama_model & model, const llm_graph_params & params);
++};
++
++struct llm_build_afm_draft : public llm_graph_context {
++    llm_build_afm_draft(const llama_model & model, const llm_graph_params & params);
 +};
 +
  struct llm_build_qwen2moe : public llm_graph_context {
@@ -1032,10 +1263,11 @@ index 000000000..a1f3701dd
 +target_compile_features(${TARGET} PRIVATE cxx_std_17)
 diff --git a/tools/afm-logits/afm-logits.cpp b/tools/afm-logits/afm-logits.cpp
 new file mode 100644
-index 000000000..aa3097694
+index 000000000..e9dd72804
 --- /dev/null
 +++ b/tools/afm-logits/afm-logits.cpp
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,75 @@
++#include <algorithm>
 +// llama-afm-logits <model.gguf> <ids1.bin> <out1.f32> [<ids2.bin> <out2.f32> ...]
 +// Teacher-forced logits for every position of each token sequence (ids: int32 little-endian; out: float32 [T, n_vocab]).
 +// Used to measure next-token agreement with Apple's live model (see tools/eval in afm-ifp-teardown).
@@ -1092,7 +1324,8 @@ index 000000000..aa3097694
 +            // runtime path: prompt as one batch, then one token per llama_decode (as in generation)
 +            int i0 = 0;
 +            while (i0 < (int) ids.size()) {
-+                const int n = i0 == 0 ? stepwise : 1;
++                const int chunk = getenv("AFM_CHUNK") ? atoi(getenv("AFM_CHUNK")) : 1;   // >1: answer in verify-style batches
++                const int n = i0 == 0 ? stepwise : std::min(chunk, (int) ids.size() - i0);
 +                b.n_tokens = 0;
 +                for (int i = i0; i < i0 + n; ++i) { int k = b.n_tokens++; b.token[k] = ids[i]; b.pos[k] = i; b.n_seq_id[k] = 1; b.seq_id[k][0] = 0; b.logits[k] = 1; }
 +                if (llama_decode(ctx, b) != 0) { fprintf(stderr, "decode failed\n"); return 1; }
