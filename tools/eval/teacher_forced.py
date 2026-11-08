@@ -20,7 +20,7 @@ def main():
     if len(args) != 3: sys.exit(__doc__)
     gguf, bindir, odir = args
     here = os.path.dirname(os.path.abspath(__file__))
-    prompts = open(os.path.join(here, 'prompts.txt'), encoding='utf-8').read().strip().split('\n')
+    prompts = open(os.environ.get('AFM_PROMPTS', os.path.join(here, 'prompts.txt')), encoding='utf-8').read().strip().split('\n')
     exe = lambda n: os.path.join(bindir, n + ('.exe' if os.name == 'nt' else ''))
 
     port = 18300 + os.getpid() % 100

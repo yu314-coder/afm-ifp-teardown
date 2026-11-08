@@ -16,3 +16,9 @@ python3 tools/eval/free_running.py   afm-v11.2-ifp.gguf llama.cpp/build/bin orac
   (expected: 17/40).
 
 Apple's answers change when Apple updates the model asset, so collect the reference on the same OS build as the GGUF.
+
+A larger set of 190 more prompts is in `prompts_extended.txt`:
+```bash
+tools/eval/collect_oracle.sh oracle_ext/ tools/eval/prompts_extended.txt
+AFM_PROMPTS=tools/eval/prompts_extended.txt python3 tools/eval/teacher_forced.py afm-v11.2-ifp.gguf llama.cpp/build/bin oracle_ext/
+```

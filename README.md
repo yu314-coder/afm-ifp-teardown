@@ -75,7 +75,24 @@ Old GGUFs work with the current patch; nothing needs to be re-converted.
 early token sends the rest of an answer elsewhere. Apple's schedule was confirmed independently: replaying 47 of Apple's
 own expert re-picks, our router changes as many experts per re-pick as Apple's (27 vs 27 on average, r = 0.84).
 
-**What still differs.** 37 of 1127 answer tokens. Apple's token is almost always our second or third choice. The weights, tokenizer, prompt format, layer-0 input, attention scale and expert schedule all match Apple's; each was checked separately (see the paper).
+**A larger test (230 prompts, 6572 answer tokens).** The 40-prompt set moves by about ±0.4% from noise, so every candidate was re-run on 190 more prompts (`tools/eval/prompts_extended.txt`):
+
+| Variant (teacher-forced, 6572 tokens) | agreement | vs default: fixed / broken |
+|---|---|---|
+| **v1.2 default** | **95.19%** | – |
+| exact SiLU (`AFM_EXACT_SILU=1`) | 94.17% | 72 / 139 |
+| per-token routing | 93.34% | – |
+| fp16 rounding of every matmul output (`AFM_MM_F16=1`) | 95.13% | 30 / 34 |
+| int8 KV emulation off | 95.07% | 46 / 54 |
+| int8 rounding by truncation instead of to-nearest | 94.05% | 64 / 139 |
+| keys quantised before their gain | 95.09% | 43 / 50 |
+| RoPE tables rounded to fp16 | 94.99% | 21 / 34 |
+
+Apple's log also confirms the re-pick timing: around a boundary its runtime steps one token at a time, then logs "Picking IFP experts at position=96".
+
+**Why 100% is out of reach from outside.** We rebuilt the 12 dense layers as a Core ML program on the real Neural Engine and injected its layer-12 state into llama.cpp. Agreement stayed the same (94.9% vs 95.2%), but 3.4% of tokens flipped in both directions. Two plausible versions of the hardware arithmetic disagree on as many tokens as separate us from Apple, and Core ML does not compile our graph into Apple's hand-built Neural Engine program. The last few percent are therefore set by Apple's exact rounding, not by anything missing from the model.
+
+**What still differs.** 37 of 1127 answer tokens on the 40-prompt set (316 of 6572 on the larger one; 2.9% of tokens are missed whatever the routing, 1.9% only with Apple's schedule). Apple's token is almost always our second or third choice. The weights, tokenizer, prompt format, layer-0 input, attention scale and expert schedule all match Apple's; each was checked separately (see the paper).
 
 Measured directly and ruled out as the main cause:
 - **The Neural Engine's arithmetic.** Its matrix multiplies are accurate (high-precision accumulation, fp16 output). Its SiLU table is now emulated, which is worth +0.6 points. Rounding the activations to fp16 changes nothing measurable.

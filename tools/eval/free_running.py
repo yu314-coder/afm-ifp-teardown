@@ -13,7 +13,7 @@ def main():
     if len(sys.argv) != 4: sys.exit(__doc__)
     gguf, bindir, odir = sys.argv[1:]
     here = os.path.dirname(os.path.abspath(__file__))
-    prompts = open(os.path.join(here, 'prompts.txt'), encoding='utf-8').read().strip().split('\n')
+    prompts = open(os.environ.get('AFM_PROMPTS', os.path.join(here, 'prompts.txt')), encoding='utf-8').read().strip().split('\n')
     exe = os.path.join(bindir, 'llama-server' + ('.exe' if os.name == 'nt' else ''))
     port = 18400 + os.getpid() % 100
     srv = subprocess.Popen([exe, '-m', gguf, '--port', str(port), '-c', '4096', '-np', '1', '--jinja'],

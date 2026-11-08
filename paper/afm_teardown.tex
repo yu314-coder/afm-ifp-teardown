@@ -527,6 +527,29 @@ Every weight, gain, bias, the router, the tokenizer, the template and the routin
 
 \paragraph{Path noise.} On the final model, the CPU and Metal backends (identical mathematics) disagree on 0.71\% of answer tokens (8/1127), and their agreement with Apple is identical (96.72\%). The remaining 37 misses are near-ties: Apple's token is our second choice in 84\% and always in our top three, and the median logit gap is 0.40. Rounding every matmul output to fp16, as the ANE stores it, gives 96.89\% (within noise). In v1.0, mathematically identical variants disagreed on 0.1--2.4\% of next-token choices: fp16-rounded activations against fp32, llama.cpp's RoPE kernel against an elementwise one, or one batch against a prompt batch followed by single steps. The 2-bit weights and the int8 KV cache amplify rounding, so a percent or so of residual disagreement is expected even from an exact model.
 
+\paragraph{A larger test.} The 40-prompt set moves by about $\pm0.4\%$ from noise alone, so we added 190 prompts (6572 answer tokens in all) and re-ran every candidate (Table~\ref{tab:ext}). The Neural Engine SiLU is worth a full point. Every other ANE detail we could emulate is neutral: fp16 matmul outputs, int8 KV on or off, keys quantised before their gain, and fp16 RoPE tables. Truncating instead of rounding the int8 cache costs a point, so Apple rounds to nearest. Of the remaining 316 misses, 2.9\% of tokens are missed under any routing and 1.9\% only under Apple's schedule. The latter is consistent with our prompt-level pick differing from Apple's by a boundary expert or two: the 23rd and 24th router logits are a median 0.003 apart, about the size of a rounding difference in the layer-12 state. Apple's log also confirms the re-pick timing. Around a boundary the runtime steps one token at a time, and the pick at position 96 uses token 96 itself. Apple's fp16 logits never tie at the top, and its softmax errors (about 0.2\% in the denominator) cancel in the post-attention RMS norm.
+
+\begin{table}[h]
+\centering\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Variant (230 prompts, 6572 answer tokens) & top-1 & fixed / broken \\
+\midrule
+v1.2 default (Apple's schedule, ANE SiLU, int8 KV) & \textbf{95.19\%} & -- \\
+exact SiLU & 94.17\% & 72 / 139 \\
+per-token routing & 93.34\% & -- \\
+fp16 rounding of every matmul and attention output & 95.13\% & 30 / 34 \\
+int8 KV emulation off & 95.07\% & 46 / 54 \\
+int8 rounding by truncation & 94.05\% & 64 / 139 \\
+keys quantised before their gain & 95.09\% & 43 / 50 \\
+RoPE cos/sin rounded to fp16 & 94.99\% & 21 / 34 \\
+\bottomrule
+\end{tabular}
+\caption{Candidates on the larger set, against the v1.2 default (fixed / broken = tokens that become right / wrong).}\label{tab:ext}
+\end{table}
+
+\paragraph{Running the dense layers on the Neural Engine.} As a direct test of the arithmetic, we rebuilt layers 0--11 as a Core ML program, which placed every operation on the ANE: int8 KV round and clip, the ANE's own SiLU and softmax. We fed its layer-12 state to llama.cpp for routing and the remaining 44 layers. The state differs from our emulation by about 15\% (relative norm) after 12 layers; in isolation each layer's FFN agrees with our SiLU-table model to fp16 rounding (0.5\%), and int8 steps in the very coarse layer-0 values amplify the differences. Agreement with Apple stays the same: 94.92\% against 95.19\%, but 224 of 6572 tokens flip (103 fixed, 121 broken). The control, the same program in fp32 on the CPU with exact SiLU, gives 94.42\%. So two plausible versions of the hardware arithmetic disagree on about 3.4\% of tokens without either being closer to Apple, which is the size of the remaining gap. Core ML compiles our graph differently from Apple's hand-built ANE program, so even the real hardware does not reproduce Apple's rounding. Closing the last points would need that program's exact arithmetic.
+
 \paragraph{What the misses were in v1.0.} With Apple's schedule, 74 of the 93 v1.0 misses were also missed with per-token routing, so they did not depend on routing. At 89 of the 93 our choice was an ordinary text token, so Apple's output masking is not involved. Table~\ref{tab:night} lists the numerical experiments, run on the v1.0 configuration.
 
 \begin{table}[h]

@@ -431,10 +431,10 @@ index d1de16e3f..2809c0fbf 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm.cpp b/src/models/afm.cpp
 new file mode 100644
-index 000000000..fe9262a8e
+index 000000000..afa4c5594
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,501 @@
+@@ -0,0 +1,509 @@
 +#include "models.h"
 +
 +#include <algorithm>
@@ -594,7 +594,13 @@ index 000000000..fe9262a8e
 +    const bool mm16 = afm_env_f("AFM_MM_F16", 0) != 0;   // research: round every matmul / attention output to fp16 (as the ANE stores them)
 +    auto r16 = [&](ggml_tensor * t) { return mm16 ? f16r(t) : t; };
 +    // emulate the ANE int8 KV cache: x -> clamp(round(x*s), -127, 127) / s
++    const int kvq_mode = (int) afm_env_f("AFM_KVQ_MODE", 0);   // research: 0 round-half-even, 1 truncate toward zero
 +    auto fq8 = [&](ggml_tensor * t, float s) {
++        if (kvq_mode == 1) {   // trunc(x*s) = sign(x)*floor(|x*s|), floor(a) = round(a - 0.5) for a >= 0 (ties do not matter here)
++            ggml_tensor * a  = ggml_abs(ctx0, ggml_scale(ctx0, t, s));
++            ggml_tensor * fl = ggml_scale_bias(ctx0, ggml_scale_bias(ctx0, ggml_scale_bias(ctx0, a, 1.0f, -0.4999f), 1.0f, 12582912.0f), 1.0f, -12582912.0f);
++            return ggml_scale(ctx0, ggml_mul(ctx0, ggml_clamp(ctx0, fl, 0.0f, 127.0f), ggml_sgn(ctx0, t)), 1.0f/s);
++        }
 +        // round-to-nearest via the fp32 magic constant 1.5*2^23 (backend-independent), saturate to int8, rescale
 +        ggml_tensor * r = ggml_scale_bias(ctx0, t, s, 12582912.0f);
 +        r = ggml_scale_bias(ctx0, r, 1.0f, -12582912.0f);
@@ -824,10 +830,11 @@ index 000000000..fe9262a8e
 +                Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
 +                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
 +                Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps);
++                const bool kq_pre_gamma = afm_env_f("AFM_KQ_PRE_GAMMA", 0) != 0 && layer.attn_k_norm && kvq;   // research
 +                if (gamma_first && layer.attn_k_norm) { Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm); }
 +                Kcur = rope(Kcur);
 +                if (gamma_first) {
-+                } else if (layer.attn_k_norm) {
++                } else if (layer.attn_k_norm && !kq_pre_gamma) {
 +                    Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm);
 +                } else if (const char * g = getenv("AFM_K_GAMMA_FROM")) {   // research: borrow a gain for a K without one
 +                    const int src = atoi(g);
@@ -844,6 +851,7 @@ index 000000000..fe9262a8e
 +                    const float c0 = il == 0 ? afm_env_f("AFM_V0_INSCALE", 1.0f) : 1.0f;
 +                    if (vs > 0) { Vcur = c0 == 1.0f ? fq8(Vcur, vs) : ggml_scale(ctx0, fq8(ggml_scale(ctx0, Vcur, c0), vs), 1.0f/c0); }
 +                }
++                if (kq_pre_gamma) { Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm); }   // dequantised cache times the gain
 +                cb(Kcur, "Kcur", il);
 +                cb(Vcur, "Vcur", il);
 +                cur = build_attn(inp_attn, mm16 ? nullptr : layer.wo, NULL, Qcur, Kcur, Vcur, nullptr, nullptr, nullptr,
@@ -978,10 +986,10 @@ index 000000000..a1f3701dd
 +target_compile_features(${TARGET} PRIVATE cxx_std_17)
 diff --git a/tools/afm-logits/afm-logits.cpp b/tools/afm-logits/afm-logits.cpp
 new file mode 100644
-index 000000000..ce9e02b62
+index 000000000..bdb3dcf88
 --- /dev/null
 +++ b/tools/afm-logits/afm-logits.cpp
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,68 @@
 +// llama-afm-logits <model.gguf> <ids1.bin> <out1.f32> [<ids2.bin> <out2.f32> ...]
 +// Teacher-forced logits for every position of each token sequence (ids: int32 little-endian; out: float32 [T, n_vocab]).
 +// Used to measure next-token agreement with Apple's live model (see tools/eval in afm-ifp-teardown).
@@ -1018,6 +1026,8 @@ index 000000000..ce9e02b62
 +    llama_model * model = llama_model_load_from_file(argv[1], mp);
 +    if (!model) { fprintf(stderr, "load failed\n"); return 1; }
 +    auto cp = llama_context_default_params(); cp.n_ctx = 4096; cp.n_batch = 4096; cp.n_ubatch = 1024;
++    if (getenv("AFM_FA")) { cp.flash_attn_type = atoi(getenv("AFM_FA")) ? LLAMA_FLASH_ATTN_TYPE_ENABLED : LLAMA_FLASH_ATTN_TYPE_DISABLED; }
++    if (getenv("AFM_KV_F32")) { cp.type_k = GGML_TYPE_F32; cp.type_v = GGML_TYPE_F32; }   // research: fp32 KV cache
 +    g_dump = getenv("AFM_DUMP_ROUTER"); if (g_dump) { cp.cb_eval = dump_cb; cp.cb_eval_user_data = nullptr; }
 +    llama_context * ctx = llama_init_from_model(model, cp);
 +    const int nv = llama_vocab_n_tokens(llama_model_get_vocab(model));
