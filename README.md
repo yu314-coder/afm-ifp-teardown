@@ -53,7 +53,7 @@ llama-server -m afm-v11.2-ifp.gguf --jinja          # OpenAI-compatible API; a s
 ## How faithful is it?
 
 Measured against Apple's own model through the public FoundationModels API (`tools/afm.swift`, temperature 0, the same
-instructions), on 40 prompts:
+instructions), on 40 prompts (reproduce with [`tools/eval`](tools/eval)):
 
 | Expert routing | next-token agreement (teacher-forced) | first answer token | answers identical to Apple's |
 |---|---|---|---|
@@ -81,7 +81,8 @@ implementations already disagree on 1–2.5% of next-token choices. Emulating Ap
 | Path | |
 |---|---|
 | `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets |
-| `llama.cpp-patch/` | the `afm` architecture for llama.cpp (graph, KV sharing, Apple's expert schedule, int8 KV emulation, Metal kernels) |
+| `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, int8 KV emulation, Metal kernels) and the `llama-afm-logits` evaluation tool |
+| `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons |
 | `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |
 | `tools/template_probe.swift` | checks the prompt template against Apple's `tokenCount` |
 | `tools/afm.swift` | CLI / OpenAI-style server over Apple's live model (the fidelity reference) |

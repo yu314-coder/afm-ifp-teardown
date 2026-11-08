@@ -776,3 +776,98 @@ index 3a44f7f14..05f8b235c 100644
  struct llm_build_qwen2moe : public llm_graph_context {
      llm_build_qwen2moe(const llama_model & model, const llm_graph_params & params);
  };
+diff --git a/tools/CMakeLists.txt b/tools/CMakeLists.txt
+index 518f8b9ae..c676c685e 100644
+--- a/tools/CMakeLists.txt
++++ b/tools/CMakeLists.txt
+@@ -26,6 +26,7 @@ else()
+         add_subdirectory(server)
+     endif()
+     add_subdirectory(tokenize)
++    add_subdirectory(afm-logits)
+     add_subdirectory(tts)
+     add_subdirectory(mtmd)
+     if (GGML_RPC)
+diff --git a/tools/afm-logits/CMakeLists.txt b/tools/afm-logits/CMakeLists.txt
+new file mode 100644
+index 000000000..a1f3701dd
+--- /dev/null
++++ b/tools/afm-logits/CMakeLists.txt
+@@ -0,0 +1,7 @@
++set(TARGET llama-afm-logits)
++add_executable(${TARGET} afm-logits.cpp)
++if(LLAMA_TOOLS_INSTALL)
++    install(TARGETS ${TARGET} RUNTIME)
++endif()
++target_link_libraries(${TARGET} PRIVATE llama ${CMAKE_THREAD_LIBS_INIT})
++target_compile_features(${TARGET} PRIVATE cxx_std_17)
+diff --git a/tools/afm-logits/afm-logits.cpp b/tools/afm-logits/afm-logits.cpp
+new file mode 100644
+index 000000000..790db7d2e
+--- /dev/null
++++ b/tools/afm-logits/afm-logits.cpp
+@@ -0,0 +1,64 @@
++// llama-afm-logits <model.gguf> <ids1.bin> <out1.f32> [<ids2.bin> <out2.f32> ...]
++// Teacher-forced logits for every position of each token sequence (ids: int32 little-endian; out: float32 [T, n_vocab]).
++// Used to measure next-token agreement with Apple's live model (see tools/eval in afm-ifp-teardown).
++// env: AFM_NGL=<n> GPU layers (0 = CPU); AFM_STEPWISE=<P> prompt of P tokens as one batch, then one token per decode
++//      (the generation path); AFM_ROUTE_SCHED=<P> Apple's expert schedule for a P-token prompt in a single batch;
++//      AFM_DUMP_ROUTER=<file> also dump the layer-12 router logits (and its input, <file>.x) of the last sequence.
++#include "llama.h"
++#include <cstdio>
++#include <cstdint>
++#include <cstdlib>
++#include <vector>
++#include <cstring>
++#include <string>
++#include "ggml-backend.h"
++// env AFM_DUMP_ROUTER=<file>: also write the per-token IFP router logits (tensor "ifp_router_logits-12") of the last sequence
++static const char * g_dump = nullptr;
++static bool dump_cb(ggml_tensor * t, bool ask, void *) {
++    const bool is_r = strcmp(t->name, "ifp_router_logits-12") == 0, is_x = strcmp(t->name, "attn_in-12") == 0;
++    if (!g_dump || !(is_r || is_x) || !ggml_is_contiguous(t) || t->type != GGML_TYPE_F32) return ask ? false : true;
++    if (ask) return true;
++    std::vector<float> buf(ggml_nelements(t)); ggml_backend_tensor_get(t, buf.data(), 0, ggml_nbytes(t));
++    std::string fn = std::string(g_dump) + (is_x ? ".x" : "");
++    FILE * f = fopen(fn.c_str(), "wb"); if (!f) return true; fwrite(buf.data(), 4, buf.size(), f); fclose(f);
++    fprintf(stderr, "router logits %lld x %lld -> %s\n", (long long) t->ne[0], (long long) t->ne[1], fn.c_str());
++    return true;
++}
++int main(int argc, char ** argv) {
++    if (argc < 4 || (argc - 2) % 2) { fprintf(stderr, "usage: %s model ids.bin out.f32 [...]\n", argv[0]); return 1; }
++    llama_backend_init();
++    auto mp = llama_model_default_params();
++    if (getenv("AFM_NGL")) mp.n_gpu_layers = atoi(getenv("AFM_NGL"));
++    llama_model * model = llama_model_load_from_file(argv[1], mp);
++    if (!model) { fprintf(stderr, "load failed\n"); return 1; }
++    auto cp = llama_context_default_params(); cp.n_ctx = 4096; cp.n_batch = 4096; cp.n_ubatch = 1024;
++    g_dump = getenv("AFM_DUMP_ROUTER"); if (g_dump) { cp.cb_eval = dump_cb; cp.cb_eval_user_data = nullptr; }
++    llama_context * ctx = llama_init_from_model(model, cp);
++    const int nv = llama_vocab_n_tokens(llama_model_get_vocab(model));
++    for (int a = 2; a + 1 < argc; a += 2) {
++        FILE * f = fopen(argv[a], "rb"); if (!f) { fprintf(stderr, "cannot read %s\n", argv[a]); return 1; } std::vector<llama_token> ids; int32_t t; while (fread(&t, 4, 1, f) == 1) ids.push_back(t); fclose(f);
++        llama_memory_clear(llama_get_memory(ctx), true);
++        llama_batch b = llama_batch_init((int) ids.size(), 0, 1);
++        FILE * o = fopen(argv[a + 1], "wb"); if (!o) { fprintf(stderr, "cannot write %s\n", argv[a + 1]); return 1; }
++        const int stepwise = getenv("AFM_STEPWISE") ? atoi(getenv("AFM_STEPWISE")) : 0;   // prompt length: batch it, then 1 token/step
++        if (stepwise > 0) {
++            // runtime path: prompt as one batch, then one token per llama_decode (as in generation)
++            int i0 = 0;
++            while (i0 < (int) ids.size()) {
++                const int n = i0 == 0 ? stepwise : 1;
++                b.n_tokens = 0;
++                for (int i = i0; i < i0 + n; ++i) { int k = b.n_tokens++; b.token[k] = ids[i]; b.pos[k] = i; b.n_seq_id[k] = 1; b.seq_id[k][0] = 0; b.logits[k] = 1; }
++                if (llama_decode(ctx, b) != 0) { fprintf(stderr, "decode failed\n"); return 1; }
++                for (int k = 0; k < n; ++k) fwrite(llama_get_logits_ith(ctx, k), 4, nv, o);
++                i0 += n;
++            }
++        } else {
++            for (size_t i = 0; i < ids.size(); ++i) { b.token[i] = ids[i]; b.pos[i] = (int) i; b.n_seq_id[i] = 1; b.seq_id[i][0] = 0; b.logits[i] = 1; }
++            b.n_tokens = (int) ids.size();
++            if (llama_decode(ctx, b) != 0) { fprintf(stderr, "decode failed\n"); return 1; }
++            for (size_t i = 0; i < ids.size(); ++i) fwrite(llama_get_logits_ith(ctx, (int) i), 4, nv, o);
++        }
++        fclose(o); llama_batch_free(b);
++    }
++    llama_free(ctx); llama_model_free(model); return 0;
++}
