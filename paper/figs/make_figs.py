@@ -55,7 +55,8 @@ ax.set_xlabel('layer'); ax.set_ylabel('best head self-rank\n(of 262k / 153k)'); 
 fig.tight_layout(); fig.savefig(f'{OUT}/fig_copy.pdf'); plt.close(fig)
 
 # 4. fidelity vs Apple's greedy answers (40 prompts, 1127 answer tokens, teacher-forced top-1)
-rows = [("v1.1: no embedding multiplier, input bias on generated tokens only (default)", 96.10, BLUE),
+rows = [("v1.2: + Neural Engine SiLU table (default)", 96.72, BLUE),
+        ("v1.1: no embedding multiplier, input bias on generated tokens only", 96.10, ORANGE),
         ('v1.1, per-token routing', 93.79, ORANGE),
         ('v1.1 with the input bias on every token (router sees it)', 92.64, ORANGE),
         ("v1.0: embedding scaled x100 (bug), Apple's schedule", 91.75, GREY),

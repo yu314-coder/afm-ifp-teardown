@@ -14,8 +14,8 @@ your own Mac.
 | Weights | Apple's 2-bit codes and fp16 scales carried into Q2_K **bit-exactly**; int4 embedding as Q4_0 (exact) |
 | Prompt format | Apple's `afm_cider_v2` template, decoded from the runtime and verified against `SystemLanguageModel.tokenCount` |
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
-| Fidelity | **96.1%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens); 17/40 answers identical character for character |
-| Speed (M4) | ~150 tok/s prompt, 12–21 tok/s generation |
+| Fidelity | **96.7%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens); 17/40 answers identical character for character |
+| Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
 result) is in [`paper/afm_teardown.pdf`](paper/afm_teardown.pdf).
@@ -57,7 +57,8 @@ instructions), on 40 prompts (reproduce with [`tools/eval`](tools/eval)):
 
 | Version / expert routing | next-token agreement (teacher-forced) | first answer token | answers identical to Apple's |
 |---|---|---|---|
-| **v1.1**, Apple's schedule (default) | **96.1%** | 37/40 | **17/40** |
+| **v1.2**, Apple's schedule + Neural Engine SiLU (default) | **96.7%** | 38/40 | **17/40** |
+| v1.1 = v1.2 with `AFM_EXACT_SILU=1` | 96.1% | 37/40 | 17/40 |
 | v1.1, per token (`AFM_ROUTE_TOKEN=1`) | 93.8% | 36/40 | 12/40 |
 | v1.0, Apple's schedule | 91.7% | 35/40 | 7/40 |
 | v1.0, per token | 90.5% | 38/40 | 11/40 |
@@ -66,21 +67,23 @@ instructions), on 40 prompts (reproduce with [`tools/eval`](tools/eval)):
 - **Embedding scale.** llama.cpp's generic embedding code already applied the GGUF's `embedding_scale`, and the AFM graph applied it a second time, so the model ran with its input embedding ×100. Apple applies no multiplier at all.
 - **Input bias.** Apple's prompt procedures add nothing at layer 0, while its extend procedures (generated tokens) add the input bias; the port now does the same.
 
-Old GGUFs work with the v1.1 patch; nothing needs to be re-converted.
+**What changed in v1.2:** the FFN activation uses Apple's Neural Engine SiLU by default. It is a 33-knot piecewise-linear table (fp16 output); Apple's program contains the identical table once per FFN task. We measured it on the Neural Engine through Core ML and reproduce it to within one fp16 step for every input. `AFM_EXACT_SILU=1` switches back to the exact function.
+
+Old GGUFs work with the current patch; nothing needs to be re-converted.
 
 "Answers identical" compares our free-running greedy answer with Apple's character for character; a single different
 early token sends the rest of an answer elsewhere. Apple's schedule was confirmed independently: replaying 47 of Apple's
 own expert re-picks, our router changes as many experts per re-pick as Apple's (27 vs 27 on average, r = 0.84).
 
-**What still differs.** 44 of 1127 answer tokens. Apple's token is almost always our second or third choice. The weights, tokenizer, prompt format, layer-0 input, attention scale and expert schedule all match Apple's; each was checked separately (see the paper).
+**What still differs.** 37 of 1127 answer tokens. Apple's token is almost always our second or third choice. The weights, tokenizer, prompt format, layer-0 input, attention scale and expert schedule all match Apple's; each was checked separately (see the paper).
 
 Measured directly and ruled out as the main cause:
-- **The Neural Engine's arithmetic.** Its matrix multiplies are accurate. Its SiLU is a coarse 33-point lookup table; the identical table appears 2113 times in Apple's program. Emulating it exactly moves 2% of predictions in no particular direction.
+- **The Neural Engine's arithmetic.** Its matrix multiplies are accurate (high-precision accumulation, fp16 output). Its SiLU table is now emulated, which is worth +0.6 points. Rounding the activations to fp16 changes nothing measurable.
 - **Apple's speculative decoding.** The tolerance is 0, so it is exact.
 - **The FM-API adapter.** It is declared empty.
 - **A repetition penalty.** There is none.
 
-Mathematically identical computations already disagree on 0.1–2.4% of tokens, because the 2-bit weights and int8 KV cache amplify rounding. So the last percent or so needs bit-exact Neural Engine emulation.
+The model amplifies rounding: the same computation on CPU and on Metal disagrees on 2–6% of individual next-token choices, though the overall agreement stays the same within about ±4 tokens. So the last few percent need bit-exact Neural Engine emulation (its softmax, exp and normalisation are also approximations).
 
 ## What is in this repository
 
