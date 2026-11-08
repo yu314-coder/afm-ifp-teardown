@@ -16,6 +16,7 @@ your own Mac.
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
 | Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
 | Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: 43% next-token agreement with Apple, exact `afm-draft` GGUF, lossless speculation |
+| Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded and running as llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.96–0.99); colours and scene gist right, text not yet |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -94,6 +95,33 @@ drafted tokens are accepted, and a verify batch costs several single decodes her
 (fixed 8-token programs) it costs about one. Measured back to back, it was 2.1x slower on Metal and 3.5x slower on the
 CPU. `tools/eval/speculative.py` measures both.
 
+## Images (Apple's image encoder)
+
+The converter also rebuilds Apple's image encoder (asset `instruct_3b.image_encoder`) as a multimodal projector
+for llama.cpp's `mtmd`:
+
+```bash
+python3 afm2gguf/afm2gguf.py --vision -o afm-v11.2-vision.gguf          # 685 MiB, projector type afm
+llama-mtmd-cli -m afm-v11.2-ifp.gguf --mmproj afm-v11.2-vision.gguf --image photo.jpg --temp 0 \
+  -p "Describe this image in one sentence.
+<__media__>"
+```
+
+It is a 24-layer ViT (d=1024, 16 heads, SwiGLU 2816) with 12×12-patch window attention, full attention in layers
+7/15/23, 2D RoPE and per-head q/k norms, followed by a 3×3 patch merger to the model's 1536-wide input. Images
+are sized as Apple does it (aspect kept, at most 338,688 pixels, sides in multiples of 168 px). Everything is read
+from the asset's Neural Engine program, including two things the compiler had folded in: a 0.01 pre-norm scale in
+the last layer and activation tables in place of SiLU/GELU.
+
+Apple's encoder itself runs from our own process, so it is a direct reference. On identical inputs, our encoder matches it
+at cosine 0.987 per token on constant images and 0.962 on photos (llama.cpp: 0.957; Metal and CPU agree to
+0.9999). Through the 3B GGUF, it names all 8 colours of a colour probe (1/8 without the image) and gives the same
+answers as Apple's own encoder on a shape probe. Captions get colours, backgrounds and scene gist
+("This image shows a rainbow flag with seven horizontal stripes of red, orange, yellow, green, blue, and purple."), but text and simple
+shapes are **not read yet** ("HELLO" comes out as geometric shapes). The remaining difference is in the host-side
+inputs (pixel normalisation, position table, RoPE matrices) or in how the 3B treats image tokens; see the paper,
+Section "The image encoder".
+
 ## How faithful is it?
 
 Measured against Apple's own model through the public FoundationModels API (`tools/afm.swift`, temperature 0, the same
@@ -159,8 +187,8 @@ The remaining misses are near-ties: Apple's token is our second choice in 84% an
 
 | Path | |
 |---|---|
-| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files and the draft model |
-| `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, exact speculative verify batches, int8 KV emulation, Metal kernels), the `afm-draft` architecture and the `llama-afm-logits` evaluation tool |
+| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files, the draft model and the image encoder (`--vision`) |
+| `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, exact speculative verify batches, int8 KV emulation, Metal kernels), the `afm-draft` architecture, the `afm` image projector for `mtmd` and the `llama-afm-logits` evaluation tool |
 | `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons; `speculative.py` checks speculative decoding with the draft |
 | `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |
 | `tools/template_probe.swift` | checks the prompt template against Apple's `tokenCount` |

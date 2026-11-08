@@ -494,6 +494,160 @@ def write_draft(P, out):
         assert arr.shape == tuple(shp), (name, arr.shape, shp); w.write_tensor_data(arr)
     w.close(); log(f'wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): use with  llama-server -m afm-v11.2-ifp.gguf -md {os.path.basename(out)}')
 
+# ----------------------------------------------------------------------------- image encoder (vision tower + merger)
+# Apple's image tokenizer (asset ...instruct_3b.image_encoder, ImageTokenizer) is a 24-layer ViT (d 1024, 16 heads x 64,
+# SwiGLU 2816, attention inside 12x12-patch windows except the global layers 7/15/23, 2D RoPE, per-head q/k RMSNorm) and a
+# 3x3 patch merger (9216 -> 4096, LayerNorm, GELU, 4096 -> 2048 -> 1536). Everything is read from the Neural Engine program
+# (binary_0.hwx, procedure 0 = 1152 patches) and swift_preprocess_weights.bin (16x16 position table):
+#  * int4 conv blocks = 16 units of [128-B activation table if the conv activates (NE reg1 bit 0x20000)][16-entry fp16 LUT]
+#    [32 zero B][rows/16 fp16 row scales][rows/16 fp16 biases, ONLY if the conv has a bias (NE reg1 bit 0x10); effective
+#    bias = stored x row scale][codes, input-major, low nibble first]. The header length therefore depends on the flags.
+#  * fp16 blocks (patch embedding, last projection): rows/16 sub-tiles per unit, each [in][16]
+#  * ViT projection tiles are written to descending addresses: channel order = reversed tile order
+#  * norm gains: [bias | scale] constant tiles fetched by the planar engine (tile-source offset register)
+#  * the compiler folded a 0.01 pre-norm scale into the last residual add (planar-engine operand scale) and into the last
+#    FFN's up/down weights; it is undone here so the GGUF holds the trained model
+SPEC_VISION = 'com.apple.fm.language.instruct_3b.image_encoder.generic_sparse'
+V_GLOBAL, V_D, V_FF, V_L = (7, 15, 23), 1024, 2816, 24
+
+def vision_model():
+    a = find_asset(SPEC_VISION)
+    if a is None: sys.exit(f'error: image encoder asset {SPEC_VISION} not found under {ASSETS}')
+    pkg = f'{a}/.AssetData/model.odixpackage'; meta = json.load(open(f'{a}/.AssetData/metadata.json'))
+    if meta.get('model_cls_name') != 'ImageTokenizer': sys.exit(f"error: unexpected image encoder asset {meta.get('model_cls_name')}")
+    hwx = f'{pkg}/MPSGraph/mpsExecutable.mpsgraphpackage/binary_0.hwx'; spw = open(f'{pkg}/swift_preprocess_weights.bin', 'rb').read()
+    blob = open(hwx, 'rb').read(); seg, sect = macho(hwx)
+    procs = []
+    for t in ane_tasks(blob, *sect[('__TEXT', '__text')]):
+        if t[0] == 0 or not procs: procs.append([])
+        procs[-1].append(t)
+    P = procs[0]
+    KS = [np.frombuffer(blob, np.uint8, sect[(s, s.lower())][1], sect[(s, s.lower())][0]) for s in ('__KERN_0', '__KERN_1')]
+    cfo, csz = sect[('__TEXT', '__const')]; C = np.frombuffer(blob, np.uint8, csz, cfo)
+    def geom(R): n_in, out, U = R[_CM+3], R[_CM+7], R[_KD+25]; return n_in, out, U, out//16
+    def lut_ok(K, R, off):
+        n_in, out, U, rpu = geom(R); pre = 128 if R[_NE+1] & 0x20000 else 0
+        if off + 16*U > len(K): return False
+        for u in (0, 7, 15):
+            h = K[off+u*U+pre: off+u*U+pre+64]
+            with np.errstate(invalid='ignore', over='ignore'): lut = h[:32].view('<f2').astype(np.float32)
+            if not (np.all(np.isfinite(lut)) and np.all(lut == np.round(lut)) and np.all(np.abs(lut) <= 8) and not h[32:64].any()): return False
+        return True
+    # weight convs (dynamic attention matmuls, NE mode 0x10082, read their kernels from activations); dedupe by kernel address
+    raw = []
+    for k, (_, R, W) in enumerate(P):
+        if (_KD+4) in W and R.get(_NE) != 0x10082: raw.append((k, R, W[_KD+4]))
+    fp16 = lambda R: geom(R)[2] == geom(R)[3]*geom(R)[0]*2
+    side = {}
+    for k, R, off in raw:
+        if fp16(R) or (geom(R)[0] == geom(R)[1] == 4096): continue
+        a0, a1 = lut_ok(KS[0], R, off), lut_ok(KS[1], R, off)
+        if a0 != a1: side[k] = 0 if a0 else 1
+    split = min(k for k, s in side.items() if s == 1)
+    assert all(s == (1 if k >= split else 0) for k, s in side.items()), 'image encoder kernel segment check failed'
+    which = lambda k, R, off: side.get(k, 1 if (k >= split and off + 16*geom(R)[2] <= len(KS[1])) else 0)
+    def block(k, R, off):
+        K = KS[which(k, R, off)]; n_in, out, U, rpu = geom(R)
+        if U == rpu*n_in*2:
+            S = rpu//16; Wm = np.zeros((out, n_in), np.float32)
+            for u in range(16):
+                t = K[off+u*U: off+(u+1)*U].view('<f2').astype(np.float32).reshape(S, n_in, 16)
+                for s in range(S): Wm[s*(out//S)+u*16: s*(out//S)+u*16+16] = t[s].T
+            return dict(W=Wm, b=None, s=None, act=False, k=k, R=R)
+        ne1 = R[_NE+1]; hasb = bool(ne1 & 0x10); pre = 128 if ne1 & 0x20000 else 0; hb = 64 + 2*rpu*(2 if hasb else 1)
+        assert 0 <= U - (pre + hb + rpu*n_in//2) < 128, 'image encoder weight block size check failed'
+        rows, bias, sc = [], [], []
+        for u in range(16):
+            b = K[off+u*U: off+(u+1)*U]; h = b[pre:pre+hb]; lut = h[:32].view('<f2').astype(np.float32)
+            s = h[64:64+2*rpu].view('<f2').astype(np.float32); c = b[pre+hb: pre+hb+rpu*n_in//2]
+            rows.append(lut[np.stack([c & 0xF, c >> 4], 1).reshape(n_in, rpu).T] * s[:, None]); sc.append(s)
+            bias.append(h[64+2*rpu:64+4*rpu].view('<f2').astype(np.float32) * s if hasb else np.zeros(rpu, np.float32))
+        return dict(W=np.concatenate(rows), b=np.concatenate(bias), s=np.concatenate(sc), act=pre > 0, k=k, R=R)
+    seen, convs = set(), []
+    for k, R, off in raw:
+        key = (which(k, R, off), off)
+        if key not in seen: seen.add(key); convs.append((k, R, off))
+    pe = [block(*c)['W'] for c in convs[:2]]; assert pe[0].shape[1] == 588, 'patch embedding check failed'
+    M = {'patch_embd': np.concatenate(pe[::-1]).reshape(V_D, 3, 14, 14)}            # tiles at descending addresses
+    rest, layers, cur = convs[2:], [], []
+    for c in rest:
+        cur.append(c)
+        if sum(1 for x in cur if x[1][_CM+3] == V_FF) == 4: layers.append(cur); cur = []
+    assert len(layers) == V_L, 'image encoder layer count check failed'
+    rev = lambda a, t: a.reshape(t, -1, *a.shape[1:])[::-1].reshape(a.shape)
+    for L, g in enumerate(layers):
+        d = [block(*c) for c in g]; a1 = [x for x in d if x['R'][_CM+3] == V_D]
+        attn = [x for x in a1 if not x['act']][:16]; ids = {id(x) for x in attn}; mlp = [x for x in a1 if id(x) not in ids]
+        cat = lambda xs, f: np.concatenate([x[f] for x in xs])
+        grp = [(rev(cat(attn[4*i:4*i+4], 'W'), 4), rev(cat(attn[4*i:4*i+4], 'b'), 4)) for i in range(4)]
+        vi = 0 if (L == 0 or L in V_GLOBAL) else 1; qi, ki = [i for i in range(3) if i != vi]
+        M[L] = dict(q=grp[qi], k=grp[ki], v=grp[vi], o=grp[3],
+                    gate=rev(cat([x for x in mlp if x['act']], 'W'), 11), up=rev(cat([x for x in mlp if not x['act']], 'W'), 11),
+                    down=rev(cat([x for x in d if x['R'][_CM+3] == V_FF], 'W'), 4))
+    ad = [block(*c) if not (c[1][_CM+3] == c[1][_CM+7] == 4096) else c for c in cur]
+    M['merge'] = np.concatenate([x['W'] for x in ad if isinstance(x, dict) and x['R'][_CM+3] == 9216])
+    M['proj1'] = np.concatenate([x['W'] for x in ad if isinstance(x, dict) and x['R'][_CM+3] == 4096])
+    M['proj2'] = np.concatenate([x['W'] for x in ad if isinstance(x, dict) and x['R'][_CM+3] == 2048])
+    k, R, off = next(x for x in ad if not isinstance(x, dict)); U = R[_KD+25]; K = KS[which(k, R, off)]
+    bg = np.stack([K[off+u*U+128: off+(u+1)*U].view('<f2').astype(np.float32).reshape(-1, 2) for u in range(16)]).reshape(-1, 2)
+    M['mm_ln_b'], M['mm_ln_g'] = bg[:, 0], bg[:, 1]                                  # depthwise conv: (bias, weight) per channel
+    assert M['merge'].shape == (4096, 9216) and M['proj1'].shape == (2048, 4096) and M['proj2'].shape == (1536, 2048) and len(bg) == 4096
+    # norm gains, in program order: pre-norm, (attention, FFN) x 24, final; q/k head gains (q, k) x 24
+    g1, g64, fold, eps = [], [], [], None
+    for _, R, W in P:
+        if W.get(_PE) == 0x80000 and (_TS+10) in W and R.get(_CM+3) in (V_D, 64) and W[_TS+10] + 8*R[_CM+3] <= csz:
+            n = R[_CM+3]; t = C[W[_TS+10]: W[_TS+10]+4*n].view('<f2').astype(np.float32)
+            assert not t[:n].any(), 'image encoder norm bias check failed'; (g1 if n == V_D else g64).append(t[n:])
+        if W.get(_PE) == 0x80000 and (_PE+4) in W:
+            s = struct.unpack('<f', struct.pack('<I', W[_PE+4]))[0]
+            if abs(s - 0.125) > 1e-6: fold.append(s)
+        if W.get(_PE) == 0x82004 and (_PE+3) in W and eps is None: eps = struct.unpack('<f', struct.pack('<I', W[_PE+3]))[0]
+    assert len(g1) == 2*V_L+2 and len(g64) == 2*V_L and len(fold) == 1, ('image encoder gain check failed', len(g1), len(g64), fold)
+    M['pre_ln'], M['post_ln'] = g1[0], g1[-1]
+    f = float(np.sqrt(1/fold[0]))                                                    # undo the 0.01 fold: x (+) 0.01*f -> x + f
+    for L in range(V_L):
+        M[L].update(ln1=g1[1+2*L], ln2=g1[2+2*L], q_norm=g64[2*L], k_norm=g64[2*L+1])
+    M[V_L-1]['up'] = M[V_L-1]['up']*f; M[V_L-1]['down'] = M[V_L-1]['down']*f
+    M['pos'] = np.frombuffer(spw, '<f4', 16*16*V_D, 16).reshape(256, V_D)
+    assert struct.unpack_from('<4I', spw, 0) == (16, 1024, 16, 481), 'image preprocessing weights check failed'
+    return dict(meta=meta, M=M, eps=eps, fold=fold[0])
+
+def write_vision(out):
+    m = vision_model(); M = m['M']
+    log(f"image encoder: ViT {V_L} layers d{V_D}, global layers {V_GLOBAL}, rms eps {m['eps']:.4g}, folded residual scale {m['fold']:.4g} undone")
+    # Apple rotates interleaved pairs (2i, 2i+1); llama.cpp's vision RoPE rotates (i, i+32): permute q/k head dims to match
+    hp = np.concatenate([np.arange(0, 64, 2), np.arange(1, 64, 2)])
+    perm = (np.arange(16)[:, None]*64 + hp[None]).reshape(-1)
+    w = gguf.GGUFWriter(path=None, arch='clip')
+    w.add_name(f'Apple Foundation Model {DISPLAY} image encoder - local conversion')
+    w.add_description("Apple Intelligence on-device image encoder converted from this Mac's assets by afm2gguf. "
+                      'Use as --mmproj next to the afm GGUF; requires llama.cpp with the `afm` projector.')
+    w.add_string('clip.projector_type', 'afm'); w.add_bool('clip.has_vision_encoder', True); w.add_bool('clip.use_silu', True)
+    for k, v_ in (('embedding_length', V_D), ('feed_forward_length', V_FF), ('block_count', V_L), ('projection_dim', 1536),
+                  ('attention.head_count', 16), ('image_size', 672), ('patch_size', 14), ('spatial_merge_size', 3), ('window_size', 168)):
+        w.add_uint32('clip.vision.'+k, v_)
+    w.add_float32('clip.vision.attention.layer_norm_epsilon', float(m['eps']))
+    w.add_array('clip.vision.wa_layer_indexes', list(V_GLOBAL))
+    # pixel normalisation is host-side (not in the asset); ImageNet statistics match Apple's answers best (white reads as
+    # white; CLIP's statistics make it read as gray), see the paper
+    w.add_array('clip.vision.image_mean', [0.485, 0.456, 0.406]); w.add_array('clip.vision.image_std', [0.229, 0.224, 0.225])
+    T = [('v.patch_embd.weight', M['patch_embd'], QT.F16), ('v.position_embd.weight', M['pos'], QT.F32),
+         ('v.pre_ln.weight', M['pre_ln'], QT.F32), ('v.post_ln.weight', M['post_ln'], QT.F32)]
+    for L in range(V_L):
+        l, p = M[L], f'v.blk.{L}.'
+        T += [(p+'ln1.weight', l['ln1'], QT.F32), (p+'ln2.weight', l['ln2'], QT.F32),
+              (p+'attn_q.weight', l['q'][0][perm], QT.F16), (p+'attn_q.bias', l['q'][1][perm], QT.F32),
+              (p+'attn_k.weight', l['k'][0][perm], QT.F16), (p+'attn_k.bias', l['k'][1][perm], QT.F32),
+              (p+'attn_v.weight', l['v'][0], QT.F16), (p+'attn_v.bias', l['v'][1], QT.F32),
+              (p+'attn_out.weight', l['o'][0], QT.F16), (p+'attn_out.bias', l['o'][1], QT.F32),
+              (p+'attn_q_norm.weight', l['q_norm'][hp], QT.F32), (p+'attn_k_norm.weight', l['k_norm'][hp], QT.F32),
+              (p+'ffn_gate.weight', l['gate'], QT.F16), (p+'ffn_up.weight', l['up'], QT.F16), (p+'ffn_down.weight', l['down'], QT.F16)]
+    T += [('mm.0.weight', M['merge'], QT.F16), ('mm.post_norm.weight', M['mm_ln_g'], QT.F32), ('mm.post_norm.bias', M['mm_ln_b'], QT.F32),
+          ('mm.1.weight', M['proj1'], QT.F16), ('mm.2.weight', M['proj2'], QT.F16)]
+    for name, arr, qt in T: w.add_tensor(name, np.ascontiguousarray(arr, np.float16 if qt == QT.F16 else np.float32))
+    w.write_header_to_file(path=out); w.write_kv_data_to_file(); w.write_tensors_to_file(); w.close()
+    log(f'wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): use with  llama-mtmd-cli -m afm-v11.2-ifp.gguf --mmproj {os.path.basename(out)}')
+
 # ----------------------------------------------------------------------------- feature adapters (rank-48 LoRA)
 # Apple Intelligence features ship as LoRA adapters for this backbone: lora_i{1,2,3}_r48_48_constant_data.bin, the digit
 # being the IFP level the feature runs at (ifp1/2/3 = 5/14/23 experts). The file is 218 (A, B) pairs, fp16, in segment
@@ -556,12 +710,14 @@ def main():
     ap.add_argument('--adapter', help='write this feature adapter as a llama.cpp LoRA GGUF instead of the model')
     ap.add_argument('--no-kvq', action='store_true', help='do not store int8 K/V cache emulation scales')
     ap.add_argument('--draft', action='store_true', help="write Apple's speculative-decoding draft model instead (arch afm-draft)")
+    ap.add_argument('--vision', action='store_true', help="write Apple's image encoder as a multimodal projector (--mmproj) instead")
     a = ap.parse_args(); t0 = time.time()
     if a.list_adapters:
         for n, (p_, _) in sorted(adapters().items()): print(f'{n:44s} ifp{re.search(r"lora_i(\d)_", p_).group(1)}')
         return
     if not a.out: ap.error('-o/--out is required')
     if a.adapter: return write_adapter(a.adapter, a.out)
+    if a.vision: return write_vision(a.out)
     if a.draft:
         tok = a.tokenizer
         if tok is None:
