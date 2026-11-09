@@ -522,10 +522,10 @@ index d1de16e3f..d4b1d6c39 100644
      struct ggml_tensor * output_norm_enc = nullptr;
 diff --git a/src/models/afm-draft.cpp b/src/models/afm-draft.cpp
 new file mode 100644
-index 000000000..e6324352c
+index 000000000..ee1676a14
 --- /dev/null
 +++ b/src/models/afm-draft.cpp
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,97 @@
 +#include "models.h"
 +
 +// Apple's speculative-decoding draft model for the on-device foundation model (asset ...fm_api_generic.draft, "v11-ifp-9m"),
@@ -544,7 +544,11 @@ index 000000000..e6324352c
 +
 +    ggml_tensor * cur;
 +    ggml_tensor * inpL = build_inp_embd(model.tok_embd);
-+    inpL = ggml_mul(ctx0, inpL, model.tok_embd_scale);
++    // the per-dimension scale belongs to the int4 token codes; embeddings passed in directly (image tokens from the
++    // 300M model's image encoder) are already in the model's input space
++    if (ubatch.token) {
++        inpL = ggml_mul(ctx0, inpL, model.tok_embd_scale);
++    }
 +    cb(inpL, "inp_scaled", -1);
 +
 +    ggml_tensor * inp_pos     = build_inp_pos();

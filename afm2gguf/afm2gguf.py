@@ -510,11 +510,12 @@ def write_draft(P, out):
 #  * the compiler folded a 0.01 pre-norm scale into the last residual add (planar-engine operand scale) and into the last
 #    FFN's up/down weights; it is undone here so the GGUF holds the trained model
 SPEC_VISION = 'com.apple.fm.language.instruct_3b.image_encoder.generic_sparse'
+SPEC_VISION_300M = 'com.apple.fm.language.instruct_300m.image_tokenizer.generic'   # the same encoder trained for the 300M model
 V_GLOBAL, V_D, V_FF, V_L = (7, 15, 23), 1024, 2816, 24
 
-def vision_model():
-    a = find_asset(SPEC_VISION)
-    if a is None: sys.exit(f'error: image encoder asset {SPEC_VISION} not found under {ASSETS}')
+def vision_model(spec=SPEC_VISION, out_dim=1536):
+    a = find_asset(spec)
+    if a is None: sys.exit(f'error: image encoder asset {spec} not found under {ASSETS}')
     pkg = f'{a}/.AssetData/model.odixpackage'; meta = json.load(open(f'{a}/.AssetData/metadata.json'))
     if meta.get('model_cls_name') != 'ImageTokenizer': sys.exit(f"error: unexpected image encoder asset {meta.get('model_cls_name')}")
     hwx = f'{pkg}/MPSGraph/mpsExecutable.mpsgraphpackage/binary_0.hwx'; spw = open(f'{pkg}/swift_preprocess_weights.bin', 'rb').read()
@@ -533,7 +534,7 @@ def vision_model():
         for u in (0, 7, 15):
             h = K[off+u*U+pre: off+u*U+pre+64]
             with np.errstate(invalid='ignore', over='ignore'): lut = h[:32].view('<f2').astype(np.float32)
-            if not (np.all(np.isfinite(lut)) and np.all(lut == np.round(lut)) and np.all(np.abs(lut) <= 8) and not h[32:64].any()): return False
+            if not (np.all(np.isfinite(lut)) and (np.all(lut == np.round(lut)) or np.all(np.diff(lut) > 0)) and np.all(np.abs(lut) <= 8) and not h[32:64].any()): return False
         return True
     # weight convs (dynamic attention matmuls, NE mode 0x10082, read their kernels from activations); dedupe by kernel address
     raw = []
@@ -593,7 +594,7 @@ def vision_model():
     k, R, off = next(x for x in ad if not isinstance(x, dict)); U = R[_KD+25]; K = KS[which(k, R, off)]
     bg = np.stack([K[off+u*U+128: off+(u+1)*U].view('<f2').astype(np.float32).reshape(-1, 2) for u in range(16)]).reshape(-1, 2)
     M['mm_ln_b'], M['mm_ln_g'] = bg[:, 0], bg[:, 1]                                  # depthwise conv: (bias, weight) per channel
-    assert M['merge'].shape == (4096, 9216) and M['proj1'].shape == (2048, 4096) and M['proj2'].shape == (1536, 2048) and len(bg) == 4096
+    assert M['merge'].shape == (4096, 9216) and M['proj1'].shape == (2048, 4096) and M['proj2'].shape == (out_dim, 2048) and len(bg) == 4096
     # norm gains, in program order: pre-norm, (attention, FFN) x 24, final; q/k head gains (q, k) x 24
     g1, g64, fold, eps = [], [], [], None
     for _, R, W in P:
@@ -604,30 +605,32 @@ def vision_model():
             s = struct.unpack('<f', struct.pack('<I', W[_PE+4]))[0]
             if abs(s - 0.125) > 1e-6: fold.append(s)
         if W.get(_PE) == 0x82004 and (_PE+3) in W and eps is None: eps = struct.unpack('<f', struct.pack('<I', W[_PE+3]))[0]
-    assert len(g1) == 2*V_L+2 and len(g64) == 2*V_L and len(fold) == 1, ('image encoder gain check failed', len(g1), len(g64), fold)
+    assert len(g1) == 2*V_L+2 and len(g64) == 2*V_L and len(fold) <= 1, ('image encoder gain check failed', len(g1), len(g64), fold)
     M['pre_ln'], M['post_ln'] = g1[0], g1[-1]
-    f = float(np.sqrt(1/fold[0]))                                                    # undo the 0.01 fold: x (+) 0.01*f -> x + f
+    f = float(np.sqrt(1/fold[0])) if fold else 1.0                                                    # undo the 0.01 fold: x (+) 0.01*f -> x + f
     for L in range(V_L):
         M[L].update(ln1=g1[1+2*L], ln2=g1[2+2*L], q_norm=g64[2*L], k_norm=g64[2*L+1])
     M[V_L-1]['up'] = M[V_L-1]['up']*f; M[V_L-1]['down'] = M[V_L-1]['down']*f
     M['pos'] = np.frombuffer(spw, '<f4', 16*16*V_D, 16).reshape(256, V_D)
     assert struct.unpack_from('<4I', spw, 0) == (16, 1024, 16, 481), 'image preprocessing weights check failed'
-    return dict(meta=meta, M=M, eps=eps, fold=fold[0])
+    return dict(meta=meta, M=M, eps=eps, fold=fold[0] if fold else None)
 
-def write_vision(out):
-    m = vision_model(); M = m['M']
-    log(f"image encoder: ViT {V_L} layers d{V_D}, global layers {V_GLOBAL}, rms eps {m['eps']:.4g}, folded residual scale {m['fold']:.4g} undone")
+def write_vision(out, small=False):
+    spec, od = (SPEC_VISION_300M, P_D) if small else (SPEC_VISION, 1536)
+    m = vision_model(spec, od); M = m['M']
+    log(f"image encoder{' (300M model)' if small else ''}: ViT {V_L} layers d{V_D}, output {od}, global layers {V_GLOBAL}, rms eps {m['eps']:.4g}, "
+        + (f"folded residual scale {m['fold']:.4g} undone" if m['fold'] else 'no folded scale'))
     # Apple rotates interleaved pairs (2p, 2p+1) and alternates the axes: pair 2f = y, pair 2f+1 = x, both at frequency f.
     # llama.cpp's vision RoPE rotates (j, j+32) with y on j < 16 and x on j >= 16 (frequency j mod 16): permute q/k head dims
     pj = np.array([2*j if j < 16 else 2*(j-16)+1 for j in range(32)])
     hp = np.concatenate([2*pj, 2*pj+1])
     perm = (np.arange(16)[:, None]*64 + hp[None]).reshape(-1)
     w = gguf.GGUFWriter(path=None, arch='clip')
-    w.add_name(f'Apple Foundation Model {DISPLAY} image encoder - local conversion')
+    w.add_name(f"Apple Foundation Model {'300M' if small else DISPLAY} image encoder - local conversion")
     w.add_description("Apple Intelligence on-device image encoder converted from this Mac's assets by afm2gguf. "
                       'Use as --mmproj next to the afm GGUF; requires llama.cpp with the `afm` projector.')
     w.add_string('clip.projector_type', 'afm'); w.add_bool('clip.has_vision_encoder', True); w.add_bool('clip.use_silu', True)
-    for k, v_ in (('embedding_length', V_D), ('feed_forward_length', V_FF), ('block_count', V_L), ('projection_dim', 1536),
+    for k, v_ in (('embedding_length', V_D), ('feed_forward_length', V_FF), ('block_count', V_L), ('projection_dim', od),
                   ('attention.head_count', 16), ('image_size', 672), ('patch_size', 14), ('spatial_merge_size', 3), ('window_size', 168)):
         w.add_uint32('clip.vision.'+k, v_)
     w.add_float32('clip.vision.attention.layer_norm_epsilon', float(m['eps']))
@@ -650,7 +653,7 @@ def write_vision(out):
           ('mm.1.weight', M['proj1'], QT.F16), ('mm.2.weight', M['proj2'], QT.F16)]
     for name, arr, qt in T: w.add_tensor(name, np.ascontiguousarray(arr, np.float16 if qt == QT.F16 else np.float32))
     w.write_header_to_file(path=out); w.write_kv_data_to_file(); w.write_tensors_to_file(); w.close()
-    log(f'wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): use with  llama-mtmd-cli -m afm-v11.2-ifp.gguf --mmproj {os.path.basename(out)}')
+    log(f"wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): use with  llama-mtmd-cli -m {'afm-300m-base.gguf' if small else 'afm-v11.2-ifp.gguf'} --mmproj {os.path.basename(out)}")
 
 # ----------------------------------------------------------------------------- feature adapters (rank-48 LoRA)
 # Apple Intelligence features ship as LoRA adapters for this backbone: lora_i{1,2,3}_r48_48_constant_data.bin, the digit
@@ -910,6 +913,7 @@ def main():
     ap.add_argument('--draft', action='store_true', help="write Apple's speculative-decoding draft model instead (arch afm-draft)")
     ap.add_argument('--vision', action='store_true', help="write Apple's image encoder as a multimodal projector (--mmproj) instead")
     ap.add_argument('--pico', action='store_true', help="write Apple's 300M base model (afmplus-v11.0-pico) instead (arch afm-draft)")
+    ap.add_argument('--pico-vision', action='store_true', help="write the 300M model's image encoder (instruct_300m.image_tokenizer) as a projector instead")
     ap.add_argument('--pico-adapter', help='write this 300M adapter (e.g. safety, mm_guard, base.default64) as a llama.cpp LoRA GGUF')
     a = ap.parse_args(); t0 = time.time()
     if a.list_adapters:
@@ -920,6 +924,7 @@ def main():
     if a.adapter: return write_adapter(a.adapter, a.out)
     if a.pico_adapter: return write_pico_adapter(a.pico_adapter, a.out)
     if a.vision: return write_vision(a.out)
+    if a.pico_vision: return write_vision(a.out, small=True)
     if a.pico:
         tok = a.tokenizer
         if tok is None:

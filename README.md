@@ -19,6 +19,7 @@ your own Mac.
 | Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
 | 300M base | Apple's 300M base model (`afmplus-v11.0-pico`) decoded: perplexity 21–31 on plain English with its default adapter, coherent chat answers, `afm-draft` GGUF |
 | Safety guard | Apple's 300M safety classifier and 11 other task adapters as llama.cpp LoRAs: the guard answers `safe` for benign text and labels harmful text in its own `category,action` / `category,mention` format |
+| 300M images | the 300M model's own image encoder decoded too (`afm` projector); its people counter is right on 9 of 10 photos with 0–2 people, and the image safety classifiers pass every benign image |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -186,6 +187,29 @@ The smaller `mm_guard` (rank 32, nine categories) gives the same verdicts except
 by whether they follow the guard's own instructions. The adapter files list their layers in the manifest's string
 order (0, 10–19, 1, 20–23, 2–9). Read in numeric order, every adapter looks inert.
 
+### Images and the image classifiers
+
+The 300M model has its own image encoder (`instruct_300m.image_tokenizer`): the same 24-layer windowed ViT and 3×3
+merger as the 3B's, trained separately and projecting to 1024. The converter writes it as an `afm` projector, and
+the image classifiers are adapters like the guard (`misc_safety`: violence/gore and people counting;
+`prepubescent_safety`). Images need a build that includes v1.7.0's `afm-draft` change (the embedding scale applies
+to text tokens only).
+
+```bash
+python3 afm2gguf/afm2gguf.py --pico-vision -o afm-300m-vision.gguf              # 683 MiB, projector afm
+python3 afm2gguf/afm2gguf.py --pico-adapter misc_safety -o afm-300m-misc_safety.lora.gguf
+llama-mtmd-cli -m afm-300m-base.gguf --mmproj afm-300m-vision.gguf --lora afm-300m-base.default64.lora.gguf \
+  --image photo.jpg -p "<__media__>What is in this image?" --temp 0
+llama-mtmd-cli -m afm-300m-base.gguf --mmproj afm-300m-vision.gguf --lora afm-300m-misc_safety.lora.gguf --image photo.jpg \
+  -sys "How many human people are represented in this image? Reply with only one word from 0, 1, 2." -p "<__media__>" --temp 0
+```
+
+With the default adapter it describes images ("The image contains the text "HELLO" in a stylized font.").
+People counting, on stock photos from Keynote's themes: four photos without people give `0`, four of five portraits
+give `1` (the miss is a person whose face is hidden by a hood), two women give `2` and three boys `2` (the answer is
+limited to 0, 1, 2). The violence/gore and prepubescent classifiers answer `safe` for every benign image we tried;
+we did not test them on harmful images.
+
 ## How faithful is it?
 
 Measured against Apple's own model through the public FoundationModels API (`tools/afm.swift`, temperature 0, the same
@@ -251,7 +275,7 @@ The remaining misses are near-ties: Apple's token is our second choice in 84% an
 
 | Path | |
 |---|---|
-| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files, the draft model, the image encoder (`--vision`) and the 300M base model and its adapters (`--pico`, `--pico-adapter`) |
+| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files, the draft model, the image encoder (`--vision`) and the 300M base model, its image encoder and its adapters (`--pico`, `--pico-vision`, `--pico-adapter`) |
 | `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, exact speculative verify batches, int8 KV emulation, Metal kernels), the `afm-draft` architecture, the `afm` image projector for `mtmd` and the `llama-afm-logits` evaluation tool |
 | `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons; `speculative.py` checks speculative decoding with the draft |
 | `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |
