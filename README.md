@@ -17,6 +17,7 @@ your own Mac.
 | Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
 | Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: 43% next-token agreement with Apple, exact `afm-draft` GGUF, lossless speculation |
 | Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
+| 300M base | Apple's 300M base model (`afmplus-v11.0-pico`, the base of its safety guard and classifiers) decoded: perplexity 25–38 on plain English, coherent chat answers, `afm-draft` GGUF |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -126,6 +127,33 @@ The rest are close paraphrases ("The image shows a math problem: "2 + 3 = ?"." f
 equation: 2 + 3 = ?."). Use `-sys "You are a helpful, concise assistant."` to match the instructions those
 comparisons used.
 
+## Apple's 300M base model
+
+Apple ships a second, smaller language model, `instruct_300m.base` (`afmplus-v11.0-pico`). Its safety guard and
+other 300M classifiers (`instruct_300m.safety`, `mm_guard`, `action_validator`, …) are built on it. The converter
+rebuilds it too:
+
+```bash
+python3 afm2gguf/afm2gguf.py --pico -o afm-300m-base.gguf            # 721 MiB, architecture afm-draft
+llama-completion -m afm-300m-base.gguf -p "The capital of France is" -n 40 --temp 0
+```
+
+It is a 24-layer dense transformer (d=1024, 16 query / 4 KV heads × 64, SwiGLU 3200, int4 weight palettes) with
+a tied int4 readout over the full 262,144-token vocabulary. Its layer is the draft model's, so it uses the
+`afm-draft` architecture and needs no new llama.cpp code. Everything is read from the asset's Neural Engine program
+and `program.odix`, including the norm gains, the int8 K/V cache scales and the RoPE table (base 500,000).
+
+Apple does not expose this model through a public API, so there is no Apple reference to compare against as for
+the 3B. As a language model it behaves as trained: perplexity 38.2 and 24.6 on two plain-English passages,
+the correct next token at median rank 2, and 78% copying on repeated random-token sequences. Each decoding detail is
+needed. With the K/V projections assigned by position instead of by dataflow, perplexity is above 100,000. Greedy
+answers through llama.cpp:
+
+> **What is 12 plus 7?** 12 plus 7 is 19.
+>
+> **Write one sentence about the ocean.** The ocean is a vast, mysterious expanse of water that stretches for
+> miles, teeming with life, diverse ecosystems, and endless horizons.
+
 ## How faithful is it?
 
 Measured against Apple's own model through the public FoundationModels API (`tools/afm.swift`, temperature 0, the same
@@ -191,7 +219,7 @@ The remaining misses are near-ties: Apple's token is our second choice in 84% an
 
 | Path | |
 |---|---|
-| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files, the draft model and the image encoder (`--vision`) |
+| `afm2gguf/afm2gguf.py` | standalone converter (NumPy + gguf-py), reads only the local assets; also writes the feature adapters as LoRA files, the draft model, the image encoder (`--vision`) and the 300M base model (`--pico`) |
 | `llama.cpp-patch/` | the complete llama.cpp side of the project as one patch against upstream `41ea26144`: the `afm` architecture (graph, KV sharing, Apple's expert schedule, exact speculative verify batches, int8 KV emulation, Metal kernels), the `afm-draft` architecture, the `afm` image projector for `mtmd` and the `llama-afm-logits` evaluation tool |
 | `tools/eval/` | reproduces the fidelity numbers: collects Apple's answers, then teacher-forced and free-running comparisons; `speculative.py` checks speculative decoding with the draft |
 | `.github/workflows/build.yml` | builds Windows / Linux / macOS binaries from upstream llama.cpp + the patch |

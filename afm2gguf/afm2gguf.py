@@ -13,6 +13,7 @@ usage: python3 afm2gguf.py -o afm-v11.2-ifp.gguf [--asset DIR] [--tokenizer FILE
        python3 afm2gguf.py --list-adapters
        python3 afm2gguf.py --adapter summarization -o summarization.lora.gguf   (an Apple Intelligence feature adapter)
        python3 afm2gguf.py --draft -o afm-v11.2-draft.gguf   (the speculative-decoding draft model, arch afm-draft)
+       python3 afm2gguf.py --pico -o afm-300m-base.gguf     (the 300M base model, arch afm-draft)
 """
 import argparse, glob, json, mmap, os, plistlib, re, struct, sys, time
 import numpy as np
@@ -657,6 +658,139 @@ def write_vision(out):
 # A is [48, in] and B is [out, 48] (row-major, natural row order), linear_0 = up, linear_1 = gate, scale 1.
 # Verified on the proofreading adapter: correct outputs become 7x likelier than with the base model; every other
 # layout, and scales 0.75 / 1.25, are clearly worse.
+# ----------------------------------------------------------------------------- the 300M base model ("pico")
+# Apple's 300M base (asset ...instruct_300m.base, "afmplus-v11.0-pico", the base of the 300M classifiers such as the safety
+# guard) is a 24-layer dense transformer (d 1024, 16 q / 4 kv heads x 64, SwiGLU 3200) with the same layer as the draft
+# model, so it is written with the afm-draft architecture. Read from its Neural Engine program and program.odix:
+#  * int4 conv blocks = 16 units of [16-entry fp16 LUT][32 zero B][rows/16 fp16 row scales][codes, input-major][zero pad]
+#    (no biases, no activation prefix); channel order = destination-address order of the blocks
+#  * the two 256-wide projections: K is the one whose output is RoPE'd and head-normalised (layer 0 emits K first,
+#    every later layer V first); the per-layer multiplier on the K gain is the int8 K-cache scale (the q.k matmul
+#    divides it out, attention scale = 1/sqrt(64) in every layer)
+#  * norm gains, the readout scale tile [0 | s] and the vocabulary mask: __TEXT,__const tiles named by the planar engine
+#  * embedding: odix data section = int4 codes, 8-token interleave, per-dimension scale s; RoPE cos/sin table after it
+#  * the lora_32/64 constant data is placeholder adapter content for the task adapters' slots and is not applied
+SPEC_PICO, PICO_CFG = 'com.apple.fm.language.instruct_300m.base.generic', 'v11-pico'
+SPEC_TOK_300M = 'com.apple.fm.language.instruct_300m.tokenizer.generic'
+P_L, P_D, P_NH, P_NKV, P_HD, P_FF = 24, 1024, 16, 4, 64, 3200
+
+def pico_model():
+    a = find_asset(SPEC_PICO)
+    if a is None: sys.exit(f'error: 300M base asset {SPEC_PICO} not found under {ASSETS}')
+    root = f'{a}/.AssetData'; meta = json.load(open(f'{root}/metadata.json'))
+    if meta.get('model_config') != PICO_CFG: sys.exit(f"error: this converter supports {PICO_CFG}, the asset is {meta.get('model_config')}")
+    hwx = f'{root}/model.odixpackage/MPSGraph/mpsExecutable.mpsgraphpackage/binary_0.hwx'; odix = f'{root}/model.odixpackage/program.odix'
+    blob = open(hwx, 'rb').read(); seg, sect = macho(hwx)
+    procs = []
+    for t in ane_tasks(blob, *sect[('__TEXT', '__text')]):
+        if t[0] == 0 or not procs: procs.append([])
+        procs[-1].append(t)
+    P = min(procs, key=len)
+    KS = [np.frombuffer(blob, np.uint8, sect[(s, s.lower())][1], sect[(s, s.lower())][0]) for s in ('__KERN_0', '__KERN_1')]
+    cfo, csz = sect[('__TEXT', '__const')]; C = np.frombuffer(blob, np.uint8, csz, cfo)
+    def header_ok(K, off, U, rpu):
+        if off + 16*U > len(K): return False
+        for u in (0, 7, 15):
+            h = K[off+u*U: off+u*U+64+2*rpu]
+            with np.errstate(invalid='ignore', over='ignore'):
+                lut = h[:32].view('<f2').astype(np.float32); s = h[64:].view('<f2').astype(np.float32)
+            if not (np.all(np.isfinite(lut)) and np.all(np.diff(lut) > 0) and not h[32:64].any() and np.all(s > 0) and np.all(s < 4)): return False
+        return True
+    convs = [(k, R, W[_KD+4]) for k, (_, R, W) in enumerate(P) if (_KD+4) in W and R.get(_NE) == 0x46 and 32 not in (R[_CM+3], R[_CM+7])]
+    assert len(convs) == 40*P_L, 'pico conv count check failed'
+    side = [[i for i, K in enumerate(KS) if header_ok(K, off, R[_KD+25], R[_CM+7]//16)] for _, R, off in convs]
+    segs = []                                       # blocks valid in both segments take the segment of their neighbours
+    for i, s_ in enumerate(side):
+        segs.append(s_[0] if len(s_) == 1 else segs[-1] if segs else next(side[j][0] for j in range(i, len(side)) if len(side[j]) == 1))
+    def block(R, off, sg):
+        n_in, out, U = R[_CM+3], R[_CM+7], R[_KD+25]; rpu = out//16; hb = 64 + 2*rpu; K = KS[sg]
+        assert not R[_NE+1] & 0x20010 and 0 <= U - (hb + rpu*n_in//2) < 128 and header_ok(K, off, U, rpu), 'pico weight block check failed'
+        rows = []
+        for u in range(16):
+            b = K[off+u*U: off+(u+1)*U]; lut = b[:32].view('<f2').astype(np.float32); s = b[64:hb].view('<f2').astype(np.float32)
+            c = b[hb: hb+rpu*n_in//2]; rows.append(lut[np.stack([c & 0xF, c >> 4], 1).reshape(n_in, rpu).T] * s[:, None])
+        return np.concatenate(rows)
+    def cat(idx):
+        idx = sorted(idx, key=lambda i: convs[i][1][_L2+19]); return np.concatenate([block(convs[i][1], convs[i][2], segs[i]) for i in idx])
+    tiles, eps = [], None
+    for _, R, W in P:
+        if _PE in W and (_TS+10) in W: tiles.append(W[_TS+10])
+        if W.get(_PE) == 0x82004 and (_PE+3) in W and eps is None: eps = struct.unpack('<f', struct.pack('<I', W[_PE+3]))[0]
+    tile = lambda off, n: C[off: off+2*n].view('<f2').astype(np.float32)
+    layers = []
+    for L in range(P_L):
+        b0 = 40*L; base = L*0x1100
+        k1, k2 = convs[b0+4][0], convs[b0+5][0]
+        kfirst = any(W.get(_PE) == 0x82004 for _, _, W in P[k1+1:k2])
+        ki, vi = (b0+4, b0+5) if kfirst else (b0+5, b0+4)
+        assert all(o in tiles for o in (base, base+0x800, base+0x880, base+0x900)), 'pico gain tile check failed'
+        layers.append(dict(q=cat(range(b0, b0+4)), k=cat([ki]), v=cat([vi]), o=cat(range(b0+6, b0+10)), gate=cat(range(b0+10, b0+23)),
+                           up=cat(range(b0+23, b0+36)), down=cat(range(b0+36, b0+40)), attn_norm=tile(base, P_D),
+                           q_norm=tile(base+0x800, P_HD), k_norm=tile(base+0x880, P_HD), ffn_norm=tile(base+0x900, P_D)))
+    fin = P_L*0x1100; assert fin in tiles and fin+0x800 in tiles, 'pico final tile check failed'
+    final, sc = tile(fin, P_D), tile(fin+0x800, 2*P_D)
+    assert not sc[:P_D].any() and np.all(sc[P_D:] > 0); S = sc[P_D:]
+    mask = np.concatenate([tile(fin+0x1800+i*0x20000, 65536) for i in range(4)])
+    d = np.memmap(odix, np.uint8, 'r'); data = struct.unpack_from('<Q', bytes(d[:0x18]), 0x10)[0]; V = 262144
+    codes = np.asarray(d[data: data+V*P_D//2]).reshape(V//8, P_D, 4)                 # 8 tokens per 4-byte cell, lanes low-nibble first
+    zero = np.flatnonzero(~codes.reshape(V//8, -1).any(1))
+    assert np.array_equal(np.flatnonzero(mask < -1000), np.arange(zero[0]*8, V)) if len(zero) else False, 'pico embedding / mask check failed'
+    rt = np.asarray(d[data+V*P_D//2+64: data+V*P_D//2+64+2*8192*P_HD*2]).view('<f2').astype(np.float64).reshape(2, 8192, P_HD)
+    assert np.all(rt[0, 0] == 1) and not rt[1, 0].any(), 'pico RoPE table check failed'
+    # angle(pos p, pair j) = p * base^(-j/32): a rough fit at p = 1, then each pair read at the largest position whose
+    # angle is still unwrapped (fp16 resolution is relative, so long angles pin the base to ~1e-4)
+    j = np.arange(1, P_HD//2); slope = np.polyfit(j, np.log(np.arctan2(rt[1, 1, j], rt[0, 1, j])), 1)[0]
+    pj = np.minimum(8191, (2.5 / np.exp(slope*j)).astype(int)); f = np.arctan2(rt[1, pj, j], rt[0, pj, j]) / pj
+    theta = float(np.exp(-P_HD//2 * np.polyfit(j, np.log(f), 1)[0]))
+    return dict(meta=meta, layers=layers, final=final, S=S, mask=mask, codes=codes, eps=eps, theta=theta)
+
+def write_pico(tok, out):
+    m = pico_model(); toks, scores, types = tokenizer(tok); V = 262144
+    log(f"300M base {PICO_CFG}: {P_L} layers d{P_D}, rms eps {m['eps']:.4g}, rope base {m['theta']:.4g}")
+    def emb():                                                                   # int4 codes as Q4_0 with d = 1 (exact)
+        o_ = np.empty((V, P_D//32*18), np.uint8)
+        for r0 in range(0, V, 16384):
+            blk = m['codes'][r0//8:(r0+16384)//8].astype(np.uint8)
+            n = np.stack([blk & 0xF, blk >> 4], -1).reshape(-1, P_D, 8).transpose(0, 2, 1).reshape(16384, P_D)
+            o_[r0:r0+16384] = pack_q4_0(np.where(n > 7, n.astype(np.int16)-16, n).astype(np.int16), np.ones(16384, np.float16))
+        return o_
+    w = gguf.GGUFWriter(path=None, arch='afm-draft')
+    w.add_name(f"Apple Foundation Model 300M base ({m['meta'].get('display_version', PICO_CFG)}) - local conversion")
+    w.add_description("Apple's 300M on-device base model converted from this Mac's Apple Intelligence assets by afm2gguf. "
+                      'Requires llama.cpp with the `afm-draft` architecture.')
+    p = 'afm-draft.'
+    for k, v_ in (('context_length', int(m['meta'].get('context_length', 8192))), ('embedding_length', P_D), ('block_count', P_L),
+                  ('feed_forward_length', P_FF), ('attention.head_count', P_NH), ('attention.head_count_kv', P_NKV),
+                  ('attention.key_length', P_HD), ('attention.value_length', P_HD), ('rope.dimension_count', P_HD)):
+        w.add_uint32(p+k, v_)
+    w.add_float32(p+'rope.freq_base', float(f"{m['theta']:.3g}")); w.add_float32(p+'attention.layer_norm_rms_epsilon', m['eps'])
+    w.add_tokenizer_model('llama'); w.add_tokenizer_pre('default')
+    w.add_token_list(toks); w.add_token_scores([float(x) for x in scores]); w.add_token_types([int(x) for x in types])
+    w.add_bos_token_id(2); w.add_eos_token_id(106); w.add_unk_token_id(3); w.add_pad_token_id(0)
+    w.add_add_bos_token(True); w.add_add_eos_token(False); w.add_add_space_prefix(False)
+    w.add_chat_template("{%- for message in messages -%}{{ '<start_of_turn>' + ('model' if message['role'] == 'assistant' else message['role']) + "
+                        "'\\n' + message['content'] + '<end_of_turn>\\n' }}{%- endfor -%}"
+                        "{%- if add_generation_prompt -%}{{ '<start_of_turn>model\\n' }}{%- endif -%}")
+    plan = [('token_embd.weight', (V, P_D//32*18), QT.Q4_0, emb),
+            ('token_embd_scale.weight', (P_D,), QT.F32, lambda: m['S']),
+            ('output_scale.weight', (P_D,), QT.F32, lambda: m['S']),
+            ('output_norm.weight', (P_D,), QT.F32, lambda: m['final']),
+            ('output.bias', (V,), QT.F32, lambda: m['mask'])]
+    names = dict(attn_norm='attn_norm', ffn_norm='ffn_norm', q_norm='attn_q_norm', k_norm='attn_k_norm',
+                 q='attn_q', k='attn_k', v='attn_v', o='attn_output', gate='ffn_gate', up='ffn_up', down='ffn_down')
+    for L, lay in enumerate(m['layers']):
+        for key, nm in names.items():
+            arr = lay[key]; plan.append((f'blk.{L}.{nm}.weight', arr.shape, QT.F16 if arr.ndim == 2 else QT.F32, (lambda a_=arr: a_)))
+    for name, shp, qt, _ in plan:
+        if qt == QT.Q4_0: w.add_tensor_info(name, shp, np.dtype(np.uint8), int(np.prod(shp)), raw_dtype=qt)
+        elif qt == QT.F16: w.add_tensor_info(name, shp, np.dtype(np.float16), int(np.prod(shp))*2)
+        else: w.add_tensor_info(name, shp, np.dtype(np.float32), int(np.prod(shp))*4)
+    w.write_header_to_file(path=out); w.write_kv_data_to_file(); w.write_ti_data_to_file()
+    for name, shp, qt, fn in plan:
+        arr = np.ascontiguousarray(fn()); arr = arr.astype(np.float16 if qt == QT.F16 else np.float32) if qt != QT.Q4_0 else arr
+        assert arr.shape == tuple(shp), (name, arr.shape, shp); w.write_tensor_data(arr)
+    w.close(); log(f'wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): run with  llama-cli -m {os.path.basename(out)}')
+
 LORA_R = 48
 LORA_GROUPS = {'dense': [('o', 2048, 1536), ('q', 1536, 2048), ('k', 1536, 1024), ('v', 1536, 1024),
                          ('l0', 1536, 3072), ('l1', 1536, 3072), ('down', 3072, 1536)],
@@ -713,6 +847,7 @@ def main():
     ap.add_argument('--no-kvq', action='store_true', help='do not store int8 K/V cache emulation scales')
     ap.add_argument('--draft', action='store_true', help="write Apple's speculative-decoding draft model instead (arch afm-draft)")
     ap.add_argument('--vision', action='store_true', help="write Apple's image encoder as a multimodal projector (--mmproj) instead")
+    ap.add_argument('--pico', action='store_true', help="write Apple's 300M base model (afmplus-v11.0-pico) instead (arch afm-draft)")
     a = ap.parse_args(); t0 = time.time()
     if a.list_adapters:
         for n, (p_, _) in sorted(adapters().items()): print(f'{n:44s} ifp{re.search(r"lora_i(\d)_", p_).group(1)}')
@@ -720,6 +855,12 @@ def main():
     if not a.out: ap.error('-o/--out is required')
     if a.adapter: return write_adapter(a.adapter, a.out)
     if a.vision: return write_vision(a.out)
+    if a.pico:
+        tok = a.tokenizer
+        if tok is None:
+            t = find_asset(SPEC_TOK_300M) or find_asset(SPEC_TOK); tok = f'{t}/AssetData/tokenizer' if t else None
+        if not tok or not os.path.exists(tok): sys.exit(f'error: tokenizer asset {SPEC_TOK_300M} not found; pass --tokenizer')
+        return write_pico(tok, a.out)
     if a.draft:
         tok = a.tokenizer
         if tok is None:
