@@ -558,13 +558,17 @@ def vision_model(spec=SPEC_VISION, out_dim=1536):
                 for s in range(S): Wm[s*(out//S)+u*16: s*(out//S)+u*16+16] = t[s].T
             return dict(W=Wm, b=None, s=None, act=False, k=k, R=R)
         ne1 = R[_NE+1]; hasb = bool(ne1 & 0x10); pre = 128 if ne1 & 0x20000 else 0; hb = 64 + 2*rpu*(2 if hasb else 1)
+        # a conv task that writes the NE bias register (exponent e in bits 16-20, value 0) scales its per-channel
+        # biases by 2^(e - 32); tasks that do not write it use the stored biases as they are
+        nb = P[k][2].get(_NE+3); bexp = 1.0
+        if nb is not None: assert not nb & 0xffff, 'unexpected NE scalar bias'; bexp = 2.0 ** (((nb >> 16) & 0x1f) - 32)
         assert 0 <= U - (pre + hb + rpu*n_in//2) < 128, 'image encoder weight block size check failed'
         rows, bias, sc = [], [], []
         for u in range(16):
             b = K[off+u*U: off+(u+1)*U]; h = b[pre:pre+hb]; lut = h[:32].view('<f2').astype(np.float32)
             s = h[64:64+2*rpu].view('<f2').astype(np.float32); c = b[pre+hb: pre+hb+rpu*n_in//2]
             rows.append(lut[np.stack([c & 0xF, c >> 4], 1).reshape(n_in, rpu).T] * s[:, None]); sc.append(s)
-            bias.append(h[64+2*rpu:64+4*rpu].view('<f2').astype(np.float32) * s if hasb else np.zeros(rpu, np.float32))
+            bias.append(h[64+2*rpu:64+4*rpu].view('<f2').astype(np.float32) * s * bexp if hasb else np.zeros(rpu, np.float32))
         return dict(W=np.concatenate(rows), b=np.concatenate(bias), s=np.concatenate(sc), act=pre > 0, k=k, R=R)
     seen, convs = set(), []
     for k, R, off in raw:

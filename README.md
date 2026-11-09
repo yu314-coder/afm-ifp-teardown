@@ -18,8 +18,8 @@ your own Mac.
 | Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: 43% next-token agreement with Apple, exact `afm-draft` GGUF, lossless speculation |
 | Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
 | 300M base | Apple's 300M base model (`afmplus-v11.0-pico`) decoded: perplexity 21–31 on plain English with its default adapter, coherent chat answers, `afm-draft` GGUF |
-| Safety guard | Apple's 300M safety classifier and 11 other task adapters as llama.cpp LoRAs: the guard answers `safe` for benign text and labels harmful text in its own `category,action` / `category,mention` format |
-| 300M images | the 300M model's own image encoder decoded too (`afm` projector); its people counter is right on 9 of 10 photos with 0–2 people, and the image safety classifiers pass every benign image |
+| Safety guard | Apple's 300M safety classifier and 11 other task adapters as llama.cpp LoRAs: the guard labels text in its own `category,action` / `category,mention` format and, with Apple's policy table, predicts the public API's guardrail decisions on 26/26 prompts |
+| 300M images | the 300M model's own image encoder decoded too (`afm` projector); its people counter is right on 10 of 10 photos with 0–2 people, and the image safety classifiers pass every benign image |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -205,10 +205,20 @@ llama-mtmd-cli -m afm-300m-base.gguf --mmproj afm-300m-vision.gguf --lora afm-30
 ```
 
 With the default adapter it describes images ("The image contains the text "HELLO" in a stylized font.").
-People counting, on stock photos from Keynote's themes: four photos without people give `0`, four of five portraits
-give `1` (the miss is a person whose face is hidden by a hood), two women give `2` and three boys `2` (the answer is
-limited to 0, 1, 2). The violence/gore and prepubescent classifiers answer `safe` for every benign image we tried;
+People counting, on stock photos from Keynote's themes: four photos without people give `0`, all five portraits give
+`1`, two women give `2` and three boys `2` (the answer is limited to 0, 1, 2). The violence/gore and prepubescent classifiers answer `safe` for every benign image we tried;
 we did not test them on harmful images.
+
+**Checked against Apple.** Apple's own 300M image encoder runs from our process (like the 3B's), so it is a direct
+reference: on identical inputs ours agrees at cosine 0.97 on constant images and 0.61–0.78 per token on photos. The
+decisive fix was a Neural Engine register: convolution tasks that write the `NEBias` exponent e scale their biases by
+2^(e−32); 15 of the encoder's 96 attention bias tensors were 2–16× too large without it (two in the 3B encoder too).
+The remaining gap is shared with the 3B encoder and sits where the last layer writes very large activations.
+
+Apple's public FoundationModels API runs the text safety guard: it rejects a request with "May contain unsafe content"
+when the guard's labels map to `unsafe` in Apple's policy table for the API (`feature_output_category_mapping.json`).
+On 26 prompts, our guard plus that table predicts Apple's decision every time (26/26), including jailbreak attempts,
+vulgarity and mentions that the guard labels but the API's policy lets through.
 
 ## How faithful is it?
 
