@@ -14,6 +14,7 @@ usage: python3 afm2gguf.py -o afm-v11.2-ifp.gguf [--asset DIR] [--tokenizer FILE
        python3 afm2gguf.py --adapter summarization -o summarization.lora.gguf   (an Apple Intelligence feature adapter)
        python3 afm2gguf.py --draft -o afm-v11.2-draft.gguf   (the speculative-decoding draft model, arch afm-draft)
        python3 afm2gguf.py --pico -o afm-300m-base.gguf     (the 300M base model, arch afm-draft)
+       python3 afm2gguf.py --pico-adapter safety -o afm-300m-safety.lora.gguf   (a 300M adapter, e.g. the safety guard)
 """
 import argparse, glob, json, mmap, os, plistlib, re, struct, sys, time
 import numpy as np
@@ -669,7 +670,7 @@ def write_vision(out):
 #    divides it out, attention scale = 1/sqrt(64) in every layer)
 #  * norm gains, the readout scale tile [0 | s] and the vocabulary mask: __TEXT,__const tiles named by the planar engine
 #  * embedding: odix data section = int4 codes, 8-token interleave, per-dimension scale s; RoPE cos/sin table after it
-#  * the lora_32/64 constant data is placeholder adapter content for the task adapters' slots and is not applied
+#  * the lora_32/64 constant data is the model's default adapter; it is written separately (--pico-adapter base.default64)
 SPEC_PICO, PICO_CFG = 'com.apple.fm.language.instruct_300m.base.generic', 'v11-pico'
 SPEC_TOK_300M = 'com.apple.fm.language.instruct_300m.tokenizer.generic'
 P_L, P_D, P_NH, P_NKV, P_HD, P_FF = 24, 1024, 16, 4, 64, 3200
@@ -768,8 +769,12 @@ def write_pico(tok, out):
     w.add_token_list(toks); w.add_token_scores([float(x) for x in scores]); w.add_token_types([int(x) for x in types])
     w.add_bos_token_id(2); w.add_eos_token_id(106); w.add_unk_token_id(3); w.add_pad_token_id(0)
     w.add_add_bos_token(True); w.add_add_eos_token(False); w.add_add_space_prefix(False)
-    w.add_chat_template("{%- for message in messages -%}{{ '<start_of_turn>' + ('model' if message['role'] == 'assistant' else message['role']) + "
-                        "'\\n' + message['content'] + '<end_of_turn>\\n' }}{%- endfor -%}"
+    # afm_cider_v2: a system message becomes the system turn followed by an (empty) developer turn, as Apple renders it
+    w.add_chat_template("{%- for message in messages -%}"
+                        "{%- if message['role'] == 'system' -%}{{ '<start_of_turn>system\\n' + message['content'] + "
+                        "'<end_of_turn>\\n<start_of_turn>developer\\n<end_of_turn>\\n' }}"
+                        "{%- else -%}{{ '<start_of_turn>' + ('model' if message['role'] == 'assistant' else 'user') + "
+                        "'\\n' + message['content'] + '<end_of_turn>\\n' }}{%- endif -%}{%- endfor -%}"
                         "{%- if add_generation_prompt -%}{{ '<start_of_turn>model\\n' }}{%- endif -%}")
     plan = [('token_embd.weight', (V, P_D//32*18), QT.Q4_0, emb),
             ('token_embd_scale.weight', (P_D,), QT.F32, lambda: m['S']),
@@ -790,6 +795,63 @@ def write_pico(tok, out):
         arr = np.ascontiguousarray(fn()); arr = arr.astype(np.float16 if qt == QT.F16 else np.float32) if qt != QT.Q4_0 else arr
         assert arr.shape == tuple(shp), (name, arr.shape, shp); w.write_tensor_data(arr)
     w.close(); log(f'wrote {out} ({os.path.getsize(out)/2**20:.1f} MiB): run with  llama-cli -m {os.path.basename(out)}')
+
+# The 300M model's adapters: its own default adapter (lora_32/lora_64 constant data in the base package) and the task
+# adapters built on it (safety guard, mm_guard, classifiers, ...), each a lora_{r}_constant_data.bin of fp16 (A [r, in],
+# B [out, r]) pairs. The pairs follow the package manifest's spec names in string order, so layers come as
+# 0, 10..19, 1, 20..23, 2..9; per layer: attention output, q, k, v, linear_0 (= gate), linear_1 (= up), FFN output.
+# The Neural Engine program scales the A product by 0.5 (written as alpha = r/2).
+PREFIX_300M = 'com.apple.fm.language.instruct_300m.'
+P_ROLE = {'attention_output_transform': ('attn_output', P_NH*P_HD, P_D), 'lora_0': ('attn_q', P_D, P_NH*P_HD),
+          'lora_1': ('attn_k', P_D, P_NKV*P_HD), 'lora_2': ('attn_v', P_D, P_NKV*P_HD),
+          'linear_0': ('ffn_gate', P_D, P_FF), 'linear_1': ('ffn_up', P_D, P_FF), 'feed_forward_output_transform': ('ffn_down', P_FF, P_D)}
+
+def pico_adapters():
+    out = {}
+    for a in sorted(glob.glob(f'{ASSETS}/*.asset')):
+        try: d = plistlib.load(open(f'{a}/Info.plist', 'rb'))
+        except Exception: continue
+        spec = (d.get('MobileAssetProperties') or {}).get('AssetSpecifier', d.get('AssetSpecifier')) or ''
+        if not spec.startswith(PREFIX_300M): continue
+        name = spec[len(PREFIX_300M):].rsplit('.generic', 1)[0]
+        for pkg, meta in ((f'{a}/AssetData/adapter.odixpackage', f'{a}/AssetData/metadata.json'),
+                          (f'{a}/.AssetData/model.odixpackage', None)):
+            for f in sorted(glob.glob(f'{pkg}/MPSGraph/mpsExecutable.mpsgraphpackage/lora_*_constant_data.bin')):
+                r = int(re.search(r'lora_(\d+)_constant', f).group(1))
+                key = name if meta else f'{name}.default{r}'          # the base package: base.default32 / base.default64
+                if r in (32, 64): out[key] = (f, meta, r)
+    return out
+
+def write_pico_adapter(name, out):
+    ads = pico_adapters()
+    if name not in ads: sys.exit(f'error: 300M adapter {name!r} not found; available: {", ".join(sorted(ads))}')
+    path, mpath, r = ads[name]; meta = json.load(open(mpath)) if mpath else {}
+    man = plistlib.load(open(os.path.join(os.path.dirname(path), 'manifest.plist'), 'rb'))['Package Version']
+    specs = next(iter(man.values()))['Adapters by rank'][f'lora_{r}']
+    order = []
+    for s in specs:
+        m_ = re.search(r'layer_(\d+)_(attention_output_transform|attention_qkv_transform_adapters_base_adapter_(lora_\d)|'
+                       r'feed_forward_hidden_transform_(linear_\d)|feed_forward_output_transform)', s)
+        key = (int(m_.group(1)), m_.group(3) or m_.group(4) or m_.group(2))
+        if key not in order: order.append(key)
+    assert len(order) == 7*P_L and sorted(order) == sorted({(L, k) for L in range(P_L) for k in P_ROLE}), '300M adapter manifest check failed'
+    v = np.fromfile(path, np.float16); o = 0; pairs = []
+    for L, role in order:
+        nm, a, b = P_ROLE[role]
+        A = v[o:o + a*r].reshape(r, a); o += a*r; B = v[o:o + b*r].reshape(b, r); o += b*r
+        pairs.append((L, nm, A, B))
+    if o != v.size: sys.exit(f'error: unexpected adapter size ({v.size} values, layout needs {o})')
+    log(f'300M adapter {name}: rank {r}, {len(pairs)} LoRA pairs, B rms {float(np.sqrt(np.mean([np.mean(np.square(B.astype(np.float32))) for *_, B in pairs]))):.2e}')
+    w = gguf.GGUFWriter(out, 'afm-draft')
+    w.add_string('general.type', 'adapter'); w.add_string('adapter.type', 'lora'); w.add_float32('adapter.lora.alpha', r/2)
+    w.add_string('adapter.afm.name', name)
+    for key in ('systemInstructions', 'promptContentTemplates', 'user_defined_fields'):
+        if meta.get(key): w.add_string('adapter.afm.' + key, json.dumps(meta[key], ensure_ascii=False))
+    for L, nm, A, B in sorted(pairs, key=lambda x: x[0]):
+        w.add_tensor(f'blk.{L}.{nm}.weight.lora_a', np.ascontiguousarray(A)); w.add_tensor(f'blk.{L}.{nm}.weight.lora_b', np.ascontiguousarray(B))
+    w.write_header_to_file(); w.write_kv_data_to_file(); w.write_tensors_to_file(); w.close()
+    si = (meta.get('systemInstructions') or {}).get('default')
+    log(f'wrote {out}: use with  llama-completion -m afm-300m-base.gguf --lora {os.path.basename(out)}' + ('  (system instructions in the GGUF metadata)' if si else ''))
 
 LORA_R = 48
 LORA_GROUPS = {'dense': [('o', 2048, 1536), ('q', 1536, 2048), ('k', 1536, 1024), ('v', 1536, 1024),
@@ -848,12 +910,15 @@ def main():
     ap.add_argument('--draft', action='store_true', help="write Apple's speculative-decoding draft model instead (arch afm-draft)")
     ap.add_argument('--vision', action='store_true', help="write Apple's image encoder as a multimodal projector (--mmproj) instead")
     ap.add_argument('--pico', action='store_true', help="write Apple's 300M base model (afmplus-v11.0-pico) instead (arch afm-draft)")
+    ap.add_argument('--pico-adapter', help='write this 300M adapter (e.g. safety, mm_guard, base.default64) as a llama.cpp LoRA GGUF')
     a = ap.parse_args(); t0 = time.time()
     if a.list_adapters:
         for n, (p_, _) in sorted(adapters().items()): print(f'{n:44s} ifp{re.search(r"lora_i(\d)_", p_).group(1)}')
+        for n, (_, _, r) in sorted(pico_adapters().items()): print(f'{n:44s} 300M, rank {r}  (--pico-adapter)')
         return
     if not a.out: ap.error('-o/--out is required')
     if a.adapter: return write_adapter(a.adapter, a.out)
+    if a.pico_adapter: return write_pico_adapter(a.pico_adapter, a.out)
     if a.vision: return write_vision(a.out)
     if a.pico:
         tok = a.tokenizer
