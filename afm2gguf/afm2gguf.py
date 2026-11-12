@@ -440,8 +440,12 @@ def draft_model():
     codes = lambda X, n: np.asarray(d[X:X+n//8*1024]).reshape(n//8, D_DRAFT, 4)
     nondraft, draft = codes(data, V-nd), codes(data+(V-nd)*128, nd)
     assert bytes(d[data+V*128:data+V*128+8]) == bytes.fromhex('0100000040000000'), 'draft embedding layout check failed'
-    S = np.frombuffer(C, '<f2', D_DRAFT, 0x200).astype(np.float32)              # readout constant tile = [0 | s]
-    assert not np.frombuffer(C, '<f2', D_DRAFT, 0).any() and np.all(S > 0)
+    # readout constant tile = [0 | s]: at the start of __const when the readout is its own procedure (the generic draft),
+    # inside each procedure's block when it is not (the per-feature drafts)
+    tile = lambda o: (np.frombuffer(C, '<f2', D_DRAFT, o), np.frombuffer(C, '<f2', D_DRAFT, o+0x200).astype(np.float32))
+    so = next((o for o in [0] + [cbase+x for x in range(0, 0x3c00, 0x40)] if not tile(o)[0].any() and np.all(tile(o)[1] > 0)), None)
+    assert so is not None, 'draft readout scale tile not found'
+    S = tile(so)[1]
     r1000 = np.asarray(d[data+V*128+64+1000*64: data+V*128+64+1001*64]).view('<f2').astype(np.float32)
     theta = float((np.arccos(r1000[8])/1000)**-2)                              # cos(1000*theta_8), theta_j = base^(-j/16)
     return dict(meta=meta, layers=layers, final=final, eps=eps, S=S, vocab=vocab, nondraft=nondraft, draft=draft, theta=theta)
@@ -944,6 +948,7 @@ def main():
     ap.add_argument('--adapter', help='write this feature adapter as a llama.cpp LoRA GGUF instead of the model')
     ap.add_argument('--no-kvq', action='store_true', help='do not store int8 K/V cache emulation scales')
     ap.add_argument('--draft', action='store_true', help="write Apple's speculative-decoding draft model instead (arch afm-draft)")
+    ap.add_argument('--draft-of', metavar='FEATURE', help="like --draft, but the draft model Apple ships for one feature adapter (e.g. machine_translation)")
     ap.add_argument('--vision', action='store_true', help="write Apple's image encoder as a multimodal projector (--mmproj) instead")
     ap.add_argument('--pico', action='store_true', help="write Apple's 300M base model (afmplus-v11.0-pico) instead (arch afm-draft)")
     ap.add_argument('--pico-vision', action='store_true', help="write the 300M model's image encoder (instruct_300m.image_tokenizer) as a projector instead")
@@ -964,6 +969,9 @@ def main():
             t = find_asset(SPEC_TOK_300M) or find_asset(SPEC_TOK); tok = f'{t}/AssetData/tokenizer' if t else None
         if not tok or not os.path.exists(tok): sys.exit(f'error: tokenizer asset {SPEC_TOK_300M} not found; pass --tokenizer')
         return write_pico(tok, a.out)
+    if a.draft_of:
+        global SPEC_DRAFT
+        SPEC_DRAFT = f'{ADAPTER_PREFIX}{a.draft_of}.draft{ADAPTER_SUFFIX}'; a.draft = True
     if a.draft:
         tok = a.tokenizer
         if tok is None:
