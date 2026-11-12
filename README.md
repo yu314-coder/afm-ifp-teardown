@@ -19,7 +19,7 @@ your own Mac.
 | Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
 | 300M base | Apple's 300M base model (`afmplus-v11.0-pico`) decoded: perplexity 21–31 on plain English with its default adapter, coherent chat answers, `afm-draft` GGUF |
 | Safety guard | Apple's 300M safety classifier and 11 other task adapters as llama.cpp LoRAs: the guard labels text in its own `category,action` / `category,mention` format and, with Apple's policy table, predicts the public API's guardrail decisions on 26/26 prompts |
-| 300M images | the 300M model's own image encoder decoded too (`afm` projector); its people counter is right on 10 of 10 photos with 0–2 people, and the image safety classifiers pass every benign image |
+| 300M images | the 300M model's own image encoder decoded too (`afm` projector); matches Apple's own encoder at cosine 0.99 per token on photos; its people counter is right on 10 of 10 photos with 0–2 people, and the image safety classifiers pass every benign image |
 | Speed (M4, Metal) | ~150 tok/s prompt, ~28 tok/s generation (`AFM_EXACT_SILU=1`: ~290 / ~35 tok/s, slightly less faithful) |
 
 The full write-up (architecture diagrams, storage formats, the bug that hid the model, validation, every negative
@@ -212,11 +212,14 @@ People counting, on stock photos from Keynote's themes: four photos without peop
 we did not test them on harmful images.
 
 **Checked against Apple.** Apple's own 300M image encoder runs from our process (like the 3B's), so it is a direct
-reference: on identical inputs ours agrees at cosine 0.97 on constant images and 0.68–0.87 per token on photos
-(the 3B encoder: 0.98–0.99). The
-decisive fix was a Neural Engine register: convolution tasks that write the `NEBias` exponent e scale their biases by
-2^(e−32); 15 of the encoder's 96 attention bias tensors were 2–16× too large without it (two in the 3B encoder too).
-The remaining gap is shared with the 3B encoder and sits where the last layer writes very large activations.
+reference: on identical inputs ours agrees at cosine 0.998 on constant images and 0.990–0.999 per token on photos
+(the 3B encoder: 0.989–0.997), and llama.cpp's projector at 0.98–0.99 straight from the image files. Two fixes were
+decisive. The first is a Neural Engine register: convolution tasks that write the `NEBias` exponent e scale their
+biases by 2^(e−32); 15 of the encoder's 96 attention bias tensors were 2–16× too large without it (two in the 3B
+encoder too). The second is the merger's normalisation layer: its depthwise kernel stores its 16 units interleaved
+over the channels (channel c is entry c/16 of unit c mod 16), not one unit after another. Read stacked, every gain and
+bias lands on the wrong channel. The 3B encoder hardly notices, because its values are nearly uniform (0.992 → 0.994);
+the 300M encoder's are not, and it sat at 0.68–0.87 until this was found.
 
 Apple's public FoundationModels API runs the text safety guard: it rejects a request with "May contain unsafe content"
 when the guard's labels map to `unsafe` in Apple's policy table for the API (`feature_output_category_mapping.json`).

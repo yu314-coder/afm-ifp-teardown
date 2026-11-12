@@ -597,7 +597,9 @@ def vision_model(spec=SPEC_VISION, out_dim=1536):
     M['proj1'] = np.concatenate([x['W'] for x in ad if isinstance(x, dict) and x['R'][_CM+3] == 4096])
     M['proj2'] = np.concatenate([x['W'] for x in ad if isinstance(x, dict) and x['R'][_CM+3] == 2048])
     k, R, off = next(x for x in ad if not isinstance(x, dict)); U = R[_KD+25]; K = KS[which(k, R, off)]
-    bg = np.stack([K[off+u*U+128: off+(u+1)*U].view('<f2').astype(np.float32).reshape(-1, 2) for u in range(16)]).reshape(-1, 2)
+    # depthwise conv: the 16 kernel units are interleaved over the channels (channel c is entry c//16 of unit c%16), not
+    # stacked; checked against Apple's own encoders (300M: 0.68-0.87 -> 0.99 on photos, 3B: 0.992 -> 0.994)
+    bg = np.stack([K[off+u*U+128: off+(u+1)*U].view('<f2').astype(np.float32).reshape(-1, 2) for u in range(16)]).transpose(1, 0, 2).reshape(-1, 2)
     M['act_gelu'] = K[off:off+128].view('<f2').astype(np.float32)                    # the conv's activation table (GELU)
     M['act_silu'] = next(x['tab'] for x in [block(*c) for c in layers[0]] if x.get('tab') is not None).view('<f2').astype(np.float32)
     M['mm_ln_b'], M['mm_ln_g'] = bg[:, 0], bg[:, 1]                                  # depthwise conv: (bias, weight) per channel
