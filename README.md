@@ -15,7 +15,7 @@ your own Mac.
 | Prompt format | Apple's `afm_cider_v2` template, decoded from the runtime and verified against `SystemLanguageModel.tokenCount` |
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
 | Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
-| Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: 43% next-token agreement with Apple, exact `afm-draft` GGUF, lossless speculation |
+| Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: reproduces the accept/reject decisions of Apple's own draft (99% of 1,134 clear decisions; Apple's runtime logs them), exact `afm-draft` GGUF, lossless speculation |
 | Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
 | 300M base | Apple's 300M base model (`afmplus-v11.0-pico`) decoded: perplexity 21–31 on plain English with its default adapter, coherent chat answers, `afm-draft` GGUF |
 | Safety guard | Apple's 300M safety classifier and 11 other task adapters as llama.cpp LoRAs: the guard labels text in its own `category,action` / `category,mention` format and, with Apple's policy table, predicts the public API's guardrail decisions on 26/26 prompts |
@@ -90,6 +90,18 @@ over a 100,000-token subset of the vocabulary. Every value comes from the asset;
 order and the norm gains were read from the ANE task stream (paper, Section "The speculative-decoding draft model").
 It predicts Apple's next answer token 43% of the time (40 prompts; 37.7% on 230), and every alternative layout we
 tried scores 0–17%.
+
+**Checked against Apple's own draft.** Apple's runtime logs, after every output token, how many draft tokens it has
+accepted and rejected (`log stream`, subsystem `com.apple.tokengenerationinference`, category `SpeculativeDecode`).
+That is a per-token record of what Apple's draft proposed, and it shows how Apple speculates: not a chain of 7 tokens
+but a small tree. Each round scores the last real token plus 7 draft nodes (the 8-token program), chosen as the 7 most
+likely nodes of a depth-2 tree by joint probability; a token is accepted if it is one of the tree's nodes at its level.
+Replaying that tree with our draft on Apple's own answers (60 prompts, 1,331 logged decisions), ours makes the same
+decision as Apple's in 95.6% of the cases and accepts at the same rate (55.7% against Apple's 55.9%); an unrelated
+model would agree 51% of the time. The disagreements are near-ties at the tree's threshold: where the token is more
+than a factor 2 away from it, 99.2% agree (1,134 decisions), beyond a factor 4, 99.7%. (A round is also lost whenever
+the sequence outgrows the current fixed-size program, at 96, 128, … tokens; the 104 decisions within one token of
+those lengths are left out.)
 
 Speculative decoding with it is **lossless**: with greedy sampling, llama.cpp returns exactly the plain answers
 (40/40, Metal and CPU). The `afm` graph treats a verify batch exactly like single decode tokens: input bias, Apple's
@@ -223,8 +235,10 @@ the 300M encoder's are not, and it sat at 0.68–0.87 until this was found.
 
 Apple's public FoundationModels API runs the text safety guard: it rejects a request with "May contain unsafe content"
 when the guard's labels map to `unsafe` in Apple's policy table for the API (`feature_output_category_mapping.json`).
-On 26 prompts, our guard plus that table predicts Apple's decision every time (26/26), including jailbreak attempts,
-vulgarity and mentions that the guard labels but the API's policy lets through.
+On 100 prompts, our guard plus that table predicts Apple's decision 95 times (26/26 on a first set, 69/74 on a
+second), including jailbreak attempts, vulgarity and mentions that the guard labels but the API's policy lets through.
+The five misses are borderline: four insults or threats-by-proxy that ours labels as an action and Apple lets through,
+and one hobby question about lock picking that Apple stops.
 
 ## How faithful is it?
 
