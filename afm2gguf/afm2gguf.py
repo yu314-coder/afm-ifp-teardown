@@ -569,7 +569,7 @@ def vision_model(spec=SPEC_VISION, out_dim=1536):
             s = h[64:64+2*rpu].view('<f2').astype(np.float32); c = b[pre+hb: pre+hb+rpu*n_in//2]
             rows.append(lut[np.stack([c & 0xF, c >> 4], 1).reshape(n_in, rpu).T] * s[:, None]); sc.append(s)
             bias.append(h[64+2*rpu:64+4*rpu].view('<f2').astype(np.float32) * s * bexp if hasb else np.zeros(rpu, np.float32))
-        return dict(W=np.concatenate(rows), b=np.concatenate(bias), s=np.concatenate(sc), act=pre > 0, k=k, R=R)
+        return dict(W=np.concatenate(rows), b=np.concatenate(bias), s=np.concatenate(sc), act=pre > 0, k=k, R=R, tab=K[off:off+128].copy() if pre else None)
     seen, convs = set(), []
     for k, R, off in raw:
         key = (which(k, R, off), off)
@@ -598,6 +598,8 @@ def vision_model(spec=SPEC_VISION, out_dim=1536):
     M['proj2'] = np.concatenate([x['W'] for x in ad if isinstance(x, dict) and x['R'][_CM+3] == 2048])
     k, R, off = next(x for x in ad if not isinstance(x, dict)); U = R[_KD+25]; K = KS[which(k, R, off)]
     bg = np.stack([K[off+u*U+128: off+(u+1)*U].view('<f2').astype(np.float32).reshape(-1, 2) for u in range(16)]).reshape(-1, 2)
+    M['act_gelu'] = K[off:off+128].view('<f2').astype(np.float32)                    # the conv's activation table (GELU)
+    M['act_silu'] = next(x['tab'] for x in [block(*c) for c in layers[0]] if x.get('tab') is not None).view('<f2').astype(np.float32)
     M['mm_ln_b'], M['mm_ln_g'] = bg[:, 0], bg[:, 1]                                  # depthwise conv: (bias, weight) per channel
     assert M['merge'].shape == (4096, 9216) and M['proj1'].shape == (2048, 4096) and M['proj2'].shape == (out_dim, 2048) and len(bg) == 4096
     # norm gains, in program order: pre-norm, (attention, FFN) x 24, final; q/k head gains (q, k) x 24
@@ -645,7 +647,15 @@ def write_vision(out, small=False):
     # pixel normalisation is host-side (not in the asset); ImageNet statistics match Apple's answers best (white reads as
     # white; CLIP's statistics make it read as gray), see the paper
     w.add_array('clip.vision.image_mean', [0.485, 0.456, 0.406]); w.add_array('clip.vision.image_std', [0.229, 0.224, 0.225])
-    T = [('v.patch_embd.weight', M['patch_embd'], QT.F16), ('v.position_embd.weight', M['pos'], QT.F32),
+    # the Neural Engine's activations: 33-knot tables (SiLU on [-8, 8], GELU on [-4, 4]) with linear tails, stored as
+    # values and segment slopes on a grid (SiLU: 38 points from -10.5 step 0.5; GELU: 33 points from -4 step 0.25);
+    # above the grid the projector continues with slope 1
+    def act(t, lo, hi, x0, step, n):
+        f = lambda x: (min(0.0, t[37]*x + t[38]) if x < lo else t[4 + int(round((x - lo)/((hi - lo)/32)))] if x <= hi else t[39]*x + t[40])
+        v = np.array([f(x0 + step*k) for k in range(n + 1)], np.float32); return v[:n].reshape(n, 1), np.diff(v).reshape(n, 1)
+    sv, sd = act(M['act_silu'], -8, 8, -10.5, 0.5, 38); gv, gd = act(M['act_gelu'], -4, 4, -4.0, 0.25, 33)
+    T = [('v.afm.silu_v', sv, QT.F32), ('v.afm.silu_d', sd, QT.F32), ('v.afm.gelu_v', gv, QT.F32), ('v.afm.gelu_d', gd, QT.F32),
+         ('v.patch_embd.weight', M['patch_embd'], QT.F16), ('v.position_embd.weight', M['pos'], QT.F32),
          ('v.pre_ln.weight', M['pre_ln'], QT.F32), ('v.post_ln.weight', M['post_ln'], QT.F32)]
     for L in range(V_L):
         l, p = M[L], f'v.blk.{L}.'
