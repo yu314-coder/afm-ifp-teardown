@@ -211,7 +211,8 @@ People counting, on stock photos from Keynote's themes: four photos without peop
 we did not test them on harmful images.
 
 **Checked against Apple.** Apple's own 300M image encoder runs from our process (like the 3B's), so it is a direct
-reference: on identical inputs ours agrees at cosine 0.97 on constant images and 0.61–0.78 per token on photos. The
+reference: on identical inputs ours agrees at cosine 0.97 on constant images and 0.68–0.87 per token on photos
+(the 3B encoder: 0.98–0.99). The
 decisive fix was a Neural Engine register: convolution tasks that write the `NEBias` exponent e scale their biases by
 2^(e−32); 15 of the encoder's 96 attention bias tensors were 2–16× too large without it (two in the 3B encoder too).
 The remaining gap is shared with the 3B encoder and sits where the last layer writes very large activations.

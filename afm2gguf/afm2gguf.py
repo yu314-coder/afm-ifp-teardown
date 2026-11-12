@@ -611,7 +611,9 @@ def vision_model(spec=SPEC_VISION, out_dim=1536):
             if abs(s - 0.125) > 1e-6: fold.append(s)
         if W.get(_PE) == 0x82004 and (_PE+3) in W and eps is None: eps = struct.unpack('<f', struct.pack('<I', W[_PE+3]))[0]
     assert len(g1) == 2*V_L+2 and len(g64) == 2*V_L and len(fold) <= 1, ('image encoder gain check failed', len(g1), len(g64), fold)
-    M['pre_ln'], M['post_ln'] = g1[0], g1[-1]
+    # the final gain is ~0 on the few dimensions that carry the last layer's very large activations; those entries are
+    # fp16 subnormals, which the Neural Engine treats as zero (matches Apple's encoder better on every image tried)
+    M['pre_ln'], M['post_ln'] = g1[0], np.where(np.abs(g1[-1]) < 2.0**-14, 0, g1[-1]).astype(np.float32)
     f = float(np.sqrt(1/fold[0])) if fold else 1.0                                                    # undo the 0.01 fold: x (+) 0.01*f -> x + f
     for L in range(V_L):
         M[L].update(ln1=g1[1+2*L], ln2=g1[2+2*L], q_norm=g64[2*L], k_norm=g64[2*L+1])
