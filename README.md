@@ -16,6 +16,7 @@ your own Mac.
 | Expert routing | Apple's schedule: experts picked from the last prompt token, re-picked every 32 positions |
 | Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1127 answer tokens; 95.3% on a harder 230-prompt set); 17/40 answers identical character for character |
 | Draft model | Apple's speculative-decoding draft (`v11-ifp-9m`, 9M parameters) decoded too: reproduces the accept/reject decisions of Apple's own draft (99% of 1,134 clear decisions; Apple's runtime logs them), exact `afm-draft` GGUF, lossless speculation |
+| Feature adapters | The 26 Apple Intelligence adapters as llama.cpp LoRAs; the translation adapter reproduces Apple's own on-device translations (98.7% of 3,424 tokens, 166/200 translations identical) |
 | Images | Apple's image encoder (358M-parameter windowed ViT + 3×3 merger) decoded, llama.cpp projector `afm`: matches Apple's own encoder (cosine 0.95–0.99); captions 94.0% teacher-forced agreement with Apple, 5/13 identical |
 | 300M base | Apple's 300M base model (`afmplus-v11.0-pico`) decoded: perplexity 21–31 on plain English with its default adapter, coherent chat answers, `afm-draft` GGUF |
 | Safety guard | Apple's 300M safety classifier and 11 other task adapters as llama.cpp LoRAs: the guard labels text in its own `category,action` / `category,mention` format and, with Apple's policy table, predicts the public API's guardrail decisions on 26/26 prompts |
@@ -70,10 +71,20 @@ llama-server -m afm-v11.2-ifp.gguf --lora proofreading_review.lora.gguf
 
 Each adapter file also carries Apple's prompts for that feature (`adapter.afm.systemInstructions`,
 `adapter.afm.promptContentTemplates`). A feature expects its instruction in the system turn, in the same
-`afm_cider_v2` format the model uses. The layout was settled on the proofreading adapter: correct proofreading
-outputs become 7x likelier than with the base model (0.016 vs 0.119 nats per token), every other layout is worse, and
-the scale is exactly 1. (The FM API's own adapter, which Apple's public API uses, is untrained; its B factors are
-about 0, so the base GGUF is already that configuration.)
+`afm_cider_v2` format the model uses.
+
+**Checked against Apple.** Apple's public Translation framework runs the `machine_translation` adapter on device, so
+its output is a reference. With Apple's own prompt, our adapter in llama.cpp picks Apple's next token at 98.7% of 3,424
+positions (the base model alone: 89.2%) over 200 translations into German, French, Spanish, Japanese and Traditional
+Chinese, and its free-running translation is identical to Apple's for 166 of the 200. That check corrected the layout:
+the (A, B) pairs follow the package manifest, which sorts layer names as strings (0, 10, 11, 1, …), the adapter is
+applied at half strength, and `linear_0` is the gate. The other 25 adapters use the same file format and decode, but
+only translation has a reference we can run. (The FM API's own adapter, which Apple's public API uses, is untrained;
+its B factors are about 0, so the base GGUF is already that configuration.)
+
+Apple's translation prompt, for reference: system `Conversation between a user and a friendly assistant. You are an
+expert translator.`, user `Translate from {source} to {target}.\n{source} phrase: {text}\n\n{target} phrase:` with
+names such as `American English`, `German`, `European Spanish`, `Chinese, Traditional`.
 
 ## Apple's draft model (speculative decoding)
 

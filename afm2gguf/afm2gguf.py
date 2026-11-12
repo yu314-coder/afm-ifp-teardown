@@ -881,7 +881,10 @@ LORA_GROUPS = {'dense': [('o', 2048, 1536), ('q', 1536, 2048), ('k', 1536, 1024)
                'reuse': [('o', 2048, 1536), ('q', 1536, 2048)],
                'std':   [('o', 2048, 1536), ('q', 1536, 2048), ('k', 1536, 1024), ('v', 1536, 1024)]}
 LORA_ORDER = [('dense', NDENSE, 0), ('reuse', NREUSE, KVSRC + 1), ('std', NSTD, NDENSE)]
-LORA_ROLE = {'o': 'attn_output', 'q': 'attn_q', 'k': 'attn_k', 'v': 'attn_v', 'l0': 'ffn_up', 'l1': 'ffn_gate', 'down': 'ffn_down'}
+LORA_ROLE = {'o': 'attn_output', 'q': 'attn_q', 'k': 'attn_k', 'v': 'attn_v', 'l0': 'ffn_gate', 'l1': 'ffn_up', 'down': 'ffn_down'}
+LORA_SEG = {'dense_segment': ('dense', 0), 'sparse_segment_kv_reuse_segment': ('reuse', KVSRC + 1), 'sparse_segment_standard_segment': ('std', NDENSE)}
+LORA_NAME = {'attention_output_transform': 'o', 'lora_0': 'q', 'lora_1': 'k', 'lora_2': 'v', 'attention_q_transform': 'q',
+             'linear_0': 'l0', 'linear_1': 'l1', 'feed_forward_output_transform': 'down'}
 ADAPTER_PREFIX, ADAPTER_SUFFIX = 'com.apple.fm.language.instruct_3b.', '.generic_sparse'
 
 def adapters():
@@ -902,18 +905,29 @@ def write_adapter(name, out):
     path, mpath = ads[name]; meta = json.load(open(mpath)) if mpath else {}
     if meta.get('display_version', DISPLAY) != DISPLAY: sys.exit(f"error: adapter is for {meta.get('display_version')}, not {DISPLAY}")
     ifp = int(re.search(r'lora_i(\d)_r48', os.path.basename(path)).group(1))
+    # the file holds the (A, B) pairs in the order the package manifest lists them, which sorts the layer names as strings
+    # (layer_0, layer_10, layer_11, layer_1, ...), not numerically; checked against Apple's own translations
+    man = plistlib.load(open(os.path.join(os.path.dirname(path), 'manifest.plist'), 'rb'))['Package Version']
+    specs = next(iter(man.values()))['Adapters by rank'][os.path.basename(path)[:-len('_constant_data.bin')]]
+    order = []
+    for s in specs:
+        m_ = re.search(r'layers_(dense_segment|sparse_segment_kv_reuse_segment|sparse_segment_standard_segment)_layer_(\d+)_(attention_output_transform|'
+                       r'attention_qkv_transform_adapters_lora_(lora_\d)|attention_q_transform|feed_forward_hidden_transform_(linear_\d)|feed_forward_output_transform)', s)
+        g, d0 = LORA_SEG[m_.group(1)]; key = (g, d0 + int(m_.group(2)), LORA_NAME[m_.group(4) or m_.group(5) or m_.group(3)])
+        if key not in order: order.append(key)
+    want = sorted((g, d0 + k, role) for g, cnt, d0 in LORA_ORDER for k in range(cnt) for role, _, _ in LORA_GROUPS[g])
+    if sorted(order) != want: sys.exit('error: adapter manifest check failed')
     v = np.fromfile(path, np.float16); o = 0; pairs = []
-    for g, cnt, d0 in LORA_ORDER:
-        for k in range(cnt):
-            for role, a, b in LORA_GROUPS[g]:
-                A = v[o:o + a*LORA_R].reshape(LORA_R, a); o += a*LORA_R
-                B = v[o:o + b*LORA_R].reshape(b, LORA_R); o += b*LORA_R
-                pairs.append((d0 + k, role, A, B))
+    for g, L, role in order:
+        a, b = next((a, b) for r_, a, b in LORA_GROUPS[g] if r_ == role)
+        A = v[o:o + a*LORA_R].reshape(LORA_R, a); o += a*LORA_R
+        B = v[o:o + b*LORA_R].reshape(b, LORA_R); o += b*LORA_R
+        pairs.append((L, role, A, B))
     if o != v.size: sys.exit(f'error: unexpected adapter size ({v.size} values, layout needs {o})')
     brms = float(np.sqrt(np.mean([np.mean(np.square(B.astype(np.float32))) for _, _, _, B in pairs])))
     log(f'adapter {name}: {len(pairs)} LoRA pairs, ifp{ifp}, B rms {brms:.2e}' + ('  (B ~ 0: an untrained, empty adapter)' if brms < 1e-4 else ''))
     w = gguf.GGUFWriter(out, 'afm')
-    w.add_string('general.type', 'adapter'); w.add_string('adapter.type', 'lora'); w.add_float32('adapter.lora.alpha', float(LORA_R))
+    w.add_string('general.type', 'adapter'); w.add_string('adapter.type', 'lora'); w.add_float32('adapter.lora.alpha', LORA_R/2)   # Apple applies it at 0.5
     w.add_string('adapter.afm.name', name); w.add_uint32('adapter.afm.ifp', ifp)
     for key in ('systemInstructions', 'promptContentTemplates'):
         if meta.get(key): w.add_string('adapter.afm.' + key, json.dumps(meta[key], ensure_ascii=False))
