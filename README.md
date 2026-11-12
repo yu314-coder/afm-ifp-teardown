@@ -118,7 +118,8 @@ the last layer and activation tables in place of SiLU/GELU.
 
 Apple's encoder itself runs from our own process, so it is a direct reference. On identical inputs our encoder
 matches it at cosine 0.987 per token on constant images and 0.95–0.97 on photos (llama.cpp: 0.95; Metal and CPU agree
-to 0.9999). The decisive host-side detail was the 2D RoPE layout: Apple alternates row and column rotations pair by
+to 0.9999). A later fix (layer 0 emits its key projection before its query projection) raised the match
+on photos to 0.98–0.99 with identical inputs; the free-running captions are unchanged. The decisive host-side detail was the 2D RoPE layout: Apple alternates row and column rotations pair by
 pair. With it, the 3B GGUF answers spatial questions as Apple's model does and reads text. Teacher-forced on Apple's
 captions of 13 images it predicts Apple's next token 94.0% of the time (Apple's own encoder, same inputs: 92.9%;
 no image: 58.9%), and 5 of the 13 free-running captions through llama.cpp are identical to Apple's, e.g.

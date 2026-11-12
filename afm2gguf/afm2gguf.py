@@ -588,6 +588,7 @@ def vision_model(spec=SPEC_VISION, out_dim=1536):
         cat = lambda xs, f: np.concatenate([x[f] for x in xs])
         grp = [(rev(cat(attn[4*i:4*i+4], 'W'), 4), rev(cat(attn[4*i:4*i+4], 'b'), 4)) for i in range(4)]
         vi = 0 if (L == 0 or L in V_GLOBAL) else 1; qi, ki = [i for i in range(3) if i != vi]
+        if L == 0: qi, ki = ki, qi        # layer 0 emits K before Q (checked against Apple's own encoder: 0.85-0.97 -> 0.98-0.99)
         M[L] = dict(q=grp[qi], k=grp[ki], v=grp[vi], o=grp[3],
                     gate=rev(cat([x for x in mlp if x['act']], 'W'), 11), up=rev(cat([x for x in mlp if not x['act']], 'W'), 11),
                     down=rev(cat([x for x in d if x['R'][_CM+3] == V_FF], 'W'), 4))
