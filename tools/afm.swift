@@ -85,7 +85,7 @@ func startServer(_ port: UInt16) {
             Task {
                 let reply = await respond(userMsg, instructions: sys, streaming: false)
                 let resp: [String:Any] = [
-                    "id":"afm-\(UUID().uuidString)","object":"chat.completion","model":"afmplus-v11.0-ifp",
+                    "id":"afm-\(UUID().uuidString)","object":"chat.completion","model":"afmplus-v11.2-ifp",
                     "choices":[["index":0,"message":["role":"assistant","content":reply],"finish_reason":"stop"]]]
                 let jd = try! JSONSerialization.data(withJSONObject: resp)
                 let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(jd.count)\r\nConnection: close\r\n\r\n"

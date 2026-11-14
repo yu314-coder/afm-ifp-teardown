@@ -46,7 +46,7 @@
 A Complete From-Weights Reconstruction of \code{afmplus-v11.2-ifp}\\ (AFM~3 Core Advanced) and a Portable llama.cpp Runtime}
 \author{Yu Yao-Hsing}
 \email{euler.yu@gmail.com}
-\date{November 13, 2026}
+\date{November 14, 2026}
 
 \begin{abstract}
 We reconstruct Apple's current on-device foundation language model---asset \code{com.apple.fm.language.instruct\_3b.base.generic\_sparse}, display version \code{afmplus-v11.2-ifp}, which Apple calls \emph{AFM~3 Core Advanced}---entirely from the files Apple Intelligence installs on a Mac, and run it in llama.cpp on any operating system. The model is a 56-layer, 20.3-billion-parameter transformer with a 1536-wide residual stream, grouped-query attention (16 query and 8 key/value heads), KV-cache sharing across its last 21 layers, a post-normalised (``x/y'') residual with four learned RMSNorm gains per layer, and an Instruction-Following-Pruned sparse feed-forward network: 23 always-on experts plus 23 of 348 routed experts, selected by a separate router network evaluated at layer~12. Every 2-bit weight is carried into GGUF \emph{bit-exactly} (55 million spot-checked weights, zero differences), and the tokenizer reproduces Apple's token counts on 81/81 test texts. The prompt template and the expert-selection schedule, which the model files do not contain, are recovered from Apple's inference frameworks and confirmed by Apple's public token counter and runtime log. Nothing in the reconstruction is trained or fitted.
@@ -445,7 +445,26 @@ Apple Intelligence features ship as rank-48 LoRA adapters for this backbone: 26 
 
 \paragraph{Checked against Apple.} Apple's public Translation framework is served on device by the \code{machine\_translation} adapter at ifp1 (the model manager's log names the asset, and the request produces speculative-decoding log lines), and its output is deterministic. The prompt is not in the adapter metadata. We recovered it from the \code{TranslationInference} framework and confirmed it with the token counts Apple logs for each request (51, 61, 63 and 65 tokens for four probes, all reproduced): the system turn is \emph{``Conversation between a user and a friendly assistant. You are an expert translator.''} and the user turn is \emph{``Translate from $S$ to $T$.\textbackslash n$S$ phrase: \emph{text}\textbackslash n\textbackslash n$T$ phrase:''}, with language names such as ``American English'' and ``Chinese, Traditional''.
 
-On 200 translations of 40 English sentences into German, French, Spanish, Japanese and Traditional Chinese, teacher-forced on Apple's output, our adapter picks Apple's token at 3{,}380 of 3{,}424 positions (98.7\%); the base model at ifp1 without the adapter reaches 89.2\%. Free-running in llama.cpp, 166 of the 200 translations are identical to Apple's. Apple translates each sentence of a multi-sentence input separately, which our test did not do. The reference is essential. An alternative decode (numeric layer order, scale 1, \code{linear\_0} = up) passes a likelihood test on a small set of self-constructed proofreading pairs, yet scores 0.7\% against Apple's translations: a decode of this kind helps slightly at a small scale and diverges at full scale. Writing Tools' Proofread action cannot serve as a reference, because it is served by a Private Cloud Compute model.
+On 200 translations of 40 English sentences into German, French, Spanish, Japanese and Traditional Chinese, teacher-forced on Apple's output, our adapter picks Apple's token at 3{,}380 of 3{,}424 positions (98.7\%); the base model at ifp1 without the adapter reaches 89.2\%. Table~\ref{tab:translation} gives the figures by target language; the adapter's contribution is largest for Japanese and Chinese, where the base model alone is weakest. Free-running in llama.cpp, 166 of the 200 translations are identical to Apple's. Apple translates each sentence of a multi-sentence input separately, which our test did not do. The reference is essential. An alternative decode (numeric layer order, scale 1, \code{linear\_0} = up) passes a likelihood test on a small set of self-constructed proofreading pairs, yet scores 0.7\% against Apple's translations: a decode of this kind helps slightly at a small scale and diverges at full scale. Writing Tools' Proofread action cannot serve as a reference, because it is served by a Private Cloud Compute model.
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Target language & Tokens & Reconstructed adapter & Base model alone \\
+\midrule
+German & 725 & 98.8\% & 93.0\% \\
+French & 777 & 99.5\% & 94.2\% \\
+Spanish & 659 & 99.5\% & 95.8\% \\
+Japanese & 659 & 98.2\% & 84.4\% \\
+Chinese, Traditional & 604 & 97.4\% & 76.3\% \\
+\midrule
+All & 3{,}424 & 98.7\% & 89.2\% \\
+\bottomrule
+\end{tabular}
+\caption{Agreement with Apple's Translation framework by target language: share of Apple's output tokens that the model ranks first, teacher-forced, for 40 English sentences per language, at ifp1.}
+\label{tab:translation}
+\end{table}
 
 \paragraph{A second adapter: notification urgency.} Apple's suggestion service classifies every app notification with the \code{urgency\_classification} adapter (ifp3) and logs its verdict (``Notification urgency: true''). A small test application that posts local notifications therefore provides a reference for a second adapter at a different IFP level. The adapter is a one-token classifier: the notification is urgent when the probability of ``Yes'' reaches 0.3771 (the adapter metadata's threshold for English notifications). The system turn is the metadata's instruction followed by ``The user's locale is en\_US.'', and the user turn is \emph{``[Notification]\textbackslash nTitle: \dots\textbackslash nCommunicationFlag: False\textbackslash nBody: \dots\textbackslash n\textbackslash nIs this urgent?''}, read from \code{SummarizationKit}. Apple's logged token counts match this prompt exactly when the text mentions a time of day and are two tokens longer otherwise, a difference that remains unexplained. On 55 everyday notifications our adapter gives Apple's verdict for 53, the base model for 48 and the alternative decode for 46. On 30 further notifications, selected because these three variants disagree, the adapter agrees with Apple on 28, the base model on 9 and the alternative decode on 7; on the 18 of them whose prompt length matches exactly, the adapter agrees on all 18. The remaining 24 adapters share the file format and the decode, but belong to features that only Apple's own entitled processes can run.
 

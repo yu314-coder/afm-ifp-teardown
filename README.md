@@ -111,6 +111,17 @@ adapter is applied at scale 0.5; and `linear_0` is the FFN gate.
 | `machine_translation` (ifp1) | Apple's Translation framework, 200 translations into five languages | 98.7% of 3,424 tokens teacher-forced; 166 of 200 translations identical | 89.2% |
 | `urgency_classification` (ifp3) | Verdicts logged by Apple for app notifications, 30 cases selected for disagreement | 28 of 30 | 9 of 30 |
 
+Translation agreement by target language (40 English sentences each, teacher-forced on Apple's output):
+
+| Target language | Tokens | Reconstructed adapter | Base model alone |
+|---|---|---|---|
+| German | 725 | 98.8% | 93.0% |
+| French | 777 | 99.5% | 94.2% |
+| Spanish | 659 | 99.5% | 95.8% |
+| Japanese | 659 | 98.2% | 84.4% |
+| Chinese, Traditional | 604 | 97.4% | 76.3% |
+| All | 3,424 | 98.7% | 89.2% |
+
 On an unselected set of 55 notifications the urgency adapter agrees with Apple on 53. The remaining 24 adapters use
 the same file format and decode, but belong to features that only Apple's own processes can run, so they are not
 independently verified. The adapter used by the public FoundationModels API is untrained (its B factors are
