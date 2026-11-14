@@ -3,7 +3,7 @@
 **Apple's on-device foundation models, reconstructed from the installed assets and run in llama.cpp.**
 
 This project reconstructs the language model behind Apple Intelligence on macOS 27 (`SystemLanguageModel`, display
-version **`afmplus-v11.2-ifp`**, "AFM 3 Core Advanced") from the files Apple Intelligence installs on a Mac, and
+version **`afmplus-v11.2-ifp`**, which we identify as "AFM 3 Core Advanced") from the files Apple Intelligence installs on a Mac, and
 packages it as a GGUF that runs in llama.cpp on macOS, Windows and Linux. It also covers the models that ship
 alongside it: the feature adapters, the speculative-decoding draft model, the image encoder, and the 300M base model
 with its safety guard.
@@ -37,7 +37,7 @@ The full technical report is in [`paper/afm_teardown.pdf`](paper/afm_teardown.pd
 | Weights | Apple's 2-bit codes and fp16 scales carried into Q2_K **bit-exactly**; int4 embedding as Q4_0 (exact) |
 | Prompt format | Apple's `afm_cider_v2` template, recovered from the runtime and verified against `SystemLanguageModel.tokenCount` |
 | Expert routing | Apple's schedule: experts chosen from the last prompt token and re-chosen every 32 positions |
-| Fidelity | **97.0%** teacher-forced next-token agreement with Apple's live model (40 prompts, 1,127 answer tokens); 95.3% on a 230-prompt set; 17 of 40 answers identical character for character |
+| Fidelity | **95.7%** teacher-forced next-token agreement with Apple's live model on a held-out set (100 prompts, 2,900 answer tokens; 95% interval 94.8–96.5%); 51 of 100 held-out answers identical character for character. On the development prompts: 97.0% (40 prompts) and 95.2% (230 prompts) |
 | Draft model | Apple's 9M-parameter speculative-decoding draft (`v11-ifp-9m`): reproduces 99.2% of the 1,134 clear accept/reject decisions logged by Apple's runtime; speculation is lossless |
 | Feature adapters | The 26 Apple Intelligence adapters as llama.cpp LoRAs. Two are verified against Apple: translation (98.7% of 3,424 tokens; 166 of 200 translations identical) and notification urgency (28 of 30 verdicts, where the base model gives 9) |
 | Image encoder | Apple's 358M-parameter windowed ViT with 3×3 merger as an `mtmd` projector: cosine 0.98–0.99 per token against Apple's encoder; 94.0% teacher-forced agreement on Apple's captions; 6 of 13 captions identical |
@@ -312,9 +312,24 @@ The reference is Apple's own model, queried through the public FoundationModels 
 - **Identical answers.** The GGUF's free-running greedy answer is compared with Apple's character for character. A
   single differing early token changes the rest of an answer, so this measure is dominated by the first few tokens.
 
+Three prompt sets are used, all in [`tools/eval`](tools/eval): a first development set (40 prompts), a development
+extension (190 prompts), and a held-out set (100 prompts) written after the implementation was final and evaluated
+once. Confidence intervals resample prompts, not tokens, because tokens of one answer are correlated.
+
 [`tools/eval`](tools/eval) reproduces all figures in this section.
 
-### Results (40 prompts, 1,127 answer tokens)
+### Held-out result
+
+| Set | Prompts | Answer tokens | Teacher-forced | 95% interval | Identical answers |
+|---|---|---|---|---|---|
+| **Held-out** | 100 | 2,900 | **95.66%** | 94.8–96.5% | 51/100 |
+| Development, first set | 40 | 1,127 | 96.98% | 96.1–97.8% | 17/40 |
+| Development, combined | 230 | 6,572 | 95.19% | 94.6–95.7% | – |
+
+The development prompts guided implementation choices; the held-out prompts did not. Teacher-forced agreement is a
+token-level measure, not a measure of full-response identity or of task accuracy.
+
+### Configurations (first development set: 40 prompts, 1,127 answer tokens)
 
 | Configuration | Teacher-forced | First answer token | Identical answers |
 |---|---|---|---|

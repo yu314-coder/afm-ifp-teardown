@@ -1,0 +1,100 @@
+What is the capital of Norway?
+Who painted the Mona Lisa?
+What is the freezing point of water in Kelvin?
+How many teeth does an adult human normally have?
+What is the tallest mountain in Africa?
+Which gas do humans exhale the most of?
+What is the cube of 7?
+Who discovered penicillin?
+What currency is used in Japan?
+In which year did the first humans land on the Moon?
+What is the smallest prime number?
+What does CPU stand for?
+Which ocean lies between Europe and North America?
+What is the main ingredient of guacamole?
+How many strings does a standard violin have?
+What is the plural of "cactus"?
+Which planet is known as the Red Planet?
+What is the past tense of "swim"?
+How many weeks are in a year?
+What is the capital of Kenya?
+Explain how a bicycle stays upright.
+Why does bread rise when it is baked?
+Explain what inflation is in two sentences.
+How does a microwave oven heat food?
+Why do we yawn?
+Explain how vaccines work in simple terms.
+What causes earthquakes?
+How does a sailboat move against the wind?
+Why does ice float on water?
+Explain what an algorithm is to a ten-year-old.
+What is the difference between an alligator and a crocodile?
+How does a thermometer measure temperature?
+Why does popcorn pop?
+Explain what gravity is in one sentence.
+How do noise-cancelling headphones work?
+What is the difference between a simile and a metaphor?
+Why is the sea level rising?
+How does a lighthouse help ships?
+Explain what a mortgage is.
+What is compound interest?
+Write a limerick about a cat who loves tea.
+Write a two-sentence story about a lost umbrella.
+Compose a short birthday message for a grandmother.
+Write a haiku about a snowy morning.
+Describe the smell of rain in one sentence.
+Write a slogan for a neighborhood bakery.
+Write a short dialogue between a pilot and a passenger.
+Invent a name and a one-line description for a board game.
+Write a four-line poem about a bicycle.
+Write an opening line for a mystery novel.
+Give me three tips for a job interview.
+How do I remove a coffee stain from a shirt?
+Suggest three indoor activities for a rainy day.
+How can I remember people's names better?
+Give me a packing list for a weekend hiking trip.
+How do I boil an egg so the yolk stays soft?
+What should I do if my phone gets wet?
+Suggest a weekly routine for learning to play the guitar.
+How do I politely ask a neighbor to be quieter?
+Give me three ideas for a cheap homemade gift.
+List four renewable energy sources.
+Name five countries in South America.
+List three differences between frogs and toads.
+Name four instruments in a string quartet.
+List the days of the week in reverse order.
+Name three inventions of the nineteenth century.
+List five common kitchen herbs.
+Name three rivers in Europe.
+List the colors of the rainbow in order.
+Name four noble gases.
+What is 17 times 6?
+If a train travels 90 kilometers in 1.5 hours, what is its average speed?
+What is 15 percent of 240?
+Convert 5 miles to kilometers.
+What is the area of a circle with radius 3?
+If I have 3 apples and buy 2 dozen more, how many apples do I have?
+What is the next number in the sequence 2, 6, 18, 54?
+How many seconds are in two and a half minutes?
+What is the average of 4, 9, 11 and 16?
+Solve for x: 3x + 7 = 25.
+Translate "Thank you very much for your help" into German.
+Translate "I would like a glass of water" into Italian.
+What does the French phrase "bon voyage" mean?
+Correct the grammar: "Me and him goes to school yesterday."
+Give a synonym and an antonym for "generous".
+Rewrite this sentence more formally: "Hey, can you send me that file?"
+Summarize the story of Cinderella in two sentences.
+What is the moral of the fable of the tortoise and the hare?
+Define the word "ephemeral" and use it in a sentence.
+Shorten this sentence: "Due to the fact that it was raining, we made the decision to stay at home."
+Write a Python function that returns the largest number in a list.
+What does HTML stand for, and what is it used for?
+Explain what a variable is in programming.
+What is the difference between RAM and storage?
+Write a regular expression that matches a five-digit number.
+Explain what an API is in one sentence.
+What is the binary representation of the number 10?
+What does the SQL statement SELECT do?
+Explain the difference between a compiler and an interpreter.
+Write a shell command that lists all files in the current directory.

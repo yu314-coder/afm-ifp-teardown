@@ -62,7 +62,7 @@ def main():
         lg = np.fromfile(f'{td}/{i}.f32', np.float32).reshape(len(ids), -1)[len(pre) - 1:]
         ok = lg.argmax(-1) == np.array(tgt)
         hit += int(ok.sum()); tot += len(tgt); first += int(ok[0])
-        print(f'[{i:2d}] {ok.mean():.3f}  {prompts[i][:60]}', flush=True)
+        print(f'[{i:3d}] {int(ok.sum()):3d}/{len(tgt):3d} {ok.mean():.3f}  {prompts[i][:60]}', flush=True)
     shutil.rmtree(td, ignore_errors=True)
     print(f'teacher-forced top-1 agreement {hit / tot:.4f} ({hit}/{tot}), first answer token {first}/{len(seqs)}')
 
