@@ -326,6 +326,8 @@ once. Confidence intervals resample prompts, not tokens, because tokens of one a
 | Development, first set | 40 | 1,127 | 96.98% | 96.1–97.8% | 17/40 |
 | Development, combined | 230 | 6,572 | 95.19% | 94.6–95.7% | – |
 
+At the 126 held-out disagreements Apple's token is our second choice in 85.7% of cases, with a median logit gap of 0.52. The identical-answer count is measured through `llama-server` with its default prompt-prefix cache; with `AFM_NO_PROMPT_CACHE=1` (every prompt evaluated from its first token, independent of request order) it is 50/100.
+
 The development prompts guided implementation choices; the held-out prompts did not. Teacher-forced agreement is a
 token-level measure, not a measure of full-response identity or of task accuracy.
 

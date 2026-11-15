@@ -57,9 +57,9 @@ fig.tight_layout(); fig.savefig(f'{OUT}/fig_copy.pdf'); plt.close(fig)
 # 4. fidelity vs Apple's greedy answers (40 prompts, 1127 answer tokens, teacher-forced top-1)
 rows = [("Default", 96.98, BLUE),
         ("+ input bias at re-pick tokens", 96.72, ORANGE),
-        ("+ exact SiLU", 96.10, ORANGE),
+        ("+ analytic SiLU", 96.10, ORANGE),
         ("+ per-token routing", 93.79, ORANGE),
-        ("exact SiLU, input bias on every token", 92.64, ORANGE),
+        ("analytic SiLU, input bias on every token", 92.64, ORANGE),
         ("uncorrected layer 0, Apple's schedule", 91.75, GREY),
         ("uncorrected layer 0, per-token routing", 90.51, GREY),
         ("single-turn template, per-token routing", 87.5, GREY)]

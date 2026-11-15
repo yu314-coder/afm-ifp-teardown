@@ -28,7 +28,7 @@ A held-out set of 100 prompts that played no part in development is in `prompts_
 tools/eval/collect_oracle.sh oracle_held/ tools/eval/prompts_heldout.txt
 AFM_PROMPTS=tools/eval/prompts_heldout.txt python3 tools/eval/teacher_forced.py afm-v11.2-ifp.gguf llama.cpp/build/bin oracle_held/
 ```
-Expected: 0.9566 (2774/2900), first answer token 91/100; free-running 51/100 identical. `teacher_forced.py` prints
+Expected: 0.9566 (2774/2900), first answer token 91/100; free-running 51/100 identical (50/100 with `AFM_NO_PROMPT_CACHE=1`, which evaluates every prompt from its first token and makes the result independent of request order). `teacher_forced.py` prints
 hits and tokens per prompt, from which prompt-level bootstrap intervals can be computed.
 
 Speculative decoding with Apple's draft model (`afm2gguf.py --draft`) must not change any answer:

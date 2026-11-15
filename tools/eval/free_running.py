@@ -3,6 +3,8 @@
 
 usage: [AFM_ROUTE_TOKEN=1 ...] free_running.py <model.gguf> <llama.cpp build/bin> <oracle-dir>
 Environment variables are passed through to llama-server (e.g. AFM_ROUTE_TOKEN=1 for per-token expert routing).
+AFM_NO_PROMPT_CACHE=1 makes the server evaluate every prompt from its first token instead of reusing the cached prefix it
+shares with the previous request; the two paths are numerically different and a few near-tie tokens can flip.
 Reports answers identical to Apple's and the mean fraction of Apple's tokens reproduced before the first difference.
 """
 import json, os, subprocess, sys, time, urllib.request
@@ -30,7 +32,8 @@ def main():
         exact = 0; frac = []
         for i, p in enumerate(prompts):
             r = post('/v1/chat/completions', {'messages': [{'role': 'system', 'content': INSTRUCTIONS},
-                                                           {'role': 'user', 'content': p}], 'temperature': 0, 'max_tokens': 300})
+                                                           {'role': 'user', 'content': p}], 'temperature': 0, 'max_tokens': 300,
+                                                 'cache_prompt': os.environ.get('AFM_NO_PROMPT_CACHE') != '1'})
             ours = r['choices'][0]['message']['content'].strip()
             apple = open(os.path.join(odir, f'out_{i}.txt'), encoding='utf-8').read().strip()
             ta = post('/tokenize', {'content': apple})['tokens']; to = post('/tokenize', {'content': ours})['tokens']
