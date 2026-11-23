@@ -46,7 +46,7 @@
 A From-Weights Reconstruction of \code{afmplus-v11.2-ifp}\\ and a Portable llama.cpp Runtime}
 \author{Yu Yao-Hsing}
 \email{euler.yu@gmail.com}
-\date{November 15, 2026}
+\date{November 23, 2026}
 
 \begin{abstract}
 Apple's on-device foundation models are distributed as proprietary assets compiled for the Neural Engine, which makes their structure and inference behaviour difficult to study outside Apple's runtime. We reconstruct the language model that Apple Intelligence installs on macOS~27, \code{afmplus-v11.2-ifp}, from its shipped assets, and implement a portable inference backend for it in llama.cpp. The recovered model has 56 transformer layers and 20.30 billion stored parameters. It combines dense layers, sparse feed-forward experts selected by a router (Instruction-Following Pruning), and key/value reuse across its last 21 layers. We decode the quantised weights and the tokenizer, identify a non-standard residual formulation in which both residual additions carry normalised values, and recover the prompt format and the expert-selection schedule from Apple's inference frameworks. No parameter is trained or fitted.
@@ -361,8 +361,10 @@ Attention is standard grouped-query attention~\cite{ainslie2023gqa} with rotary 
 \draw[->] (q)--(qr); \draw[->] (qr)--(qn); \draw[->] (qn)--(qg); \draw[->] (k)--(kr); \draw[->] (kr)--(kn); \draw[->] (kn)--(kg); \draw[->] (kg)--(k8);
 \draw[->] (v)--(v8); \draw[->] (qg.east) -| (sdpa.north); \draw[->] (k8)--(sdpa); \draw[->] (v8.east) -| (sdpa.south); \draw[->] (sdpa)--(o);
 \end{tikzpicture}
-\caption{Attention as executed on the ANE. RoPE comes before the per-head RMS norm and its 128-entry gain (the same order appears in CodeLM's source graph). Keys and values are stored in an int8 cache with per-layer calibrated scales; layer 34 has no key gain. Layers 35--55 compute only Q and read layer 34's cache.}\label{fig:attn}
+\caption{Attention as executed on the ANE. RoPE comes before the per-head RMS norm and its 128-entry gain (the same order appears in CodeLM's source graph). Keys and values are stored in an int8 cache with per-layer calibrated scales; layer 34 has no key gain, but its keys are still RMS-normalised. Layers 35--55 compute only Q and read layer 34's cache.}\label{fig:attn}
 \end{figure}
+
+\paragraph{The head norm is unconditional.} The per-head RMS normalisation of queries and keys is applied in every layer that computes them. Only the gain multiply is conditional: layer 34's keys have no gain, and they are normalised and written to the cache without one. An implementation that fuses the two steps into a single \code{RMSNorm(weight=}$\gamma$\code{)} and omits the module where no $\gamma$ exists leaves layer 34's keys unnormalised, and because layers 35--55 read that cache, 22 of the 56 layers attend with wrong scores. The effect is large. With the norm dropped for that one layer (\code{AFM\_K\_RMS\_NEEDS\_GAIN=1}), teacher-forced agreement falls from 96.98\% to 53.42\% on the 40 development prompts (first answer token 38/40 to 1/40) and from 95.66\% to 43.38\% on the held-out set (91/100 to 17/100). This pitfall was reported by an independent reimplementer, who observed 51.10\% before and 90.18\% after correcting it in their own code (Section~\ref{sec:related}).
 
 \subsection{The Instruction-Following-Pruned feed-forward network}
 
@@ -981,6 +983,8 @@ The following were excluded as causes of the residual difference between the two
 \paragraph{Runtime and diagnostics.} The portable implementation builds on llama.cpp~\cite{llamacpp} and its GGUF format~\cite{gguf}. The diagnostic probes follow the circuit-level analysis of transformers~\cite{elhage2021framework,olsson2022induction}: copying heads and induction behaviour serve here as tests of whether a set of decoded weights forms a working model.
 
 We are not aware of prior public work that reconstructs this model's weights into a portable runtime and measures the result against Apple's own model.
+
+\paragraph{An independent reimplementation.} After this paper's first release, the author of a separate PyTorch reimplementation built from the same assets wrote to us.\footnote{\url{https://github.com/yu314-coder/afm-ifp-teardown/issues/1}} By their account it reaches 90.18\% teacher-forced agreement (964/1069) on this paper's development prompts without the Neural Engine SiLU table, and it independently arrives at the int8 K/V cache having no measurable effect on agreement, the empty default adapter, the string ordering of adapter layers, and the dense / K/V-owning / K/V-reusing depth order with layer 34 as the cache source. We have not run their code; the figures are theirs. Their report is the source of the normalisation pitfall described in Section~\ref{sec:arch}.
 
 %======================================================================
 \section{Responsible use}\label{sec:responsible}

@@ -628,7 +628,7 @@ new file mode 100644
 index 000000000..a7d65fab5
 --- /dev/null
 +++ b/src/models/afm.cpp
-@@ -0,0 +1,592 @@
+@@ -0,0 +1,593 @@
 +#include "models.h"
 +#include "../llama-adapter.h"
 +
@@ -1098,7 +1098,8 @@ index 000000000..a7d65fab5
 +                ggml_tensor * Vcur = r16(build_lora_mm(layer.wv, x));
 +                Kcur = ggml_reshape_3d(ctx0, Kcur, n_embd_head, n_head_kv, n_tokens);
 +                Vcur = ggml_reshape_3d(ctx0, Vcur, n_embd_head, n_head_kv, n_tokens);
-+                Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps);
++                // research: AFM_K_RMS_NEEDS_GAIN=1 drops the head norm of a K without a gain (the fused-RMSNorm pitfall)
++                if (layer.attn_k_norm || afm_env_f("AFM_K_RMS_NEEDS_GAIN", 0) == 0) { Kcur = ggml_rms_norm(ctx0, Kcur, hparams.f_norm_rms_eps); }
 +                const bool kq_pre_gamma = afm_env_f("AFM_KQ_PRE_GAMMA", 0) != 0 && layer.attn_k_norm && kvq;   // research
 +                if (gamma_first && layer.attn_k_norm) { Kcur = ggml_mul(ctx0, Kcur, layer.attn_k_norm); }
 +                Kcur = rope(Kcur);
